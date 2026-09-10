@@ -24,6 +24,7 @@ export interface Listing extends CreatureRef {
   stardust: number;
   iv: string;
   looking: CreatureRef[];
+  untradable?: boolean;
 }
 
 export interface ChatMessage {

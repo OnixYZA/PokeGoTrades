@@ -35,9 +35,9 @@ export const COLORS = {
 
 export const FRIENDSHIP_LEVELS = [
   { label: 'Good', mult: 1, color: COLORS.textMuted },
-  { label: 'Great', mult: 0.2, color: '#7fd4ff' },
-  { label: 'Ultra', mult: 0.02, color: COLORS.accentViolet },
-  { label: 'Best', mult: 0.005, color: COLORS.accentGold },
+  { label: 'Great', mult: 0.8, color: '#7fd4ff' },
+  { label: 'Ultra', mult: 0.08, color: COLORS.accentViolet },
+  { label: 'Best', mult: 0.04, color: COLORS.accentGold },
 ] as const;
 
 export type FriendshipLabel = (typeof FRIENDSHIP_LEVELS)[number]['label'];

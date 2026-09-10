@@ -26,11 +26,11 @@ export const listings: Listing[] = [
     loc: 'Adyar',
     pvp: 'S+',
     demand: '#1',
-    stardust: 800,
+    stardust: 1000000,
     iv: '15/15/14',
     looking: [
       { name: 'Shiny Zamazenta', pokemonId: 889, hue: 340, shiny: true },
-      { name: 'Apex Shadow Lugia', pokemonId: 249, hue: 25 },
+      { name: 'Purified Apex Lugia', pokemonId: 249, hue: 25 },
       { name: 'Legacy Mewtwo', pokemonId: 150, hue: 220, lucky: true },
     ],
   },
@@ -50,11 +50,11 @@ export const listings: Listing[] = [
     loc: 'Adyar',
     pvp: 'A',
     demand: '#4',
-    stardust: 40000,
+    stardust: 20000,
     iv: '14/15/15',
     looking: [
       { name: 'Legacy Dragonite', pokemonId: 149, hue: 340 },
-      { name: 'Shadow Ho-Oh', pokemonId: 250, hue: 25 },
+      { name: 'Purified Ho-Oh', pokemonId: 250, hue: 25 },
       { name: 'Shiny Deoxys A.', pokemonId: 10001, hue: 220, shiny: true, lucky: true }, // deoxys-attack
     ],
   },
@@ -98,10 +98,11 @@ export const listings: Listing[] = [
     loc: 'East Tambaram',
     pvp: 'A+',
     demand: '#7',
-    stardust: 100000,
+    untradable: true,
+    stardust: 1000000,
     iv: '14/14/15',
     looking: [
-      { name: 'Shadow Lugia', pokemonId: 249, hue: 340 },
+      { name: 'Purified Lugia', pokemonId: 249, hue: 340 },
       { name: 'Mega Rayquaza IV', pokemonId: 10079, hue: 25 }, // rayquaza-mega
       { name: 'Shiny Entei', pokemonId: 244, hue: 220, shiny: true, lucky: true },
     ],
@@ -122,7 +123,7 @@ export const listings: Listing[] = [
     loc: 'East Tambaram',
     pvp: 'S',
     demand: '#3',
-    stardust: 800,
+    stardust: 20000,
     iv: '15/13/15',
     looking: [
       { name: 'Shiny Beldum Comm.', pokemonId: 374, hue: 340, shiny: true },
@@ -146,10 +147,11 @@ export const listings: Listing[] = [
     loc: 'Velachery',
     pvp: 'A',
     demand: '#5',
-    stardust: 100000,
+    untradable: true,
+    stardust: 1000000,
     iv: '15/15/15',
     looking: [
-      { name: 'Apex Shadow Ho-Oh', pokemonId: 250, hue: 340 },
+      { name: 'Purified Apex Ho-Oh', pokemonId: 250, hue: 340 },
       { name: 'Primal Groudon', pokemonId: 10078, hue: 25 }, // groudon-primal
       { name: 'Shiny Mew', pokemonId: 151, hue: 220, shiny: true, lucky: true },
     ],

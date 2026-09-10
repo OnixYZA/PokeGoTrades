@@ -40,10 +40,13 @@ export default function ListingDetailScreen() {
     overlayOpacity.value = withTiming(1, { duration: 260 });
   }, [translateY, overlayOpacity]);
 
+  const defaultNavigate = () => router.back();
+
   const close = (navigate?: () => void) => {
+    const navFunc = navigate ?? defaultNavigate;
     translateY.value = withTiming(SHEET_TRAVEL, { duration: 220, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
     overlayOpacity.value = withTiming(0, { duration: 200 }, (finished) => {
-      if (finished) runOnJS(navigate ?? (() => router.back()))();
+      if (finished) runOnJS(navFunc)();
     });
   };
 
@@ -124,9 +127,16 @@ export default function ListingDetailScreen() {
                   {listing.name}
                 </Text>
               </View>
-              <View className="mt-2 flex-row flex-wrap gap-1.5">
+              <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
                 {listing.lucky && <LuckyBadge />}
                 <BackgroundBadge bg={listing.bg} hue={listing.hue} accent={listing.accent} />
+                {listing.untradable && (
+                  <View className="rounded-[6px] border px-2 py-[3px]" style={{ backgroundColor: 'rgba(255,92,138,0.15)', borderColor: 'rgba(255,92,138,0.3)' }}>
+                    <Text className="font-display-semi uppercase" style={{ fontSize: 10, letterSpacing: 0.8, color: '#ff5c8a' }}>
+                      Untradable
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
@@ -167,12 +177,13 @@ export default function ListingDetailScreen() {
             <MapPin size={20} color="#4fb3ff" />
           </IconButton>
           <PrimaryButton
-            label="Make Offer"
+            label={listing.untradable ? 'Untradable' : 'Make Offer'}
             flex={1}
             style={SURFACE.ctaBlue}
             textColor="#04121f"
-            icon={<Send size={16} color="#04121f" />}
+            icon={!listing.untradable ? <Send size={16} color="#04121f" /> : undefined}
             onPress={() => close(() => router.dismissTo('/chats'))}
+            disabled={listing.untradable}
           />
         </View>
       </Animated.View>

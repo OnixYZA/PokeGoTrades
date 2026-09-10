@@ -14,14 +14,14 @@ export const trainer: Trainer = {
     { name: 'Sh. Rayquaza', pokemonId: 384, hue: 145, shiny: true },
     { name: 'Legacy Dnite', pokemonId: 149, hue: 205, lucky: true },
     { name: 'Sh. Metagross', pokemonId: 376, hue: 195, shiny: true },
-    { name: 'Apex Ho-Oh', pokemonId: 250, hue: 25 },
+    { name: 'Purified Apex Ho-Oh', pokemonId: 250, hue: 25 },
     { name: 'Sh. Mewtwo', pokemonId: 150, hue: 275, shiny: true, lucky: true },
     { name: 'Sh. Garchomp', pokemonId: 445, hue: 220, shiny: true },
   ],
   wishlist: [
     { name: 'Sh. Zamazenta', pokemonId: 889, hue: 340, shiny: true },
     { name: 'Sh. Kyogre', pokemonId: 382, hue: 210, shiny: true },
-    { name: 'Apex Sh. Lugia', pokemonId: 249, hue: 285, shiny: true },
+    { name: 'Purified Apex Lugia', pokemonId: 249, hue: 285, shiny: true },
     { name: 'Sh. Mew', pokemonId: 151, hue: 320, shiny: true },
   ],
 };

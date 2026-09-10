@@ -10,6 +10,7 @@ interface PrimaryButtonProps {
   flex?: number;
   fontSize?: number;
   accessibilityLabel?: string;
+  disabled?: boolean;
 }
 
 /** Gradient CTA button shared by the blue "Make Offer" / "Accept Trade" and gold "Trade Locked" states. */
@@ -22,13 +23,15 @@ export function PrimaryButton({
   flex,
   fontSize = 15,
   accessibilityLabel,
+  disabled,
 }: PrimaryButtonProps) {
   return (
     <Pressable
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      className="flex-row items-center justify-center gap-2 rounded-[14px] px-[18px] py-[15px] active:opacity-90"
+      disabled={disabled}
+      className={`flex-row items-center justify-center gap-2 rounded-[14px] px-[18px] py-[15px] ${disabled ? 'opacity-50' : 'active:opacity-90'}`}
       style={[style, flex ? { flex } : undefined]}
     >
       {icon}
