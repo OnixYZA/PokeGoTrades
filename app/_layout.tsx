@@ -2,6 +2,7 @@ import '../global.css';
 
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono/500Medium';
 import { JetBrainsMono_600SemiBold } from '@expo-google-fonts/jetbrains-mono/600SemiBold';
+import { JetBrainsMono_700Bold } from '@expo-google-fonts/jetbrains-mono/700Bold';
 import { SpaceGrotesk_500Medium } from '@expo-google-fonts/space-grotesk/500Medium';
 import { SpaceGrotesk_600SemiBold } from '@expo-google-fonts/space-grotesk/600SemiBold';
 import { SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk/700Bold';
@@ -30,6 +31,7 @@ export default function RootLayout() {
     SpaceGrotesk_700Bold,
     JetBrainsMono_500Medium,
     JetBrainsMono_600SemiBold,
+    JetBrainsMono_700Bold,
   });
 
   useEffect(() => {

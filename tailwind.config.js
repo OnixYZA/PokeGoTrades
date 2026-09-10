@@ -46,6 +46,7 @@ module.exports = {
         display: ['SpaceGrotesk_700Bold'],
         mono: ['JetBrainsMono_500Medium'],
         'mono-semi': ['JetBrainsMono_600SemiBold'],
+        'mono-bold': ['JetBrainsMono_700Bold'],
       },
     },
   },
