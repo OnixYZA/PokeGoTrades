@@ -3,31 +3,63 @@ import { ChevronDown } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 
 import { Dropdown } from '@/components/ui/Dropdown';
-import { FRIENDSHIP_LEVELS, SURFACE } from '@/constants/theme';
-import { fmtDust, stardustCost } from '@/lib/format';
+import { FRIENDSHIP_LEVELS, SURFACE, FriendshipLabel } from '@/constants/theme';
+import { fmtDust } from '@/lib/format';
 import { useTradeStore } from '@/store/trade-store';
+import { TradeType } from '@/data/types';
+
+const TRADE_COST_MATRIX: Record<TradeType, Record<FriendshipLabel, number>> = {
+  'Standard / Registered': { Good: 100, Great: 100, Ultra: 100, Best: 100 },
+  'Special (Shiny/Legendary) Registered': { Good: 20000, Great: 16000, Ultra: 1600, Best: 800 },
+  'Unregistered (Standard)': { Good: 20000, Great: 16000, Ultra: 1600, Best: 800 },
+  'Unregistered (Shiny/Legendary)': { Good: 1000000, Great: 800000, Ultra: 80000, Best: 40000 },
+};
+
+const TRADE_TYPES: TradeType[] = [
+  'Standard / Registered',
+  'Special (Shiny/Legendary) Registered',
+  'Unregistered (Standard)',
+  'Unregistered (Shiny/Legendary)',
+];
 
 export function StardustCard({ baseStardust }: { baseStardust: number }) {
   const { friendship, setFriendship } = useTradeStore();
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef<View>(null);
+  const [friendOpen, setFriendOpen] = useState(false);
+  const friendAnchorRef = useRef<View>(null);
+
+  const initialType: TradeType = 
+    baseStardust >= 1000000 ? 'Unregistered (Shiny/Legendary)' :
+    baseStardust >= 20000 ? 'Special (Shiny/Legendary) Registered' :
+    'Standard / Registered';
+
+  const [tradeType, setTradeType] = useState<TradeType>(initialType);
+  const [typeOpen, setTypeOpen] = useState(false);
+  const typeAnchorRef = useRef<View>(null);
 
   const level = FRIENDSHIP_LEVELS.find((f) => f.label === friendship)!;
-  const finalDust = stardustCost(baseStardust, level.mult);
+  const finalDust = TRADE_COST_MATRIX[tradeType][level.label as FriendshipLabel];
 
   return (
     <View className="mb-4 rounded-2xl border border-border p-4" style={SURFACE.stardustCard}>
       <View className="mb-2.5 flex-row items-center justify-between">
-        <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 10, letterSpacing: 1 }}>
-          Trade Cost
-        </Text>
+        <Pressable
+          ref={typeAnchorRef}
+          onPress={() => setTypeOpen((v) => !v)}
+          accessibilityRole="button"
+          className="flex-row items-center gap-1.5 active:opacity-80"
+        >
+          <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 10, letterSpacing: 1 }}>
+            {tradeType}
+          </Text>
+          <ChevronDown size={12} color="#7d87a0" />
+        </Pressable>
 
         <Pressable
-          ref={anchorRef}
-          onPress={() => setOpen((v) => !v)}
+          ref={friendAnchorRef}
+          onPress={() => setFriendOpen((v) => !v)}
           accessibilityRole="button"
           accessibilityLabel={`Friendship level, currently ${level.label}`}
-          accessibilityState={{ expanded: open }}
+          accessibilityState={{ expanded: friendOpen }}
           className="flex-row items-center gap-1.5 rounded-lg border border-border-strong bg-bg-panel px-2.5 py-1.5 active:opacity-80"
         >
           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: level.color, boxShadow: `0 0 6px ${level.color}` }} />
@@ -37,7 +69,30 @@ export function StardustCard({ baseStardust }: { baseStardust: number }) {
           <ChevronDown size={12} color={level.color} />
         </Pressable>
 
-        <Dropdown visible={open} onRequestClose={() => setOpen(false)} anchorRef={anchorRef} align="right" minWidth={130} gap={4}>
+        <Dropdown visible={typeOpen} onRequestClose={() => setTypeOpen(false)} anchorRef={typeAnchorRef} align="left" minWidth={220} gap={4}>
+          {TRADE_TYPES.map((t) => {
+            const selected = t === tradeType;
+            return (
+              <Pressable
+                key={t}
+                onPress={() => {
+                  setTradeType(t);
+                  setTypeOpen(false);
+                }}
+                accessibilityRole="menuitem"
+                accessibilityState={{ selected }}
+                className="flex-row items-center px-3 py-2.5 active:opacity-80"
+                style={{ backgroundColor: selected ? 'rgba(79,179,255,.08)' : 'transparent' }}
+              >
+                <Text className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
+                  {t}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </Dropdown>
+
+        <Dropdown visible={friendOpen} onRequestClose={() => setFriendOpen(false)} anchorRef={friendAnchorRef} align="right" minWidth={130} gap={4}>
           {FRIENDSHIP_LEVELS.map((f, i) => {
             const selected = f.label === friendship;
             return (
@@ -45,7 +100,7 @@ export function StardustCard({ baseStardust }: { baseStardust: number }) {
                 key={f.label}
                 onPress={() => {
                   setFriendship(f.label);
-                  setOpen(false);
+                  setFriendOpen(false);
                 }}
                 accessibilityRole="menuitem"
                 accessibilityState={{ selected }}
