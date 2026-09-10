@@ -1,5 +1,11 @@
 export type BackgroundHint = 'meta' | 'legacy' | 'shiny' | 'shadow';
 
+export type TradeType = 
+  | 'Standard / Registered'
+  | 'Special (Shiny/Legendary) Registered'
+  | 'Unregistered (Standard)'
+  | 'Unregistered (Shiny/Legendary)';
+
 export interface CreatureRef {
   name: string;
   hue: number;

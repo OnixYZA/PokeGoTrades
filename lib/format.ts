@@ -4,6 +4,3 @@ export function fmtDust(n: number): string {
   return String(n);
 }
 
-export function stardustCost(base: number, multiplier: number): number {
-  return Math.max(100, Math.round(base * multiplier));
-}
