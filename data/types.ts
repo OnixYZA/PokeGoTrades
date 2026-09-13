@@ -6,6 +6,13 @@ export type TradeType =
   | 'Unregistered (Standard)'
   | 'Unregistered (Shiny/Legendary)';
 
+export const TRADE_COST_MATRIX: Record<TradeType, number> = {
+  'Standard / Registered': 100,
+  'Special (Shiny/Legendary) Registered': 20000,
+  'Unregistered (Standard)': 20000,
+  'Unregistered (Shiny/Legendary)': 1000000,
+};
+
 export interface CreatureRef {
   name: string;
   hue: number;
@@ -27,7 +34,7 @@ export interface Listing extends CreatureRef {
   loc: string;
   pvp: string;
   demand: string;
-  stardust: number;
+  tradeType: TradeType;
   iv: string;
   looking: CreatureRef[];
   untradable?: boolean;
