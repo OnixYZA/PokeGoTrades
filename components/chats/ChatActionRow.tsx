@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import { Ban, Lock } from 'lucide-react-native';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, Text, View } from 'react-native';
 
+import { BailBlockModal } from '@/components/modals/BailBlockModal';
+import { HandshakeModal } from '@/components/modals/HandshakeModal';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SURFACE } from '@/constants/theme';
 
@@ -12,10 +15,13 @@ interface ChatActionRowProps {
 }
 
 export function ChatActionRow({ locked, onBail, onLock, onUnlockRequest }: ChatActionRowProps) {
+  const [showBail, setShowBail] = useState(false);
+  const [showHandshake, setShowHandshake] = useState(false);
+
   return (
     <View className="flex-row gap-2">
       <Pressable
-        onPress={onBail}
+        onPress={() => setShowBail(true)}
         accessibilityRole="button"
         accessibilityLabel="Bail and block this trader"
         className="flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border px-3.5 py-3 active:opacity-80"
@@ -50,9 +56,41 @@ export function ChatActionRow({ locked, onBail, onLock, onUnlockRequest }: ChatA
           style={SURFACE.ctaBlueSmall}
           textColor="#04121f"
           icon={<Lock size={14} color="#04121f" />}
-          onPress={onLock}
+          onPress={() => {
+            onLock();
+            setShowHandshake(true);
+          }}
         />
       )}
+
+      <Modal
+        visible={showBail}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowBail(false)}
+        statusBarTranslucent
+      >
+        <BailBlockModal
+          onSubmit={() => {
+            setShowBail(false);
+            onBail();
+          }}
+          onCancel={() => setShowBail(false)}
+        />
+      </Modal>
+
+      <Modal
+        visible={showHandshake}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowHandshake(false)}
+        statusBarTranslucent
+      >
+        <HandshakeModal
+          onMarkCompleted={() => setShowHandshake(false)}
+          onReturnToChat={() => setShowHandshake(false)}
+        />
+      </Modal>
     </View>
   );
 }

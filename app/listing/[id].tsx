@@ -149,7 +149,7 @@ export default function ListingDetailScreen() {
             <StatTile label="IV Spread" value={listing.iv} color="#e8ecf5" icon={<Dumbbell size={12} color="#e8ecf5" />} radius={12} mono valueSize={12} />
           </View>
 
-          <StardustCard baseStardust={listing.stardust} />
+          <StardustCard initialTradeType={listing.tradeType} />
 
           <View className="mb-[18px]">
             <View className="mb-3 flex-row items-center gap-2">

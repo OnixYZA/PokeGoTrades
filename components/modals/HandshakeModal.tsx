@@ -6,8 +6,15 @@ import { MODAL_COLORS, MODAL_SURFACE, monogramGradient } from './tokens';
 
 const C = MODAL_COLORS;
 
-/** Post-lock "Handshake & Verify" overlay — static UI match of the design handoff. */
-export function HandshakeModal() {
+interface HandshakeModalProps {
+  onCopyMyCode?: () => void;
+  onCopyTheirCode?: () => void;
+  onMarkCompleted?: () => void;
+  onReturnToChat?: () => void;
+}
+
+/** Post-lock "Handshake & Verify" overlay — static layout match of the design handoff, with onPress hooks left open for the caller. */
+export function HandshakeModal({ onCopyMyCode, onCopyTheirCode, onMarkCompleted, onReturnToChat }: HandshakeModalProps) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -33,6 +40,7 @@ export function HandshakeModal() {
           name="RaticateBoss99"
           roleKicker="YOU · SELLER"
           code="4821 · 5904 · 3372"
+          onCopy={onCopyMyCode}
         />
         <FriendCodeCard
           stripeFrom={C.blue}
@@ -45,12 +53,14 @@ export function HandshakeModal() {
           code="1109 · 7462 · 8503"
           ratingStar
           isLast
+          onCopy={onCopyTheirCode}
         />
       </View>
 
       <WarningCallout />
 
       <Pressable
+        onPress={onMarkCompleted}
         accessibilityRole="button"
         accessibilityLabel="Mark trade completed"
         className="flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] active:opacity-90"
@@ -61,7 +71,12 @@ export function HandshakeModal() {
           Mark Trade Completed
         </Text>
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Return to chat" className="items-center py-3 active:opacity-70">
+      <Pressable
+        onPress={onReturnToChat}
+        accessibilityRole="button"
+        accessibilityLabel="Return to chat"
+        className="items-center py-3 active:opacity-70"
+      >
         <Text style={{ fontSize: 13, fontWeight: '500', color: C.textMuted }}>Return to chat</Text>
       </Pressable>
     </View>
@@ -139,6 +154,7 @@ function FriendCodeCard({
   code,
   ratingStar,
   isLast,
+  onCopy,
 }: {
   stripeFrom: string;
   stripeTo: string;
@@ -150,6 +166,7 @@ function FriendCodeCard({
   code: string;
   ratingStar?: boolean;
   isLast?: boolean;
+  onCopy?: () => void;
 }) {
   return (
     <View
@@ -181,6 +198,7 @@ function FriendCodeCard({
           {code}
         </Text>
         <Pressable
+          onPress={onCopy}
           accessibilityRole="button"
           accessibilityLabel={`Copy ${name}'s friend code`}
           className="flex-row items-center gap-1.5 rounded-lg px-2.5 py-1.5 active:opacity-70"

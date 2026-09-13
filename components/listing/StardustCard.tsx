@@ -22,17 +22,12 @@ const TRADE_TYPES: TradeType[] = [
   'Unregistered (Shiny/Legendary)',
 ];
 
-export function StardustCard({ baseStardust }: { baseStardust: number }) {
+export function StardustCard({ initialTradeType }: { initialTradeType: TradeType }) {
   const { friendship, setFriendship } = useTradeStore();
   const [friendOpen, setFriendOpen] = useState(false);
   const friendAnchorRef = useRef<View>(null);
 
-  const initialType: TradeType = 
-    baseStardust >= 1000000 ? 'Unregistered (Shiny/Legendary)' :
-    baseStardust >= 20000 ? 'Special (Shiny/Legendary) Registered' :
-    'Standard / Registered';
-
-  const [tradeType, setTradeType] = useState<TradeType>(initialType);
+  const [tradeType, setTradeType] = useState<TradeType>(initialTradeType);
   const [typeOpen, setTypeOpen] = useState(false);
   const typeAnchorRef = useRef<View>(null);
 
@@ -69,7 +64,7 @@ export function StardustCard({ baseStardust }: { baseStardust: number }) {
           <ChevronDown size={12} color={level.color} />
         </Pressable>
 
-        <Dropdown visible={typeOpen} onRequestClose={() => setTypeOpen(false)} anchorRef={typeAnchorRef} align="left" minWidth={220} gap={4}>
+        <Dropdown visible={typeOpen} onRequestClose={() => setTypeOpen(false)} anchorRef={typeAnchorRef} minWidth={220} gap={4}>
           {TRADE_TYPES.map((t) => {
             const selected = t === tradeType;
             return (

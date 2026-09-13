@@ -26,7 +26,7 @@ export const listings: Listing[] = [
     loc: 'Adyar',
     pvp: 'S+',
     demand: '#1',
-    stardust: 1000000,
+    tradeType: 'Unregistered (Shiny/Legendary)',
     iv: '15/15/14',
     looking: [
       { name: 'Shiny Zamazenta', pokemonId: 889, hue: 340, shiny: true },
@@ -50,7 +50,7 @@ export const listings: Listing[] = [
     loc: 'Adyar',
     pvp: 'A',
     demand: '#4',
-    stardust: 20000,
+    tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '14/15/15',
     looking: [
       { name: 'Legacy Dragonite', pokemonId: 149, hue: 340 },
@@ -74,7 +74,7 @@ export const listings: Listing[] = [
     loc: 'Adyar',
     pvp: 'S',
     demand: '#2',
-    stardust: 20000,
+    tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '15/15/15',
     looking: [
       { name: 'Shiny Kyogre', pokemonId: 382, hue: 340, shiny: true },
@@ -98,7 +98,7 @@ export const listings: Listing[] = [
     loc: 'East Tambaram',
     pvp: 'A+',
     demand: '#7',
-    stardust: 1000000,
+    tradeType: 'Unregistered (Shiny/Legendary)',
     iv: '14/14/15',
     looking: [
       { name: 'Purified Lugia', pokemonId: 249, hue: 340 },
@@ -122,7 +122,7 @@ export const listings: Listing[] = [
     loc: 'East Tambaram',
     pvp: 'S',
     demand: '#3',
-    stardust: 20000,
+    tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '15/13/15',
     looking: [
       { name: 'Shiny Beldum Comm.', pokemonId: 374, hue: 340, shiny: true },
@@ -146,7 +146,7 @@ export const listings: Listing[] = [
     loc: 'Velachery',
     pvp: 'A',
     demand: '#5',
-    stardust: 1000000,
+    tradeType: 'Unregistered (Shiny/Legendary)',
     iv: '15/15/15',
     looking: [
       { name: 'Purified Apex Ho-Oh', pokemonId: 250, hue: 340 },
