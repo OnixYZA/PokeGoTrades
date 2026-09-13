@@ -55,6 +55,10 @@ export const MODAL_SURFACE: Record<string, ViewStyle> = {
     backgroundImage: `linear-gradient(135deg, ${C.pink}, ${C.pinkDark})`,
     boxShadow: '0 0 12px rgba(236,72,153,0.4)',
   },
+  toggleBlue: {
+    backgroundImage: `linear-gradient(135deg, ${C.blue}, ${C.blueDark})`,
+    boxShadow: '0 0 12px rgba(56,189,248,0.4)',
+  },
   extractedCard: {
     backgroundImage: 'linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.02))',
   },
