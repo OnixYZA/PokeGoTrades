@@ -28,6 +28,7 @@ export default function TabLayout() {
           positioned, non-trigger children instead of wrapping it.
         */}
         <TabList
+          role="tablist"
           className="flex-row justify-around border-t border-border-subtle"
           style={{
             position: 'relative',

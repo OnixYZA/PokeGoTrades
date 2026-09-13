@@ -25,6 +25,7 @@ export function Chip({ pokemonId, hue, shiny = false, lucky = false, size = 48 }
         contentFit="contain"
         transition={150}
         accessibilityIgnoresInvertColors
+        alt={`Pokemon ${pokemonId} sprite`}
       />
       {shiny && (
         <Text

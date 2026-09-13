@@ -28,6 +28,7 @@ export function Sprite({ pokemonId, hue, shiny = false, size = 72 }: SpriteProps
         contentFit="contain"
         transition={150}
         accessibilityIgnoresInvertColors
+        alt={`Pokemon ${pokemonId} sprite`}
       />
       {shiny && (
         <View

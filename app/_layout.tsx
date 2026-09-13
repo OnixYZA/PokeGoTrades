@@ -8,6 +8,7 @@ import { SpaceGrotesk_600SemiBold } from '@expo-google-fonts/space-grotesk/600Se
 import { SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk/700Bold';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
+import Head from 'expo-router/head';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -53,6 +54,10 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <TradeStoreProvider>
           <StatusBar style="light" />
+          <Head>
+            <title>PokeGoTrades</title>
+            <meta name="description" content="Trade Pokemon easily in your local area." />
+          </Head>
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050810' } }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen

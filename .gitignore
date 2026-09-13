@@ -3,6 +3,9 @@
 # dependencies
 node_modules/
 
+# tests 
+/LHtests/
+
 # Expo
 .expo/
 dist/
