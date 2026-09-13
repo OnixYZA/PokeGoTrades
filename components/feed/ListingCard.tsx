@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { MapPin } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 
+import { Avatar } from '@/components/ui/Avatar';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { Sprite } from '@/components/ui/Sprite';
@@ -43,8 +44,23 @@ export function ListingCard({ listing }: { listing: Listing }) {
           <View className="flex-row items-center gap-1">
             <MapPin size={12} color="#6d7690" />
             <Text className="font-mono text-text-muted" style={{ fontSize: 11 }}>
-              {listing.dist.toFixed(1)} km · {listing.seller}
+              {listing.dist.toFixed(1)} km ·
             </Text>
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                router.push(`/profile/${encodeURIComponent(listing.seller)}`);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`View ${listing.seller}'s profile`}
+              hitSlop={4}
+              className="flex-row items-center gap-1 active:opacity-70"
+            >
+              <Avatar name={listing.seller} size={16} radius={5} fontSize={9} />
+              <Text className="font-mono text-text-muted" style={{ fontSize: 11 }}>
+                {listing.seller}
+              </Text>
+            </Pressable>
           </View>
           <View className="flex-row items-center gap-1 rounded-lg border border-border-strong bg-bg-panel px-2 py-1">
             <Text style={{ color: '#f5c518', fontSize: 11 }}>★</Text>

@@ -70,6 +70,14 @@ export interface Chat {
   archived?: boolean;
 }
 
+export interface TradeHistoryEntry {
+  id: string;
+  gave: CreatureRef;
+  got: CreatureRef;
+  partner: string;
+  date: string;
+}
+
 export interface Trainer {
   handle: string;
   code: string;
@@ -82,4 +90,5 @@ export interface Trainer {
   streak: number;
   arsenal: CreatureRef[];
   wishlist: CreatureRef[];
+  tradeHistory: TradeHistoryEntry[];
 }

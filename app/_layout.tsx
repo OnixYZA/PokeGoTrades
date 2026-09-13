@@ -64,6 +64,7 @@ export default function RootLayout() {
               name="listing/[id]"
               options={{ presentation: 'transparentModal', animation: 'none' }}
             />
+            <Stack.Screen name="profile/[userId]" />
             <Stack.Screen
               name="test-bail"
               options={{ presentation: 'transparentModal', animation: 'fade' }}
