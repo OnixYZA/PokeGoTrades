@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertTriangle, Ban, Check, ChevronRight } from 'lucide-react-native';
@@ -7,9 +7,29 @@ import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
 
 const C = MODAL_COLORS;
 
-/** Bottom-sheet "Bail & Block" safety confirmation — static UI match of the design handoff. */
-export function BailBlockModal() {
+type BailReason = 'unresponsive' | 'unreasonable_adds' | 'spoofer' | 'other';
+
+const REASONS: { id: BailReason; title: string; subtitle: string; flag?: boolean; chevron?: boolean }[] = [
+  { id: 'unresponsive', title: 'Unresponsive', subtitle: 'Stopped replying after locking the trade' },
+  { id: 'unreasonable_adds', title: 'Demanding unreasonable adds', subtitle: 'Asked for extras outside the listing' },
+  {
+    id: 'spoofer',
+    title: 'Suspicious / Spoofer vibes',
+    subtitle: 'GPS jumps, impossible catches, cheats',
+    flag: true,
+  },
+  { id: 'other', title: 'Other', subtitle: 'Add a short note for the mods', chevron: true },
+];
+
+interface BailBlockModalProps {
+  onSubmit?: (reason: BailReason) => void;
+  onCancel?: () => void;
+}
+
+/** Bottom-sheet "Bail & Block" safety confirmation — reason selection is local state, with onPress hooks left open for the caller. */
+export function BailBlockModal({ onSubmit, onCancel }: BailBlockModalProps) {
   const insets = useSafeAreaInsets();
+  const [selectedReason, setSelectedReason] = useState<BailReason>('unresponsive');
 
   return (
     <View
@@ -31,9 +51,10 @@ export function BailBlockModal() {
         <DangerIcon />
         <Heading />
         <ImpactChips />
-        <ReasonList />
+        <ReasonList selectedReason={selectedReason} onSelectReason={setSelectedReason} />
 
         <Pressable
+          onPress={() => onSubmit?.(selectedReason)}
           accessibilityRole="button"
           accessibilityLabel="Submit and block"
           className="flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] active:opacity-90"
@@ -44,7 +65,12 @@ export function BailBlockModal() {
             Submit &amp; Block
           </Text>
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Cancel" className="items-center py-3 active:opacity-70">
+        <Pressable
+          onPress={onCancel}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel"
+          className="items-center py-3 active:opacity-70"
+        >
           <Text style={{ fontSize: 14, fontWeight: '600', color: C.textSecondary }}>Cancel</Text>
         </Pressable>
       </View>
@@ -117,16 +143,20 @@ function ReasonRow({
   selected,
   flag,
   chevron,
+  onPress,
 }: {
   title: string;
   subtitle: string;
   selected?: boolean;
   flag?: boolean;
   chevron?: boolean;
+  onPress?: () => void;
 }) {
   return (
     <Pressable
+      onPress={onPress}
       accessibilityRole="radio"
+      accessibilityLabel={title}
       accessibilityState={{ selected: !!selected }}
       className="flex-row items-center gap-3.5 rounded-2xl border px-5 py-[22px] active:opacity-90"
       style={{
@@ -159,17 +189,30 @@ function ReasonRow({
   );
 }
 
-function ReasonList() {
+function ReasonList({
+  selectedReason,
+  onSelectReason,
+}: {
+  selectedReason: BailReason;
+  onSelectReason: (reason: BailReason) => void;
+}) {
   return (
     <View>
       <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
         TELL US WHY (HELPS US MODERATE)
       </Text>
-      <View className="mb-6 gap-2.5">
-        <ReasonRow title="Unresponsive" subtitle="Stopped replying after locking the trade" selected />
-        <ReasonRow title="Demanding unreasonable adds" subtitle="Asked for extras outside the listing" />
-        <ReasonRow title="Suspicious / Spoofer vibes" subtitle="GPS jumps, impossible catches, cheats" flag />
-        <ReasonRow title="Other" subtitle="Add a short note for the mods" chevron />
+      <View accessibilityRole="radiogroup" className="mb-6 gap-2.5">
+        {REASONS.map((reason) => (
+          <ReasonRow
+            key={reason.id}
+            title={reason.title}
+            subtitle={reason.subtitle}
+            flag={reason.flag}
+            chevron={reason.chevron}
+            selected={selectedReason === reason.id}
+            onPress={() => onSelectReason(reason.id)}
+          />
+        ))}
       </View>
     </View>
   );

@@ -1,38 +1,70 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, Text, View, type ViewStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowRight, Calendar, Check, CheckSquare, Image as ImageIcon, Plus, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native';
 
 import { MODAL_COLORS, MODAL_SURFACE, monogramGradient } from './tokens';
 
 const C = MODAL_COLORS;
 
-/** Full-screen "Create Listing" seller flow — static UI match of the design handoff, step 2 of 3. */
-export function CreateListingModal() {
+interface CreateListingModalProps {
+  onClose?: () => void;
+  onSave?: () => void;
+  onSelectCreature?: (name: string) => void;
+  onRemoveScreenshot?: () => void;
+  onAddWanted?: () => void;
+  onRemoveWanted?: (name: string) => void;
+  onContinue?: () => void;
+}
+
+/** Full-screen "Create Listing" seller flow — static layout match of the design handoff, wired for local interactivity (toggles, reason selection) with onPress hooks left open for the caller. */
+export function CreateListingModal({
+  onClose,
+  onSave,
+  onSelectCreature,
+  onRemoveScreenshot,
+  onAddWanted,
+  onRemoveWanted,
+  onContinue,
+}: CreateListingModalProps) {
+  const insets = useSafeAreaInsets();
+  const [shiny, setShiny] = useState(true);
+  const [purified, setPurified] = useState(false);
+  const [specialBackground, setSpecialBackground] = useState(true);
+
   return (
-    <View className="flex-1" style={{ backgroundColor: C.bgSurface }}>
-      <Header />
+    <View className="flex-1" style={{ backgroundColor: C.bgSurface, paddingTop: insets.top }}>
+      <Header onClose={onClose} onSave={onSave} />
       <ProgressBar />
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24, gap: 24 }}
         showsVerticalScrollIndicator={false}
       >
-        <CreatureSelector />
-        <AttributesCard />
-        <AppraisalSection />
-        <WantedInReturn />
+        <CreatureSelector onSelectCreature={onSelectCreature} />
+        <AttributesCard
+          shiny={shiny}
+          onToggleShiny={() => setShiny((v) => !v)}
+          purified={purified}
+          onTogglePurified={() => setPurified((v) => !v)}
+          specialBackground={specialBackground}
+          onToggleSpecialBackground={() => setSpecialBackground((v) => !v)}
+        />
+        <AppraisalSection onRemoveScreenshot={onRemoveScreenshot} />
+        <WantedInReturn onAddWanted={onAddWanted} onRemoveWanted={onRemoveWanted} />
       </ScrollView>
-      <Footer />
+      <Footer onContinue={onContinue} bottomInset={insets.bottom} />
     </View>
   );
 }
 
-function Header() {
+function Header({ onClose, onSave }: { onClose?: () => void; onSave?: () => void }) {
   return (
     <View
       className="flex-row items-center justify-between border-b px-5 py-4"
       style={{ borderBottomColor: C.borderSubtle }}
     >
       <Pressable
+        onPress={onClose}
         accessibilityRole="button"
         accessibilityLabel="Close"
         className="h-10 w-10 items-center justify-center rounded-xl border active:opacity-70"
@@ -48,7 +80,12 @@ function Header() {
           STEP 2 OF 3
         </Text>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Save draft" className="px-3 py-2 active:opacity-70">
+      <Pressable
+        onPress={onSave}
+        accessibilityRole="button"
+        accessibilityLabel="Save draft"
+        className="px-3 py-2 active:opacity-70"
+      >
         <Text style={{ fontSize: 13, fontWeight: '600', color: C.textMuted }}>Save</Text>
       </Pressable>
     </View>
@@ -97,8 +134,9 @@ function MonogramTile({
   );
 }
 
-function CreatureSelector() {
-  const otherMatches = [
+function CreatureSelector({ onSelectCreature }: { onSelectCreature?: (name: string) => void }) {
+  const matches = [
+    { label: 'Ch', from: '#f97316', to: '#dc2626', name: 'Charizard', meta: '#006 · Fire / Flying', focused: true },
     { label: 'Ch', from: '#fb923c', to: '#ea580c', name: 'Charmeleon', meta: '#005 · Fire' },
     { label: 'Ch', from: '#fdba74', to: '#f97316', name: 'Charmander', meta: '#004 · Fire' },
   ];
@@ -134,28 +172,23 @@ function CreatureSelector() {
         className="mt-2 overflow-hidden rounded-[14px] border"
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
-        <View
-          className="flex-row items-center gap-3 px-4 py-3"
-          style={{
-            borderLeftWidth: 2,
-            borderLeftColor: C.gold,
-            backgroundImage: 'linear-gradient(90deg, rgba(251,191,36,0.08), transparent)',
-          }}
-        >
-          <MonogramTile label="Ch" from="#f97316" to="#dc2626" />
-          <View className="flex-1">
-            <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>Charizard</Text>
-            <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
-              #006 · Fire / Flying
-            </Text>
-          </View>
-          <Check size={18} color={C.gold} strokeWidth={2.5} />
-        </View>
-        {otherMatches.map((row) => (
-          <View
+        {matches.map((row, i) => (
+          <Pressable
             key={row.name}
-            className="flex-row items-center gap-3 border-t px-4 py-3"
-            style={{ borderTopColor: C.borderSubtle }}
+            onPress={() => onSelectCreature?.(row.name)}
+            accessibilityRole="menuitem"
+            accessibilityLabel={`Select ${row.name}, ${row.meta}`}
+            accessibilityState={{ selected: row.focused }}
+            className="flex-row items-center gap-3 px-4 py-3 active:opacity-80"
+            style={
+              row.focused
+                ? {
+                    borderLeftWidth: 2,
+                    borderLeftColor: C.gold,
+                    backgroundImage: 'linear-gradient(90deg, rgba(251,191,36,0.08), transparent)',
+                  }
+                : { borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.borderSubtle }
+            }
           >
             <MonogramTile label={row.label} from={row.from} to={row.to} />
             <View className="flex-1">
@@ -164,7 +197,8 @@ function CreatureSelector() {
                 {row.meta}
               </Text>
             </View>
-          </View>
+            {row.focused ? <Check size={18} color={C.gold} strokeWidth={2.5} /> : null}
+          </Pressable>
         ))}
       </View>
     </View>
@@ -191,6 +225,7 @@ function AttributeRow({
   description,
   on,
   onGradient,
+  onPress,
   isLast,
 }: {
   icon: ReactNode;
@@ -199,11 +234,16 @@ function AttributeRow({
   description: string;
   on: boolean;
   onGradient?: ViewStyle;
+  onPress?: () => void;
   isLast?: boolean;
 }) {
   return (
-    <View
-      className="flex-row items-center gap-3.5 px-4 py-3.5"
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="switch"
+      accessibilityLabel={title}
+      accessibilityState={{ checked: on }}
+      className="flex-row items-center gap-3.5 px-4 py-3.5 active:opacity-80"
       style={!isLast ? { borderBottomWidth: 1, borderBottomColor: C.borderSubtle } : undefined}
     >
       <View className="h-9 w-9 items-center justify-center rounded-[10px]" style={{ backgroundColor: tint }}>
@@ -216,11 +256,25 @@ function AttributeRow({
       <View className="relative h-7 w-12 rounded-full" style={on ? onGradient : { backgroundColor: C.borderDefault }}>
         <ToggleKnob on={on} />
       </View>
-    </View>
+    </Pressable>
   );
 }
 
-function AttributesCard() {
+function AttributesCard({
+  shiny,
+  onToggleShiny,
+  purified,
+  onTogglePurified,
+  specialBackground,
+  onToggleSpecialBackground,
+}: {
+  shiny: boolean;
+  onToggleShiny: () => void;
+  purified: boolean;
+  onTogglePurified: () => void;
+  specialBackground: boolean;
+  onToggleSpecialBackground: () => void;
+}) {
   return (
     <View>
       <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
@@ -235,23 +289,27 @@ function AttributesCard() {
           tint="rgba(251,191,36,0.12)"
           title="Shiny"
           description="Rare alternate coloration"
-          on
+          on={shiny}
           onGradient={MODAL_SURFACE.toggleGold}
+          onPress={onToggleShiny}
         />
         <AttributeRow
           icon={<Sparkles size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
           title="Purified"
           description="Cleansed from Shadow form"
-          on={false}
+          on={purified}
+          onGradient={MODAL_SURFACE.toggleBlue}
+          onPress={onTogglePurified}
         />
         <AttributeRow
           icon={<ImageIcon size={18} color={C.pink} strokeWidth={2.2} />}
           tint="rgba(236,72,153,0.12)"
           title="Special Background"
           description="Event / costume variant"
-          on
+          on={specialBackground}
           onGradient={MODAL_SURFACE.togglePink}
+          onPress={onToggleSpecialBackground}
           isLast
         />
       </View>
@@ -259,7 +317,7 @@ function AttributesCard() {
   );
 }
 
-function AppraisalSection() {
+function AppraisalSection({ onRemoveScreenshot }: { onRemoveScreenshot?: () => void }) {
   return (
     <View>
       <View className="mb-2.5 flex-row items-center justify-between">
@@ -298,6 +356,7 @@ function AppraisalSection() {
           </Text>
         </View>
         <Pressable
+          onPress={onRemoveScreenshot}
           accessibilityRole="button"
           accessibilityLabel="Remove screenshot"
           className="h-10 w-10 items-center justify-center rounded-[10px] border active:opacity-70"
@@ -353,13 +412,28 @@ function AppraisalSection() {
   );
 }
 
-function WantedSlot({ label, from, to, name, dex }: { label: string; from: string; to: string; name: string; dex: string }) {
+function WantedSlot({
+  label,
+  from,
+  to,
+  name,
+  dex,
+  onRemove,
+}: {
+  label: string;
+  from: string;
+  to: string;
+  name: string;
+  dex: string;
+  onRemove?: () => void;
+}) {
   return (
     <View
       className="relative aspect-square flex-1 items-center justify-center rounded-xl border p-2.5"
       style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
     >
       <Pressable
+        onPress={onRemove}
         accessibilityRole="button"
         accessibilityLabel={`Remove ${name}`}
         className="absolute right-1 top-1 h-[18px] w-[18px] items-center justify-center rounded-full border active:opacity-70"
@@ -378,7 +452,13 @@ function WantedSlot({ label, from, to, name, dex }: { label: string; from: strin
   );
 }
 
-function WantedInReturn() {
+function WantedInReturn({
+  onAddWanted,
+  onRemoveWanted,
+}: {
+  onAddWanted?: () => void;
+  onRemoveWanted?: (name: string) => void;
+}) {
   return (
     <View>
       <View className="mb-2.5 flex-row items-center justify-between">
@@ -390,9 +470,24 @@ function WantedInReturn() {
         </Text>
       </View>
       <View className="flex-row gap-2">
-        <WantedSlot label="Mw" from="#a78bfa" to="#7c3aed" name="Mewtwo" dex="#150" />
-        <WantedSlot label="Ar" from="#60a5fa" to="#2563eb" name="Articuno" dex="#144" />
+        <WantedSlot
+          label="Mw"
+          from="#a78bfa"
+          to="#7c3aed"
+          name="Mewtwo"
+          dex="#150"
+          onRemove={() => onRemoveWanted?.('Mewtwo')}
+        />
+        <WantedSlot
+          label="Ar"
+          from="#60a5fa"
+          to="#2563eb"
+          name="Articuno"
+          dex="#144"
+          onRemove={() => onRemoveWanted?.('Articuno')}
+        />
         <Pressable
+          onPress={onAddWanted}
           accessibilityRole="button"
           accessibilityLabel="Add wanted creature"
           className="aspect-square flex-1 items-center justify-center gap-1 rounded-xl border border-dashed active:opacity-70"
@@ -408,13 +503,18 @@ function WantedInReturn() {
   );
 }
 
-function Footer() {
+function Footer({ onContinue, bottomInset = 0 }: { onContinue?: () => void; bottomInset?: number }) {
   return (
     <View
-      className="border-t px-5 pb-6 pt-4"
-      style={{ borderTopColor: C.borderSubtle, backgroundImage: 'linear-gradient(180deg, transparent, #0d0d14 30%)' }}
+      className="border-t px-5 pt-4"
+      style={{
+        borderTopColor: C.borderSubtle,
+        backgroundImage: 'linear-gradient(180deg, transparent, #0d0d14 30%)',
+        paddingBottom: Math.max(bottomInset, 24),
+      }}
     >
       <Pressable
+        onPress={onContinue}
         accessibilityRole="button"
         accessibilityLabel="Continue to preview"
         className="flex-row items-center justify-center gap-2 rounded-2xl py-4 active:opacity-90"

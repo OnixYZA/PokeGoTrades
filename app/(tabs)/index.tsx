@@ -1,8 +1,10 @@
-import { ListFilter, Search } from 'lucide-react-native';
-import { FlatList, Pressable, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ListFilter, Plus, Search } from 'lucide-react-native';
+import { FlatList, Modal, Pressable, Text, View } from 'react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
 import { LocationDropdown } from '@/components/feed/LocationDropdown';
+import { CreateListingModal } from '@/components/modals/CreateListingModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { StatTile } from '@/components/ui/StatTile';
 import { SURFACE } from '@/constants/theme';
@@ -11,6 +13,7 @@ import { useTradeStore } from '@/store/trade-store';
 
 export default function FeedScreen() {
   const { filterLocation } = useTradeStore();
+  const [showCreateListing, setShowCreateListing] = useState(false);
 
   const filtered = listings.filter((l) => l.loc === filterLocation).sort((a, b) => a.dist - b.dist);
 
@@ -70,6 +73,28 @@ export default function FeedScreen() {
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, gap: 10 }}
         showsVerticalScrollIndicator={false}
       />
+
+      <Pressable
+        onPress={() => setShowCreateListing(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Create new listing"
+        className="absolute bottom-5 right-5 h-14 w-14 items-center justify-center rounded-full active:opacity-90"
+        style={SURFACE.ctaBlue}
+      >
+        <Plus size={26} color="#04121f" strokeWidth={2.5} />
+      </Pressable>
+
+      <Modal
+        visible={showCreateListing}
+        animationType="slide"
+        onRequestClose={() => setShowCreateListing(false)}
+      >
+        <CreateListingModal
+          onClose={() => setShowCreateListing(false)}
+          onSave={() => setShowCreateListing(false)}
+          onContinue={() => setShowCreateListing(false)}
+        />
+      </Modal>
     </View>
   );
 }
