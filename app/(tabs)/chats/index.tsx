@@ -2,12 +2,10 @@ import { ScrollView, Text, View } from 'react-native';
 
 import { ChatGroupHeader } from '@/components/chats/ChatGroupHeader';
 import { ChatRow } from '@/components/chats/ChatRow';
-import { chats } from '@/data/chats';
-import { listings } from '@/data/listings';
 import { useTradeStore } from '@/store/trade-store';
 
 export default function ChatsInboxScreen() {
-  const { isChatLocked } = useTradeStore();
+  const { chats, listings, isChatLocked } = useTradeStore();
 
   const grouped = new Map<string, typeof chats>();
   for (const c of chats) {

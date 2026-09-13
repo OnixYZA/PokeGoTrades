@@ -40,10 +40,20 @@ export interface Listing extends CreatureRef {
   untradable?: boolean;
 }
 
+export interface FormalOffer {
+  name: string;
+  pokemonId: number;
+  hue: number;
+  iv?: string;
+  move?: string;
+}
+
 export interface ChatMessage {
   role: 'them' | 'me';
   text: string;
   time: string;
+  /** Present when this message is an auto-sent formal-offer card rather than plain text. */
+  offer?: FormalOffer;
 }
 
 export interface Chat {

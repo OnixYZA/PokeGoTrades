@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { Bolt, Dumbbell, MapPin, Send, Trophy, X } from 'lucide-react-native';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LookingForRow } from '@/components/listing/LookingForRow';
 import { StardustCard } from '@/components/listing/StardustCard';
+import { BuyerOfferModal, type BuyerOfferSelection } from '@/components/modals/BuyerOfferModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
@@ -22,15 +23,18 @@ import { Sprite } from '@/components/ui/Sprite';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
-import { listings } from '@/data/listings';
+import type { FormalOffer } from '@/data/types';
+import { useTradeStore } from '@/store/trade-store';
 
 const SHEET_TRAVEL = 900;
 const DISMISS_THRESHOLD = 120;
 
 export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { listings, addChat } = useTradeStore();
   const listing = listings.find((l) => l.id === id);
   const insets = useSafeAreaInsets();
+  const [showOfferModal, setShowOfferModal] = useState(false);
 
   const translateY = useSharedValue(SHEET_TRAVEL);
   const overlayOpacity = useSharedValue(0);
@@ -66,6 +70,33 @@ export default function ListingDetailScreen() {
   const overlayStyle = useAnimatedStyle(() => ({ opacity: overlayOpacity.value }));
 
   if (!listing) return null;
+
+  const handleConfirmOffer = (selection: BuyerOfferSelection) => {
+    const offer: FormalOffer =
+      selection.kind === 'creature'
+        ? {
+            name: selection.creature.name,
+            pokemonId: selection.creature.pokemonId,
+            hue: selection.creature.hue,
+            iv: selection.creature.lucky ? 'Lucky' : undefined,
+          }
+        : { name: 'Custom Offer', pokemonId: listing.pokemonId, hue: listing.hue };
+
+    const chatId = `c-${Date.now()}`;
+    const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    addChat({
+      id: chatId,
+      listingId: listing.id,
+      partner: listing.seller,
+      preview: `Formal offer sent · ${offer.name}`,
+      unread: 0,
+      active: true,
+      offers: [{ role: 'me', text: '', time, offer }],
+    });
+
+    setShowOfferModal(false);
+    close(() => router.dismissTo(`/chats/${chatId}`));
+  };
 
   return (
     <View className="flex-1 items-center justify-end" pointerEvents="box-none">
@@ -182,11 +213,20 @@ export default function ListingDetailScreen() {
             style={SURFACE.ctaBlue}
             textColor="#04121f"
             icon={!listing.untradable ? <Send size={16} color="#04121f" /> : undefined}
-            onPress={() => close(() => router.dismissTo('/chats'))}
+            onPress={() => setShowOfferModal(true)}
             disabled={listing.untradable}
           />
         </View>
       </Animated.View>
+
+      <Modal
+        visible={showOfferModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowOfferModal(false)}
+      >
+        <BuyerOfferModal listing={listing} onCancel={() => setShowOfferModal(false)} onConfirm={handleConfirmOffer} />
+      </Modal>
     </View>
   );
 }

@@ -1,6 +1,9 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import type { FriendshipLabel } from '@/constants/theme';
+import { chats as initialChats } from '@/data/chats';
+import { listings as initialListings } from '@/data/listings';
+import type { Chat, Listing } from '@/data/types';
 
 interface TradeStoreValue {
   filterLocation: string;
@@ -13,6 +16,10 @@ interface TradeStoreValue {
   lockChat: (chatId: string) => void;
   unlockChat: (chatId: string) => void;
   isChatLocked: (chatId: string) => boolean;
+  listings: Listing[];
+  addListing: (listing: Listing) => void;
+  chats: Chat[];
+  addChat: (chat: Chat) => void;
 }
 
 const TradeStoreContext = createContext<TradeStoreValue | null>(null);
@@ -21,6 +28,8 @@ export function TradeStoreProvider({ children }: { children: React.ReactNode }) 
   const [filterLocation, setFilterLocation] = useState('Adyar');
   const [friendship, setFriendship] = useState<FriendshipLabel>('Great');
   const [lockedChatIds, setLockedChatIds] = useState<Set<string>>(new Set());
+  const [listings, setListings] = useState<Listing[]>(initialListings);
+  const [chats, setChats] = useState<Chat[]>(initialChats);
 
   const lockChat = useCallback((chatId: string) => {
     setLockedChatIds((prev) => new Set(prev).add(chatId));
@@ -36,6 +45,14 @@ export function TradeStoreProvider({ children }: { children: React.ReactNode }) 
 
   const isChatLocked = useCallback((chatId: string) => lockedChatIds.has(chatId), [lockedChatIds]);
 
+  const addListing = useCallback((listing: Listing) => {
+    setListings((prev) => [listing, ...prev]);
+  }, []);
+
+  const addChat = useCallback((chat: Chat) => {
+    setChats((prev) => [chat, ...prev]);
+  }, []);
+
   const value = useMemo(
     () => ({
       filterLocation,
@@ -46,8 +63,12 @@ export function TradeStoreProvider({ children }: { children: React.ReactNode }) 
       lockChat,
       unlockChat,
       isChatLocked,
+      listings,
+      addListing,
+      chats,
+      addChat,
     }),
-    [filterLocation, friendship, lockedChatIds, lockChat, unlockChat, isChatLocked],
+    [filterLocation, friendship, lockedChatIds, lockChat, unlockChat, isChatLocked, listings, addListing, chats, addChat],
   );
 
   return <TradeStoreContext.Provider value={value}>{children}</TradeStoreContext.Provider>;

@@ -4,11 +4,11 @@ import { ChevronDown, MapPin } from 'lucide-react-native';
 
 import { Dropdown } from '@/components/ui/Dropdown';
 import { SURFACE } from '@/constants/theme';
-import { listings, locations } from '@/data/listings';
+import { locations } from '@/data/listings';
 import { useTradeStore } from '@/store/trade-store';
 
 export function LocationDropdown() {
-  const { filterLocation, setFilterLocation } = useTradeStore();
+  const { filterLocation, setFilterLocation, listings } = useTradeStore();
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<View>(null);
 

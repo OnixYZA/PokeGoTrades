@@ -10,15 +10,14 @@ import { FormalOfferCard } from '@/components/chats/FormalOfferCard';
 import { LockedBanner } from '@/components/chats/LockedBanner';
 import { MessageBubble } from '@/components/chats/MessageBubble';
 import { Avatar } from '@/components/ui/Avatar';
-import { chats, fallbackOffers } from '@/data/chats';
-import { listings } from '@/data/listings';
+import { fallbackOffers } from '@/data/chats';
 import type { ChatMessage } from '@/data/types';
 import { useTradeStore } from '@/store/trade-store';
 
 export default function ActiveChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const insets = useSafeAreaInsets();
-  const { isChatLocked, lockChat, unlockChat } = useTradeStore();
+  const { chats, listings, isChatLocked, lockChat, unlockChat } = useTradeStore();
 
   const chat = chats.find((c) => c.id === chatId);
   const listing = chat ? listings.find((l) => l.id === chat.listingId) : undefined;
@@ -69,7 +68,11 @@ export default function ActiveChatScreen() {
         {messages.map((m, i) => (
           <MessageBubble key={i} message={m} />
         ))}
-        {!locked && <FormalOfferCard />}
+        {!locked && (
+          <View style={{ alignItems: 'flex-start' }}>
+            <FormalOfferCard />
+          </View>
+        )}
       </ScrollView>
 
       <View

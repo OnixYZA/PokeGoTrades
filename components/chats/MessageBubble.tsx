@@ -1,10 +1,22 @@
 import { Text, View } from 'react-native';
 
+import { FormalOfferCard } from '@/components/chats/FormalOfferCard';
 import { SURFACE } from '@/constants/theme';
 import type { ChatMessage } from '@/data/types';
 
 export function MessageBubble({ message }: { message: ChatMessage }) {
   const mine = message.role === 'me';
+
+  if (message.offer) {
+    return (
+      <View style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
+        <FormalOfferCard offer={message.offer} />
+        <Text className="font-mono" style={{ fontSize: 9, color: '#4a5169', marginTop: 3, paddingHorizontal: 4 }}>
+          {message.time}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
