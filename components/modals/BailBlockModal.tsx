@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertTriangle, Ban, Check, ChevronRight } from 'lucide-react-native';
 
@@ -7,7 +7,7 @@ import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
 
 const C = MODAL_COLORS;
 
-type BailReason = 'unresponsive' | 'unreasonable_adds' | 'spoofer' | 'other';
+export type BailReason = 'unresponsive' | 'unreasonable_adds' | 'spoofer' | 'other';
 
 const REASONS: { id: BailReason; title: string; subtitle: string; flag?: boolean; chevron?: boolean }[] = [
   { id: 'unresponsive', title: 'Unresponsive', subtitle: 'Stopped replying after locking the trade' },
@@ -22,7 +22,7 @@ const REASONS: { id: BailReason; title: string; subtitle: string; flag?: boolean
 ];
 
 interface BailBlockModalProps {
-  onSubmit?: (reason: BailReason) => void;
+  onSubmit?: (reason: BailReason, note?: string) => void;
   onCancel?: () => void;
 }
 
@@ -30,6 +30,7 @@ interface BailBlockModalProps {
 export function BailBlockModal({ onSubmit, onCancel }: BailBlockModalProps) {
   const insets = useSafeAreaInsets();
   const [selectedReason, setSelectedReason] = useState<BailReason>('unresponsive');
+  const [note, setNote] = useState('');
 
   return (
     <View
@@ -53,8 +54,31 @@ export function BailBlockModal({ onSubmit, onCancel }: BailBlockModalProps) {
         <ImpactChips />
         <ReasonList selectedReason={selectedReason} onSelectReason={setSelectedReason} />
 
+        {selectedReason === 'other' && (
+          <View className="mb-6">
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder="Tell us what happened…"
+              placeholderTextColor={C.textDim}
+              multiline
+              numberOfLines={3}
+              accessibilityLabel="Additional details for moderators"
+              className="rounded-2xl border px-4 py-3"
+              style={{
+                backgroundColor: C.bgCard,
+                borderColor: C.borderDefault,
+                color: C.textPrimary,
+                fontSize: 14,
+                minHeight: 84,
+                textAlignVertical: 'top',
+              }}
+            />
+          </View>
+        )}
+
         <Pressable
-          onPress={() => onSubmit?.(selectedReason)}
+          onPress={() => onSubmit?.(selectedReason, selectedReason === 'other' ? note.trim() || undefined : undefined)}
           accessibilityRole="button"
           accessibilityLabel="Submit and block"
           className="flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] active:opacity-90"

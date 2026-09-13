@@ -9,6 +9,7 @@ export default function ChatsInboxScreen() {
 
   const grouped = new Map<string, typeof chats>();
   for (const c of chats) {
+    if (c.archived) continue;
     grouped.set(c.listingId, [...(grouped.get(c.listingId) ?? []), c]);
   }
 

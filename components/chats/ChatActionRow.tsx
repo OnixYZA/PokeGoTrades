@@ -2,21 +2,20 @@ import { useState } from 'react';
 import { Ban, Lock } from 'lucide-react-native';
 import { Alert, Modal, Pressable, Text, View } from 'react-native';
 
-import { BailBlockModal } from '@/components/modals/BailBlockModal';
-import { HandshakeModal } from '@/components/modals/HandshakeModal';
+import { BailBlockModal, type BailReason } from '@/components/modals/BailBlockModal';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SURFACE } from '@/constants/theme';
 
 interface ChatActionRowProps {
   locked: boolean;
-  onBail: () => void;
+  onBail: (reason: BailReason, note?: string) => void;
   onLock: () => void;
   onUnlockRequest: () => void;
+  onOpenHandshake: () => void;
 }
 
-export function ChatActionRow({ locked, onBail, onLock, onUnlockRequest }: ChatActionRowProps) {
+export function ChatActionRow({ locked, onBail, onLock, onUnlockRequest, onOpenHandshake }: ChatActionRowProps) {
   const [showBail, setShowBail] = useState(false);
-  const [showHandshake, setShowHandshake] = useState(false);
 
   return (
     <View className="flex-row gap-2">
@@ -58,7 +57,7 @@ export function ChatActionRow({ locked, onBail, onLock, onUnlockRequest }: ChatA
           icon={<Lock size={14} color="#04121f" />}
           onPress={() => {
             onLock();
-            setShowHandshake(true);
+            onOpenHandshake();
           }}
         />
       )}
@@ -71,24 +70,11 @@ export function ChatActionRow({ locked, onBail, onLock, onUnlockRequest }: ChatA
         statusBarTranslucent
       >
         <BailBlockModal
-          onSubmit={() => {
+          onSubmit={(reason, note) => {
             setShowBail(false);
-            onBail();
+            onBail(reason, note);
           }}
           onCancel={() => setShowBail(false)}
-        />
-      </Modal>
-
-      <Modal
-        visible={showHandshake}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowHandshake(false)}
-        statusBarTranslucent
-      >
-        <HandshakeModal
-          onMarkCompleted={() => setShowHandshake(false)}
-          onReturnToChat={() => setShowHandshake(false)}
         />
       </Modal>
     </View>
