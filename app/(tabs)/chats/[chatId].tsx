@@ -124,8 +124,15 @@ export default function ActiveChatScreen() {
 
       <View
         className="gap-2.5 border-t border-border-subtle px-4 pt-2.5"
-        style={{ paddingBottom: Math.max(insets.bottom, 16) }}
+        style={{ paddingBottom: Math.max(insets.bottom, 20) }}
       >
+        <ChatActionRow
+          locked={locked}
+          onBail={handleBail}
+          onLock={() => lockChat(chat.id)}
+          onUnlockRequest={() => unlockChat(chat.id)}
+          onOpenHandshake={() => setShowHandshake(true)}
+        />
         <Composer
           value={draft}
           onChangeText={setDraft}
@@ -133,13 +140,6 @@ export default function ActiveChatScreen() {
           locked={locked}
           frozen={frozen}
           onOpenArsenal={() => setShowArsenal(true)}
-        />
-        <ChatActionRow
-          locked={locked}
-          onBail={handleBail}
-          onLock={() => lockChat(chat.id)}
-          onUnlockRequest={() => unlockChat(chat.id)}
-          onOpenHandshake={() => setShowHandshake(true)}
         />
       </View>
 

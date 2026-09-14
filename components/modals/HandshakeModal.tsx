@@ -21,7 +21,7 @@ export function HandshakeModal({ onCopyMyCode, onCopyTheirCode, onMarkCompleted,
     <View
       className="flex-1 px-5"
       style={{
-        backgroundImage: 'linear-gradient(180deg, rgba(8,8,12,0.85), rgba(8,8,12,0.98))',
+        backgroundColor: 'rgba(5, 8, 16, 0.96)',
         paddingTop: insets.top + 20,
         paddingBottom: insets.bottom + 24,
       }}

@@ -1,4 +1,5 @@
 import { BlurView } from 'expo-blur';
+import { useSegments } from 'expo-router';
 import { Tabs, TabList, TabSlot, TabTrigger } from 'expo-router/ui';
 import { House, MessageCircle, User } from 'lucide-react-native';
 import { View, type ViewStyle } from 'react-native';
@@ -15,6 +16,11 @@ const fill: ViewStyle = { position: 'absolute', top: 0, left: 0, right: 0, botto
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const segments = useSegments();
+  // Dynamic segments keep their file-name bracket syntax here (e.g. "[chatId]"), not the
+  // resolved id — see expo-router's getRouteInfoFromState. An open thread should read edge to
+  // edge, so hide the tab bar rather than stack it under the composer.
+  const inChatThread = segments[segments.length - 1] === '[chatId]';
 
   return (
     <PhoneFrame>
@@ -31,6 +37,7 @@ export default function TabLayout() {
           role="tablist"
           className="flex-row justify-around border-t border-border-subtle"
           style={{
+            display: inChatThread ? 'none' : 'flex',
             position: 'relative',
             overflow: 'hidden',
             paddingTop: 10,
