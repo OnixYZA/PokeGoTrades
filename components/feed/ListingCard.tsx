@@ -6,6 +6,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { Sprite } from '@/components/ui/Sprite';
+import { TextBadge } from '@/components/ui/TextBadge';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { Listing } from '@/data/types';
 
@@ -39,6 +40,24 @@ export function ListingCard({ listing }: { listing: Listing }) {
           <BackgroundBadge bg={listing.bg} hue={listing.hue} accent={listing.accent} />
           {listing.lucky && <LuckyBadge size="sm" />}
         </View>
+
+        {listing.tags && listing.tags.length > 0 && (
+          <View className="flex-row flex-wrap items-center gap-1.5">
+            {listing.tags.map((tag) => (
+              <TextBadge key={tag} label={tag} size="sm" selected />
+            ))}
+          </View>
+        )}
+
+        {listing.notes ? (
+          <Text
+            numberOfLines={2}
+            className="text-text-body"
+            style={{ fontSize: 12, lineHeight: 18, fontStyle: 'italic' }}
+          >
+            {listing.notes}
+          </Text>
+        ) : null}
 
         <View className="mt-1.5 flex-row items-center justify-between">
           <View className="flex-row items-center gap-1">

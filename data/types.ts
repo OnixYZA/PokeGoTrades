@@ -38,6 +38,13 @@ export interface Listing extends CreatureRef {
   iv: string;
   looking: CreatureRef[];
   untradable?: boolean;
+  /** Proof photos (appraisal, movesets, event badges, ...) — multiple, replacing the old
+   *  single-screenshot assumption. Optional since existing seed listings predate this field. */
+  screenshots?: string[];
+  /** Freeform listing tags the seller picks at creation time (e.g. "Legacy Move", "PvP Ready"). */
+  tags?: string[];
+  /** Seller's own terms / context, shown to buyers on the card. */
+  notes?: string;
 }
 
 export interface FormalOffer {

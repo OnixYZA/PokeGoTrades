@@ -19,6 +19,8 @@ interface TradeStoreValue {
   unlockChat: (chatId: string) => void;
   isChatLocked: (chatId: string) => boolean;
   listings: Listing[];
+  /** Appends a fully-formed listing — including its `screenshots` (multi-image proof) and
+   *  `tags` picked during creation — to the feed. */
   addListing: (listing: Listing) => void;
   /** Removes a listing entirely — used once its trade is marked completed. */
   removeListing: (listingId: string) => void;
