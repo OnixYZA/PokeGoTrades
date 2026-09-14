@@ -1,10 +1,12 @@
 /**
  * Style values NativeWind can't express as static utility classes: gradients, glows, and
  * anything driven by a per-Pokémon `hue`. React Native's New Architecture accepts these as
- * literal CSS strings via the `boxShadow` / `backgroundImage` style props, so they port
- * directly from the handoff instead of being approximated.
+ * literal CSS strings via the `boxShadow` / `experimental_backgroundImage` style props, so
+ * they port directly from the handoff instead of being approximated.
  */
 import type { ViewStyle } from 'react-native';
+
+import { gradient } from './gradient';
 
 export const COLORS = {
   bgBase: '#050810',
@@ -45,47 +47,36 @@ export type FriendshipLabel = (typeof FRIENDSHIP_LEVELS)[number]['label'];
 // ——— static surfaces ———
 
 export const SURFACE: Record<string, ViewStyle> = {
-  card: {
-    backgroundImage: 'linear-gradient(180deg, #0f1524 0%, #0b1120 100%)',
-  },
-  control: {
-    backgroundImage: 'linear-gradient(180deg, #101728, #0b1120)',
-  },
-  stardustCard: {
-    backgroundImage: 'linear-gradient(180deg, #0f1524 0%, #0a0f1c 100%)',
-  },
+  card: gradient('linear-gradient(180deg, #0f1524 0%, #0b1120 100%)', COLORS.bgCard),
+  control: gradient('linear-gradient(180deg, #101728, #0b1120)', COLORS.bgCardAlt),
+  stardustCard: gradient('linear-gradient(180deg, #0f1524 0%, #0a0f1c 100%)', COLORS.bgCard),
   ctaBlue: {
-    backgroundImage: 'linear-gradient(180deg, #4fb3ff 0%, #2a8ed6 100%)',
+    ...gradient('linear-gradient(180deg, #4fb3ff 0%, #2a8ed6 100%)', COLORS.accentBlue),
     boxShadow: '0 0 24px rgba(79,179,255,.35), inset 0 1px 0 rgba(255,255,255,.4)',
   },
   ctaBlueSmall: {
-    backgroundImage: 'linear-gradient(180deg, #4fb3ff 0%, #2a8ed6 100%)',
+    ...gradient('linear-gradient(180deg, #4fb3ff 0%, #2a8ed6 100%)', COLORS.accentBlue),
     boxShadow: '0 0 20px rgba(79,179,255,.35)',
   },
   ctaGold: {
-    backgroundImage: 'linear-gradient(180deg, #f5c518 0%, #c99b0a 100%)',
+    ...gradient('linear-gradient(180deg, #f5c518 0%, #c99b0a 100%)', COLORS.accentGold),
     boxShadow: '0 0 20px rgba(245,197,24,.35)',
   },
-  bubbleMe: {
-    backgroundImage: 'linear-gradient(180deg, #4fb3ff 0%, #2a8ed6 100%)',
-  },
+  bubbleMe: gradient('linear-gradient(180deg, #4fb3ff 0%, #2a8ed6 100%)', COLORS.accentBlue),
   avatarHero: {
-    backgroundImage: 'linear-gradient(135deg, #4fb3ff, #2a4a80)',
+    ...gradient('linear-gradient(135deg, #4fb3ff, #2a4a80)', COLORS.accentBlue),
     boxShadow: '0 0 26px rgba(79,179,255,.35)',
   },
-  lockedBanner: {
-    backgroundImage: 'linear-gradient(90deg, rgba(245,197,24,.12), rgba(245,197,24,.04))',
-  },
-  ctaFade: {
-    backgroundImage: 'linear-gradient(180deg, transparent, #0a0f1c 30%)',
-  },
-  profileHero: {
-    backgroundImage:
-      'radial-gradient(ellipse at 20% 0%, rgba(79,179,255,.18), transparent 65%), linear-gradient(180deg, #0f1524, #0a0f1c)',
-  },
-  divider: {
-    backgroundImage: 'linear-gradient(90deg, #1e2436, transparent)',
-  },
+  lockedBanner: gradient(
+    'linear-gradient(90deg, rgba(245,197,24,.12), rgba(245,197,24,.04))',
+    'rgba(245,197,24,.08)'
+  ),
+  ctaFade: gradient('linear-gradient(180deg, transparent, #0a0f1c 30%)', COLORS.bgPanel),
+  profileHero: gradient(
+    'radial-gradient(ellipse at 20% 0%, rgba(79,179,255,.18), transparent 65%), linear-gradient(180deg, #0f1524, #0a0f1c)',
+    COLORS.bgCard
+  ),
+  divider: gradient('linear-gradient(90deg, #1e2436, transparent)', COLORS.borderStrong),
 };
 
 export const luckyShimmerGradient =
@@ -145,7 +136,11 @@ export function hueBadgeStyle(hue: number): ViewStyle {
 }
 
 export function partnerAvatarGradient(partner: string): ViewStyle {
-  const a = partner.charCodeAt(0) * 7 % 360;
-  const b = (partner.charCodeAt(1) ?? partner.charCodeAt(0)) * 11 % 360;
+  const c0 = partner.charCodeAt(0);
+  const c1 = partner.charCodeAt(1);
+  const a = (c0 * 7) % 360;
+  // charCodeAt returns NaN (not undefined) past the string's end, so `??` never
+  // catches a single-character name — fall back to c0 explicitly instead.
+  const b = ((Number.isNaN(c1) ? c0 : c1) * 11) % 360;
   return { backgroundImage: `linear-gradient(135deg, hsl(${a}, 55%, 45%), hsl(${b}, 55%, 25%))` };
 }
