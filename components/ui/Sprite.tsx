@@ -29,6 +29,7 @@ export function Sprite({ pokemonId, hue, shiny = false, size = 72 }: SpriteProps
         transition={150}
         accessibilityIgnoresInvertColors
         alt={`Pokemon ${pokemonId} sprite`}
+        accessibilityLabel={`Pokemon ${pokemonId} sprite`}
       />
       {shiny && (
         <View

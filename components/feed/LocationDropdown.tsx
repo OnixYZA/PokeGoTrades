@@ -4,11 +4,11 @@ import { ChevronDown, MapPin } from 'lucide-react-native';
 
 import { Dropdown } from '@/components/ui/Dropdown';
 import { SURFACE } from '@/constants/theme';
-import { listings, locations } from '@/data/listings';
+import { locations } from '@/data/listings';
 import { useTradeStore } from '@/store/trade-store';
 
 export function LocationDropdown() {
-  const { filterLocation, setFilterLocation } = useTradeStore();
+  const { filterLocation, setFilterLocation, listings } = useTradeStore();
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<View>(null);
 
@@ -18,7 +18,7 @@ export function LocationDropdown() {
         ref={anchorRef}
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
-        accessibilityLabel={`Filter by location, currently ${filterLocation}`}
+        accessibilityHint="Change the location filter"
         accessibilityState={{ expanded: open }}
         className="flex-row items-center gap-2 rounded-xl border border-border-strong px-3 py-2.5 active:opacity-80"
         style={SURFACE.control}

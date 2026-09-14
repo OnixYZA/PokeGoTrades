@@ -1,46 +1,177 @@
-import { useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, Text, View, type ViewStyle } from 'react-native';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowRight, Calendar, Check, CheckSquare, Image as ImageIcon, Plus, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Calendar,
+  Check,
+  CheckSquare,
+  Image as ImageIcon,
+  Plus,
+  Search,
+  Sparkles,
+  Star,
+  X,
+} from 'lucide-react-native';
+
+import { ListingCard } from '@/components/feed/ListingCard';
+import { useTradeStore } from '@/store/trade-store';
+import type { BackgroundHint, CreatureRef, Listing, TradeType } from '@/data/types';
 
 import { MODAL_COLORS, MODAL_SURFACE, monogramGradient } from './tokens';
 
 const C = MODAL_COLORS;
 
+interface CreatureOption {
+  label: string;
+  from: string;
+  to: string;
+  name: string;
+  meta: string;
+  pokemonId: number;
+  hue: number;
+}
+
+const CREATURE_OPTIONS: CreatureOption[] = [
+  { label: 'Ch', from: '#f97316', to: '#dc2626', name: 'Charizard', meta: '#006 · Fire / Flying', pokemonId: 6, hue: 18 },
+  { label: 'Ch', from: '#fb923c', to: '#ea580c', name: 'Charmeleon', meta: '#005 · Fire', pokemonId: 5, hue: 18 },
+  { label: 'Ch', from: '#fdba74', to: '#f97316', name: 'Charmander', meta: '#004 · Fire', pokemonId: 4, hue: 18 },
+  { label: 'Bl', from: '#60a5fa', to: '#2563eb', name: 'Blastoise', meta: '#009 · Water', pokemonId: 9, hue: 205 },
+  { label: 'Ve', from: '#86efac', to: '#16a34a', name: 'Venusaur', meta: '#003 · Grass / Poison', pokemonId: 3, hue: 130 },
+];
+
+interface WantedCreature {
+  label: string;
+  from: string;
+  to: string;
+  name: string;
+  dex: string;
+  pokemonId: number;
+  hue: number;
+}
+
+const WANTED_POOL: WantedCreature[] = [
+  { label: 'Mw', from: '#a78bfa', to: '#7c3aed', name: 'Mewtwo', dex: '#150', pokemonId: 150, hue: 275 },
+  { label: 'Ar', from: '#60a5fa', to: '#2563eb', name: 'Articuno', dex: '#144', pokemonId: 144, hue: 210 },
+  { label: 'Zp', from: '#fde68a', to: '#f59e0b', name: 'Zapdos', dex: '#145', pokemonId: 145, hue: 48 },
+  { label: 'Mo', from: '#fca5a5', to: '#dc2626', name: 'Moltres', dex: '#146', pokemonId: 146, hue: 15 },
+  { label: 'Dn', from: '#93c5fd', to: '#1d4ed8', name: 'Dragonite', dex: '#149', pokemonId: 149, hue: 205 },
+];
+
+type Step = 'form' | 'preview';
+
 interface CreateListingModalProps {
   onClose?: () => void;
   onSave?: () => void;
-  onSelectCreature?: (name: string) => void;
-  onRemoveScreenshot?: () => void;
-  onAddWanted?: () => void;
-  onRemoveWanted?: (name: string) => void;
-  onContinue?: () => void;
+  /** Fired when the trainer confirms the preview — the caller is expected to append the listing
+   *  to the global store. */
+  onPublish?: (listing: Listing) => void;
 }
 
-/** Full-screen "Create Listing" seller flow — static layout match of the design handoff, wired for local interactivity (toggles, reason selection) with onPress hooks left open for the caller. */
-export function CreateListingModal({
-  onClose,
-  onSave,
-  onSelectCreature,
-  onRemoveScreenshot,
-  onAddWanted,
-  onRemoveWanted,
-  onContinue,
-}: CreateListingModalProps) {
+/** Full-screen "Create Listing" seller flow, wired for local interactivity — a working creature
+ *  search, editable "wanted in return" slots, and a preview step that renders the real
+ *  `ListingCard` before the listing is appended to the store. */
+export function CreateListingModal({ onClose, onSave, onPublish }: CreateListingModalProps) {
   const insets = useSafeAreaInsets();
+  const { filterLocation } = useTradeStore();
+
+  const [step, setStep] = useState<Step>('form');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCreature, setSelectedCreature] = useState<CreatureOption | null>(CREATURE_OPTIONS[0]);
   const [shiny, setShiny] = useState(true);
   const [purified, setPurified] = useState(false);
   const [specialBackground, setSpecialBackground] = useState(true);
+  const [wanted, setWanted] = useState<WantedCreature[]>(WANTED_POOL.slice(0, 2));
+
+  const previewListing = useMemo<Listing | null>(() => {
+    if (!selectedCreature) return null;
+    const bg: BackgroundHint = shiny ? 'shiny' : specialBackground ? 'legacy' : 'meta';
+    const tradeType: TradeType = shiny ? 'Unregistered (Shiny/Legendary)' : 'Unregistered (Standard)';
+    const looking: CreatureRef[] = wanted.map((w) => ({ name: w.name, pokemonId: w.pokemonId, hue: w.hue }));
+
+    return {
+      id: `draft-${selectedCreature.pokemonId}-${Date.now()}`,
+      name: selectedCreature.name,
+      pokemonId: selectedCreature.pokemonId,
+      hue: selectedCreature.hue,
+      form: purified ? 'Purified' : 'Standard',
+      year: new Date().getFullYear(),
+      lucky: true,
+      shiny,
+      accent: '#fbbf24',
+      bg,
+      seller: 'You',
+      dist: 0,
+      loc: filterLocation,
+      pvp: 'NEW',
+      demand: 'NEW',
+      tradeType,
+      iv: 'Unrated',
+      looking,
+    };
+  }, [selectedCreature, shiny, purified, specialBackground, wanted, filterLocation]);
+
+  const addWanted = () => {
+    if (wanted.length >= 3) return;
+    const next = WANTED_POOL.find((w) => !wanted.some((existing) => existing.name === w.name));
+    if (next) setWanted((prev) => [...prev, next]);
+  };
+
+  const removeWanted = (name: string) => {
+    setWanted((prev) => prev.filter((w) => w.name !== name));
+  };
+
+  const goToPreview = () => {
+    if (!selectedCreature) return;
+    setStep('preview');
+  };
+
+  const publish = () => {
+    if (!previewListing) return;
+    onPublish?.(previewListing);
+  };
+
+  if (step === 'preview' && previewListing) {
+    return (
+      <View className="flex-1" style={{ backgroundColor: C.bgSurface, paddingTop: insets.top }}>
+        <Header onClose={onClose} onSave={onSave} />
+        <ProgressBar filled={3} />
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24, gap: 16 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View>
+            <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+              PREVIEW
+            </Text>
+            <Text style={{ fontSize: 13, color: C.textSecondary, lineHeight: 19 }}>
+              This is how your listing will appear in the feed. Nothing is posted yet.
+            </Text>
+          </View>
+          <View pointerEvents="none">
+            <ListingCard listing={previewListing} />
+          </View>
+        </ScrollView>
+        <PreviewFooter onBack={() => setStep('form')} onPublish={publish} bottomInset={insets.bottom} />
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1" style={{ backgroundColor: C.bgSurface, paddingTop: insets.top }}>
       <Header onClose={onClose} onSave={onSave} />
-      <ProgressBar />
+      <ProgressBar filled={2} />
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24, gap: 24 }}
         showsVerticalScrollIndicator={false}
       >
-        <CreatureSelector onSelectCreature={onSelectCreature} />
+        <CreatureSelector
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          selected={selectedCreature}
+          onSelect={setSelectedCreature}
+        />
         <AttributesCard
           shiny={shiny}
           onToggleShiny={() => setShiny((v) => !v)}
@@ -49,10 +180,10 @@ export function CreateListingModal({
           specialBackground={specialBackground}
           onToggleSpecialBackground={() => setSpecialBackground((v) => !v)}
         />
-        <AppraisalSection onRemoveScreenshot={onRemoveScreenshot} />
-        <WantedInReturn onAddWanted={onAddWanted} onRemoveWanted={onRemoveWanted} />
+        <AppraisalSection />
+        <WantedInReturn wanted={wanted} onAddWanted={addWanted} onRemoveWanted={removeWanted} />
       </ScrollView>
-      <Footer onContinue={onContinue} bottomInset={insets.bottom} />
+      <Footer onContinue={goToPreview} disabled={!selectedCreature} bottomInset={insets.bottom} />
     </View>
   );
 }
@@ -92,16 +223,16 @@ function Header({ onClose, onSave }: { onClose?: () => void; onSave?: () => void
   );
 }
 
-function ProgressBar() {
+function ProgressBar({ filled }: { filled: number }) {
   return (
     <View className="px-5 pt-1">
       <View
         className="flex-row gap-[3px] overflow-hidden rounded-full"
         style={{ height: 3, backgroundColor: C.bgCard }}
       >
-        <View className="flex-1" style={{ backgroundColor: C.gold }} />
-        <View className="flex-1" style={{ backgroundColor: C.gold }} />
-        <View className="flex-1" style={{ backgroundColor: C.borderDefault }} />
+        {[0, 1, 2].map((i) => (
+          <View key={i} className="flex-1" style={{ backgroundColor: i < filled ? C.gold : C.borderDefault }} />
+        ))}
       </View>
     </View>
   );
@@ -134,12 +265,18 @@ function MonogramTile({
   );
 }
 
-function CreatureSelector({ onSelectCreature }: { onSelectCreature?: (name: string) => void }) {
-  const matches = [
-    { label: 'Ch', from: '#f97316', to: '#dc2626', name: 'Charizard', meta: '#006 · Fire / Flying', focused: true },
-    { label: 'Ch', from: '#fb923c', to: '#ea580c', name: 'Charmeleon', meta: '#005 · Fire' },
-    { label: 'Ch', from: '#fdba74', to: '#f97316', name: 'Charmander', meta: '#004 · Fire' },
-  ];
+function CreatureSelector({
+  query,
+  onQueryChange,
+  selected,
+  onSelect,
+}: {
+  query: string;
+  onQueryChange: (query: string) => void;
+  selected: CreatureOption | null;
+  onSelect: (creature: CreatureOption) => void;
+}) {
+  const matches = CREATURE_OPTIONS.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
     <View>
@@ -156,50 +293,67 @@ function CreatureSelector({ onSelectCreature }: { onSelectCreature?: (name: stri
         <View className="absolute left-4 z-10">
           <Search size={18} color={C.textMuted} />
         </View>
-        <View
+        <TextInput
+          value={query}
+          onChangeText={onQueryChange}
+          placeholder="Search a creature…"
+          placeholderTextColor={C.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Search creature name"
           className="rounded-[14px] border py-4 pl-[46px] pr-4"
           style={{
             backgroundColor: C.bgCard,
             borderColor: C.gold,
             boxShadow: '0 0 0 4px rgba(251,191,36,0.08)',
+            fontSize: 15,
+            fontWeight: '500',
+            color: C.textPrimary,
           }}
-        >
-          <Text style={{ fontSize: 15, fontWeight: '500', color: C.textPrimary }}>charizar</Text>
-        </View>
+        />
       </View>
 
       <View
         className="mt-2 overflow-hidden rounded-[14px] border"
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
-        {matches.map((row, i) => (
-          <Pressable
-            key={row.name}
-            onPress={() => onSelectCreature?.(row.name)}
-            accessibilityRole="menuitem"
-            accessibilityLabel={`Select ${row.name}, ${row.meta}`}
-            accessibilityState={{ selected: row.focused }}
-            className="flex-row items-center gap-3 px-4 py-3 active:opacity-80"
-            style={
-              row.focused
-                ? {
-                    borderLeftWidth: 2,
-                    borderLeftColor: C.gold,
-                    backgroundImage: 'linear-gradient(90deg, rgba(251,191,36,0.08), transparent)',
-                  }
-                : { borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.borderSubtle }
-            }
-          >
-            <MonogramTile label={row.label} from={row.from} to={row.to} />
-            <View className="flex-1">
-              <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>{row.name}</Text>
-              <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
-                {row.meta}
-              </Text>
-            </View>
-            {row.focused ? <Check size={18} color={C.gold} strokeWidth={2.5} /> : null}
-          </Pressable>
-        ))}
+        {matches.length === 0 ? (
+          <View className="px-4 py-4">
+            <Text style={{ fontSize: 13, color: C.textMuted }}>No matches for &ldquo;{query}&rdquo;</Text>
+          </View>
+        ) : (
+          matches.map((row, i) => {
+            const focused = selected?.name === row.name;
+            return (
+              <Pressable
+                key={row.name}
+                onPress={() => onSelect(row)}
+                accessibilityRole="menuitem"
+                accessibilityLabel={`Select ${row.name}, ${row.meta}`}
+                accessibilityState={{ selected: focused }}
+                className="flex-row items-center gap-3 px-4 py-3 active:opacity-80"
+                style={
+                  focused
+                    ? {
+                        borderLeftWidth: 2,
+                        borderLeftColor: C.gold,
+                        backgroundImage: 'linear-gradient(90deg, rgba(251,191,36,0.08), transparent)',
+                      }
+                    : { borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.borderSubtle }
+                }
+              >
+                <MonogramTile label={row.label} from={row.from} to={row.to} />
+                <View className="flex-1">
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>{row.name}</Text>
+                  <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
+                    {row.meta}
+                  </Text>
+                </View>
+                {focused ? <Check size={18} color={C.gold} strokeWidth={2.5} /> : null}
+              </Pressable>
+            );
+          })
+        )}
       </View>
     </View>
   );
@@ -317,7 +471,7 @@ function AttributesCard({
   );
 }
 
-function AppraisalSection({ onRemoveScreenshot }: { onRemoveScreenshot?: () => void }) {
+function AppraisalSection() {
   return (
     <View>
       <View className="mb-2.5 flex-row items-center justify-between">
@@ -355,15 +509,6 @@ function AppraisalSection({ onRemoveScreenshot }: { onRemoveScreenshot?: () => v
             2.1 MB · scanned in 1.2s
           </Text>
         </View>
-        <Pressable
-          onPress={onRemoveScreenshot}
-          accessibilityRole="button"
-          accessibilityLabel="Remove screenshot"
-          className="h-10 w-10 items-center justify-center rounded-[10px] border active:opacity-70"
-          style={{ borderColor: C.borderDefault }}
-        >
-          <Trash2 size={16} color={C.textSecondary} strokeWidth={2.5} />
-        </Pressable>
       </View>
 
       <View
@@ -453,9 +598,11 @@ function WantedSlot({
 }
 
 function WantedInReturn({
+  wanted,
   onAddWanted,
   onRemoveWanted,
 }: {
+  wanted: WantedCreature[];
   onAddWanted?: () => void;
   onRemoveWanted?: (name: string) => void;
 }) {
@@ -466,44 +613,49 @@ function WantedInReturn({
           WANTED IN RETURN
         </Text>
         <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>
-          2 / 3
+          {wanted.length} / 3
         </Text>
       </View>
       <View className="flex-row gap-2">
-        <WantedSlot
-          label="Mw"
-          from="#a78bfa"
-          to="#7c3aed"
-          name="Mewtwo"
-          dex="#150"
-          onRemove={() => onRemoveWanted?.('Mewtwo')}
-        />
-        <WantedSlot
-          label="Ar"
-          from="#60a5fa"
-          to="#2563eb"
-          name="Articuno"
-          dex="#144"
-          onRemove={() => onRemoveWanted?.('Articuno')}
-        />
-        <Pressable
-          onPress={onAddWanted}
-          accessibilityRole="button"
-          accessibilityLabel="Add wanted creature"
-          className="aspect-square flex-1 items-center justify-center gap-1 rounded-xl border border-dashed active:opacity-70"
-          style={{ borderColor: C.borderDefault }}
-        >
-          <Plus size={20} color={C.textDim} strokeWidth={2} />
-          <Text className="font-mono" style={{ fontSize: 10, color: C.textDim, letterSpacing: 0.5 }}>
-            ADD
-          </Text>
-        </Pressable>
+        {wanted.map((w) => (
+          <WantedSlot
+            key={w.name}
+            label={w.label}
+            from={w.from}
+            to={w.to}
+            name={w.name}
+            dex={w.dex}
+            onRemove={() => onRemoveWanted?.(w.name)}
+          />
+        ))}
+        {wanted.length < 3 && (
+          <Pressable
+            onPress={onAddWanted}
+            accessibilityRole="button"
+            accessibilityLabel="Add wanted creature"
+            className="aspect-square flex-1 items-center justify-center gap-1 rounded-xl border border-dashed active:opacity-70"
+            style={{ borderColor: C.borderDefault }}
+          >
+            <Plus size={20} color={C.textDim} strokeWidth={2} />
+            <Text className="font-mono" style={{ fontSize: 10, color: C.textDim, letterSpacing: 0.5 }}>
+              ADD
+            </Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
 }
 
-function Footer({ onContinue, bottomInset = 0 }: { onContinue?: () => void; bottomInset?: number }) {
+function Footer({
+  onContinue,
+  disabled,
+  bottomInset = 0,
+}: {
+  onContinue?: () => void;
+  disabled?: boolean;
+  bottomInset?: number;
+}) {
   return (
     <View
       className="border-t px-5 pt-4"
@@ -514,16 +666,60 @@ function Footer({ onContinue, bottomInset = 0 }: { onContinue?: () => void; bott
       }}
     >
       <Pressable
-        onPress={onContinue}
+        onPress={disabled ? undefined : onContinue}
+        disabled={disabled}
         accessibilityRole="button"
-        accessibilityLabel="Continue to preview"
-        className="flex-row items-center justify-center gap-2 rounded-2xl py-4 active:opacity-90"
+        accessibilityLabel="Preview listing"
+        className={`flex-row items-center justify-center gap-2 rounded-2xl py-4 ${disabled ? 'opacity-50' : 'active:opacity-90'}`}
         style={MODAL_SURFACE.ctaGold}
       >
         <Text className="font-display" style={{ fontSize: 15, color: '#0a0a0f', letterSpacing: -0.15 }}>
-          Continue to Preview
+          Preview Listing
         </Text>
         <ArrowRight size={18} color="#0a0a0f" strokeWidth={2.5} />
+      </Pressable>
+    </View>
+  );
+}
+
+function PreviewFooter({
+  onBack,
+  onPublish,
+  bottomInset = 0,
+}: {
+  onBack?: () => void;
+  onPublish?: () => void;
+  bottomInset?: number;
+}) {
+  return (
+    <View
+      className="gap-2.5 border-t px-5 pt-4"
+      style={{
+        borderTopColor: C.borderSubtle,
+        backgroundImage: 'linear-gradient(180deg, transparent, #0d0d14 30%)',
+        paddingBottom: Math.max(bottomInset, 24),
+      }}
+    >
+      <Pressable
+        onPress={onPublish}
+        accessibilityRole="button"
+        accessibilityLabel="Post listing"
+        className="flex-row items-center justify-center gap-2 rounded-2xl py-4 active:opacity-90"
+        style={MODAL_SURFACE.ctaGreen}
+      >
+        <Check size={18} color={C.successText} strokeWidth={2.5} />
+        <Text className="font-display" style={{ fontSize: 15, color: C.successText, letterSpacing: -0.15 }}>
+          Post Listing
+        </Text>
+      </Pressable>
+      <Pressable
+        onPress={onBack}
+        accessibilityRole="button"
+        accessibilityLabel="Back to edit"
+        className="flex-row items-center justify-center gap-2 py-2 active:opacity-70"
+      >
+        <ArrowLeft size={16} color={C.textMuted} strokeWidth={2.5} />
+        <Text style={{ fontSize: 13, fontWeight: '600', color: C.textMuted }}>Back to Edit</Text>
       </Pressable>
     </View>
   );

@@ -40,10 +40,20 @@ export interface Listing extends CreatureRef {
   untradable?: boolean;
 }
 
+export interface FormalOffer {
+  name: string;
+  pokemonId: number;
+  hue: number;
+  iv?: string;
+  move?: string;
+}
+
 export interface ChatMessage {
   role: 'them' | 'me';
   text: string;
   time: string;
+  /** Present when this message is an auto-sent formal-offer card rather than plain text. */
+  offer?: FormalOffer;
 }
 
 export interface Chat {
@@ -54,6 +64,18 @@ export interface Chat {
   unread: number;
   active: boolean;
   offers: ChatMessage[];
+  /** Set on every other chat for the same listing once one of them locks the trade. */
+  isFrozen?: boolean;
+  /** Set once the trade is marked completed — hidden from the active inbox. */
+  archived?: boolean;
+}
+
+export interface TradeHistoryEntry {
+  id: string;
+  gave: CreatureRef;
+  got: CreatureRef;
+  partner: string;
+  date: string;
 }
 
 export interface Trainer {
@@ -68,4 +90,5 @@ export interface Trainer {
   streak: number;
   arsenal: CreatureRef[];
   wishlist: CreatureRef[];
+  tradeHistory: TradeHistoryEntry[];
 }

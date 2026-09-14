@@ -46,7 +46,7 @@ export function StatTile({
         <Text className={mono ? 'font-mono-semi' : 'font-display'} style={{ fontSize: valueSize, color }}>
           {value}
         </Text>
-        {suffix ? <Text style={{ fontSize: 11, color: '#4a5169', fontWeight: '600' }}>{suffix}</Text> : null}
+        {suffix ? <Text style={{ fontSize: 11, color: '#8A93A6', fontWeight: '600' }}>{suffix}</Text> : null}
       </View>
     </View>
   );

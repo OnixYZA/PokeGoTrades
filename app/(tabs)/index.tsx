@@ -8,11 +8,10 @@ import { CreateListingModal } from '@/components/modals/CreateListingModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { StatTile } from '@/components/ui/StatTile';
 import { SURFACE } from '@/constants/theme';
-import { listings } from '@/data/listings';
 import { useTradeStore } from '@/store/trade-store';
 
 export default function FeedScreen() {
-  const { filterLocation } = useTradeStore();
+  const { filterLocation, listings, addListing } = useTradeStore();
   const [showCreateListing, setShowCreateListing] = useState(false);
 
   const filtered = listings.filter((l) => l.loc === filterLocation).sort((a, b) => a.dist - b.dist);
@@ -92,7 +91,10 @@ export default function FeedScreen() {
         <CreateListingModal
           onClose={() => setShowCreateListing(false)}
           onSave={() => setShowCreateListing(false)}
-          onContinue={() => setShowCreateListing(false)}
+          onPublish={(listing) => {
+            addListing(listing);
+            setShowCreateListing(false);
+          }}
         />
       </Modal>
     </View>

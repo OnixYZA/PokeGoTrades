@@ -24,4 +24,34 @@ export const trainer: Trainer = {
     { name: 'Purified Apex Lugia', pokemonId: 249, hue: 285, shiny: true },
     { name: 'Sh. Mew', pokemonId: 151, hue: 320, shiny: true },
   ],
+  tradeHistory: [
+    {
+      id: 'th1',
+      gave: { name: 'Zapdos', pokemonId: 145, hue: 48 },
+      got: { name: 'Sh. Charizard', pokemonId: 6, hue: 18, shiny: true },
+      partner: 'MintRunner',
+      date: 'Aug 22, 2026',
+    },
+    {
+      id: 'th2',
+      gave: { name: 'Sh. Blastoise', pokemonId: 9, hue: 205, shiny: true },
+      got: { name: 'Articuno', pokemonId: 144, hue: 210 },
+      partner: 'CobaltAsh',
+      date: 'Jul 30, 2026',
+    },
+    {
+      id: 'th3',
+      gave: { name: 'Moltres', pokemonId: 146, hue: 15 },
+      got: { name: 'Sh. Venusaur', pokemonId: 3, hue: 130, shiny: true },
+      partner: 'PixelKite',
+      date: 'Jun 14, 2026',
+    },
+    {
+      id: 'th4',
+      gave: { name: 'Groudon', pokemonId: 383, hue: 25 },
+      got: { name: 'Sh. Garchomp', pokemonId: 445, hue: 220, shiny: true },
+      partner: 'SolstonKid',
+      date: 'May 3, 2026',
+    },
+  ],
 };

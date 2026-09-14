@@ -12,7 +12,7 @@ interface TabBarButtonProps extends TabTriggerSlotProps {
  *  optional unread-count badge (Chats). `isFocused` is forwarded by TabTrigger via `asChild`. */
 export const TabBarButton = forwardRef<View, TabBarButtonProps>(
   ({ icon, label, badge, isFocused, ...props }, ref) => {
-    const color = isFocused ? '#4fb3ff' : '#4a5169';
+    const color = isFocused ? '#4fb3ff' : '#8A93A6';
 
     return (
       <Pressable

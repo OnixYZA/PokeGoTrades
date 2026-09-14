@@ -1,5 +1,7 @@
-import { Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { Pressable, Text, View } from 'react-native';
 
+import { Avatar } from '@/components/ui/Avatar';
 import { Chip } from '@/components/ui/Chip';
 import type { Listing } from '@/data/types';
 
@@ -23,12 +25,24 @@ export function ChatGroupHeader({ listing, offerCount, locked }: ChatGroupHeader
         </Text>
       </View>
       {locked && (
-        <View className="rounded-full px-2 py-[3px]" style={{ backgroundColor: 'rgba(245,197,24,.14)' }}>
+        <View className="mr-1 rounded-full px-2 py-[3px]" style={{ backgroundColor: 'rgba(245,197,24,.14)' }}>
           <Text className="font-display" style={{ fontSize: 9, letterSpacing: 1, color: '#f5c518' }}>
             LOCKED
           </Text>
         </View>
       )}
+      <Pressable
+        onPress={() => router.push(`/profile/${encodeURIComponent(listing.seller)}`)}
+        accessibilityRole="button"
+        accessibilityLabel={`View ${listing.seller}'s profile`}
+        hitSlop={4}
+        className="flex-row items-center gap-1.5 rounded-full border border-border-subtle bg-bg-panel py-1 pl-1 pr-2 active:opacity-70"
+      >
+        <Avatar name={listing.seller} size={20} radius={7} fontSize={10} />
+        <Text numberOfLines={1} className="font-mono-semi text-text-subtle" style={{ fontSize: 10, maxWidth: 84 }}>
+          {listing.seller}
+        </Text>
+      </Pressable>
     </View>
   );
 }
