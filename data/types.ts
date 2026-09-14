@@ -1,16 +1,24 @@
 export type BackgroundHint = 'meta' | 'legacy' | 'shiny' | 'shadow';
 
-export type TradeType = 
+export type TradeType =
   | 'Standard / Registered'
   | 'Special (Shiny/Legendary) Registered'
   | 'Unregistered (Standard)'
   | 'Unregistered (Shiny/Legendary)';
 
-export const TRADE_COST_MATRIX: Record<TradeType, number> = {
-  'Standard / Registered': 100,
-  'Special (Shiny/Legendary) Registered': 20000,
-  'Unregistered (Standard)': 20000,
-  'Unregistered (Shiny/Legendary)': 1000000,
+/** Friendship tier, from lowest to highest. Drives the Stardust discount in `TRADE_COST_MATRIX`. */
+export type FriendshipLabel = 'Good' | 'Great' | 'Ultra' | 'Best';
+
+/**
+ * Single source of truth for Stardust cost, by trade type and friendship tier. Standard trades
+ * stay flat at the base cost regardless of friendship (matches live game behavior); only Special
+ * and Unregistered trades get the friendship discount.
+ */
+export const TRADE_COST_MATRIX: Record<TradeType, Record<FriendshipLabel, number>> = {
+  'Standard / Registered': { Good: 100, Great: 100, Ultra: 100, Best: 100 },
+  'Special (Shiny/Legendary) Registered': { Good: 20000, Great: 16000, Ultra: 1600, Best: 800 },
+  'Unregistered (Standard)': { Good: 20000, Great: 16000, Ultra: 1600, Best: 800 },
+  'Unregistered (Shiny/Legendary)': { Good: 1000000, Great: 800000, Ultra: 80000, Best: 40000 },
 };
 
 export interface CreatureRef {
@@ -70,11 +78,15 @@ export interface Chat {
   preview: string;
   unread: number;
   active: boolean;
-  offers: ChatMessage[];
-  /** Set on every other chat for the same listing once one of them locks the trade. */
-  isFrozen?: boolean;
   /** Set once the trade is marked completed — hidden from the active inbox. */
   archived?: boolean;
+}
+
+/** A `Chat` plus its opening messages, as seeded from `data/chats.ts` or created via `addChat`.
+ *  The store splits `offers` into its own normalized `messages` slice on ingest — a live `Chat`
+ *  record never carries messages directly, so there's exactly one place they can drift. */
+export interface ChatSeed extends Chat {
+  offers: ChatMessage[];
 }
 
 export interface TradeHistoryEntry {

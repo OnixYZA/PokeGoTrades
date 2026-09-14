@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, Handshake } from 'lucide-react-native';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useShallow } from 'zustand/react/shallow';
 
 import { ArsenalOfferSheet } from '@/components/chats/ArsenalOfferSheet';
 import { ChatActionRow } from '@/components/chats/ChatActionRow';
@@ -15,51 +16,50 @@ import type { BailReason } from '@/components/modals/BailBlockModal';
 import { HandshakeModal } from '@/components/modals/HandshakeModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { IconButton } from '@/components/ui/IconButton';
-import { fallbackOffers } from '@/data/chats';
-import type { ChatMessage, CreatureRef } from '@/data/types';
-import { useTradeStore } from '@/store/trade-store';
+import type { CreatureRef } from '@/data/types';
+import { selectChatPhase, useTradeStore } from '@/store/trade-store';
 
 export default function ActiveChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const insets = useSafeAreaInsets();
-  const { chats, listings, isChatLocked, lockChat, unlockChat, removeChat, archiveChat, removeListing } =
-    useTradeStore();
 
-  const chat = chats.find((c) => c.id === chatId);
-  const listing = chat ? listings.find((l) => l.id === chat.listingId) : undefined;
+  const chat = useTradeStore((s) => (chatId ? s.chats[chatId] : undefined));
+  const listing = useTradeStore((s) => (chat ? s.listings[chat.listingId] : undefined));
+  const messages = useTradeStore(useShallow((s) => (chatId ? (s.messages[chatId] ?? []) : [])));
+  const phase = useTradeStore((s) => selectChatPhase(s, chatId ?? ''));
+  const lockChat = useTradeStore((s) => s.lockChat);
+  const unlockChat = useTradeStore((s) => s.unlockChat);
+  const removeChat = useTradeStore((s) => s.removeChat);
+  const archiveChat = useTradeStore((s) => s.archiveChat);
+  const removeListing = useTradeStore((s) => s.removeListing);
+  const sendMessageToStore = useTradeStore((s) => s.sendMessage);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    chat && chat.offers.length ? chat.offers : fallbackOffers(listing?.name ?? ''),
-  );
   const [draft, setDraft] = useState('');
   const [showArsenal, setShowArsenal] = useState(false);
   const [showHandshake, setShowHandshake] = useState(false);
 
-  if (!chat) return null;
+  if (!chat || !chatId) return null;
 
-  const isLocked = isChatLocked(chat.id);
-  const locked = isLocked || !chat.active;
-  const frozen = !!chat.isFrozen;
+  const isLocked = phase === 'locked';
+  const locked = phase === 'locked' || phase === 'closed';
+  const frozen = phase === 'frozen';
 
   const sendMessage = () => {
     const text = draft.trim();
     if (!text) return;
     const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    setMessages((prev) => [...prev, { role: 'me', text, time }]);
+    sendMessageToStore(chatId, { role: 'me', text, time });
     setDraft('');
   };
 
   const sendFormalOffer = (creature: CreatureRef) => {
     const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: 'me',
-        text: '',
-        time,
-        offer: { name: creature.name, pokemonId: creature.pokemonId, hue: creature.hue, iv: creature.lucky ? 'Lucky' : undefined },
-      },
-    ]);
+    sendMessageToStore(chatId, {
+      role: 'me',
+      text: '',
+      time,
+      offer: { name: creature.name, pokemonId: creature.pokemonId, hue: creature.hue, iv: creature.lucky ? 'Lucky' : undefined },
+    });
     setShowArsenal(false);
   };
 

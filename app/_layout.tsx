@@ -15,8 +15,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
-import { TradeStoreProvider } from '@/store/trade-store';
-
 export { ErrorBoundary } from 'expo-router';
 
 export const unstable_settings = {
@@ -52,25 +50,23 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <TradeStoreProvider>
-          <StatusBar style="light" />
-          <Head>
-            <title>PokeGoTrades</title>
-            <meta name="description" content="Trade Pokemon easily in your local area." />
-          </Head>
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050810' } }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen
-              name="listing/[id]"
-              options={{ presentation: 'transparentModal', animation: 'none' }}
-            />
-            <Stack.Screen name="profile/[userId]" />
-            <Stack.Screen
-              name="test-bail"
-              options={{ presentation: 'transparentModal', animation: 'fade' }}
-            />
-          </Stack>
-        </TradeStoreProvider>
+        <StatusBar style="light" />
+        <Head>
+          <title>PokeGoTrades</title>
+          <meta name="description" content="Trade Pokemon easily in your local area." />
+        </Head>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050810' } }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen
+            name="listing/[id]"
+            options={{ presentation: 'transparentModal', animation: 'none' }}
+          />
+          <Stack.Screen name="profile/[userId]" />
+          <Stack.Screen
+            name="test-bail"
+            options={{ presentation: 'transparentModal', animation: 'fade' }}
+          />
+        </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

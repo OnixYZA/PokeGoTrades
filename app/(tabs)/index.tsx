@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ListFilter, Plus, Search } from 'lucide-react-native';
 import { FlatList, Modal, Pressable, Text, View } from 'react-native';
+import { useShallow } from 'zustand/react/shallow';
 
 import { ListingCard } from '@/components/feed/ListingCard';
 import { LocationDropdown } from '@/components/feed/LocationDropdown';
@@ -11,7 +12,9 @@ import { SURFACE } from '@/constants/theme';
 import { useTradeStore } from '@/store/trade-store';
 
 export default function FeedScreen() {
-  const { filterLocation, listings, addListing } = useTradeStore();
+  const filterLocation = useTradeStore((s) => s.filterLocation);
+  const listings = useTradeStore(useShallow((s) => Object.values(s.listings)));
+  const addListing = useTradeStore((s) => s.addListing);
   const [showCreateListing, setShowCreateListing] = useState(false);
 
   const filtered = listings.filter((l) => l.loc === filterLocation).sort((a, b) => a.dist - b.dist);

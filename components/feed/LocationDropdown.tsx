@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { ChevronDown, MapPin } from 'lucide-react-native';
+import { useShallow } from 'zustand/react/shallow';
 
 import { Dropdown } from '@/components/ui/Dropdown';
 import { SURFACE } from '@/constants/theme';
@@ -8,7 +9,9 @@ import { locations } from '@/data/listings';
 import { useTradeStore } from '@/store/trade-store';
 
 export function LocationDropdown() {
-  const { filterLocation, setFilterLocation, listings } = useTradeStore();
+  const filterLocation = useTradeStore((s) => s.filterLocation);
+  const setFilterLocation = useTradeStore((s) => s.setFilterLocation);
+  const listings = useTradeStore(useShallow((s) => Object.values(s.listings)));
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<View>(null);
 

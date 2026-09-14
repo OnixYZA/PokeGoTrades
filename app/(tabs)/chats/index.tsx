@@ -1,14 +1,18 @@
 import { ScrollView, Text, View } from 'react-native';
+import { useShallow } from 'zustand/react/shallow';
 
 import { ChatGroupHeader } from '@/components/chats/ChatGroupHeader';
 import { ChatRow } from '@/components/chats/ChatRow';
+import type { Chat } from '@/data/types';
 import { useTradeStore } from '@/store/trade-store';
 
 export default function ChatsInboxScreen() {
-  const { chats, listings, isChatLocked } = useTradeStore();
+  const chatsById = useTradeStore(useShallow((s) => s.chats));
+  const listings = useTradeStore(useShallow((s) => s.listings));
+  const lockByListing = useTradeStore(useShallow((s) => s.lockByListing));
 
-  const grouped = new Map<string, typeof chats>();
-  for (const c of chats) {
+  const grouped = new Map<string, Chat[]>();
+  for (const c of Object.values(chatsById)) {
     if (c.archived) continue;
     grouped.set(c.listingId, [...(grouped.get(c.listingId) ?? []), c]);
   }
@@ -26,10 +30,10 @@ export default function ChatsInboxScreen() {
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
         {Array.from(grouped.entries()).map(([listingId, group]) => {
-          const listing = listings.find((l) => l.id === listingId);
+          const listing = listings[listingId];
           if (!listing) return null;
 
-          const lockedChatId = group.find((c) => isChatLocked(c.id))?.id;
+          const lockedChatId = lockByListing[listingId];
           const groupLocked = !!lockedChatId || !group.every((c) => c.active);
 
           return (
@@ -41,6 +45,7 @@ export default function ChatsInboxScreen() {
                     key={chat.id}
                     chat={chat}
                     dimmed={lockedChatId ? chat.id !== lockedChatId : !chat.active}
+                    frozen={!!lockedChatId && chat.id !== lockedChatId}
                   />
                 ))}
               </View>

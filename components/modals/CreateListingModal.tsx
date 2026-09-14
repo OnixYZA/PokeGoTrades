@@ -94,7 +94,7 @@ interface CreateListingModalProps {
  *  `ListingCard` before the listing is appended to the store. */
 export function CreateListingModal({ onClose, onSave, onPublish }: CreateListingModalProps) {
   const insets = useSafeAreaInsets();
-  const { filterLocation } = useTradeStore();
+  const filterLocation = useTradeStore((s) => s.filterLocation);
 
   const [step, setStep] = useState<Step>('form');
   const [searchQuery, setSearchQuery] = useState('');

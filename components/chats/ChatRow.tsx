@@ -6,8 +6,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { PulseDot } from '@/components/ui/PulseDot';
 import type { Chat } from '@/data/types';
 
-export function ChatRow({ chat, dimmed }: { chat: Chat; dimmed: boolean }) {
-  const frozen = !!chat.isFrozen;
+export function ChatRow({ chat, dimmed, frozen }: { chat: Chat; dimmed: boolean; frozen: boolean }) {
   const showActiveDot = chat.active && !dimmed;
 
   return (

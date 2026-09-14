@@ -6,6 +6,8 @@
  */
 import type { ViewStyle } from 'react-native';
 
+import type { FriendshipLabel } from '@/data/types';
+
 import { gradient } from './gradient';
 
 export const COLORS = {
@@ -35,14 +37,12 @@ export const COLORS = {
   accentViolet: '#c9a6ff',
 } as const;
 
-export const FRIENDSHIP_LEVELS = [
-  { label: 'Good', mult: 1, color: COLORS.textMuted },
-  { label: 'Great', mult: 0.8, color: '#7fd4ff' },
-  { label: 'Ultra', mult: 0.08, color: COLORS.accentViolet },
-  { label: 'Best', mult: 0.04, color: COLORS.accentGold },
-] as const;
-
-export type FriendshipLabel = (typeof FRIENDSHIP_LEVELS)[number]['label'];
+export const FRIENDSHIP_LEVELS: { label: FriendshipLabel; color: string }[] = [
+  { label: 'Good', color: COLORS.textMuted },
+  { label: 'Great', color: '#7fd4ff' },
+  { label: 'Ultra', color: COLORS.accentViolet },
+  { label: 'Best', color: COLORS.accentGold },
+];
 
 // ——— static surfaces ———
 

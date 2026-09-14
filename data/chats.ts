@@ -1,6 +1,6 @@
-import type { Chat } from './types';
+import type { ChatMessage, ChatSeed } from './types';
 
-export const chats: Chat[] = [
+export const chats: ChatSeed[] = [
   {
     id: 'c1',
     listingId: 'l1',
@@ -45,7 +45,7 @@ export const chats: Chat[] = [
 ];
 
 /** The default thread shown when a chat has no scripted `offers` of its own. */
-export const fallbackOffers = (listingName: string): Chat['offers'] => [
+export const fallbackOffers = (listingName: string): ChatMessage[] => [
   { role: 'them', text: `Hey, is your ${listingName} still up?`, time: '10:12' },
   { role: 'me', text: 'Yep — what are you offering?', time: '10:14' },
   { role: 'them', text: 'I have a legacy Dragonite with Draco Meteor.', time: '10:17' },

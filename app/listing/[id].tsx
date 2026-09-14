@@ -31,8 +31,8 @@ const DISMISS_THRESHOLD = 120;
 
 export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { listings, addChat } = useTradeStore();
-  const listing = listings.find((l) => l.id === id);
+  const listing = useTradeStore((s) => (id ? s.listings[id] : undefined));
+  const addChat = useTradeStore((s) => s.addChat);
   const insets = useSafeAreaInsets();
   const [showOfferModal, setShowOfferModal] = useState(false);
 

@@ -3,17 +3,10 @@ import { ChevronDown } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 
 import { Dropdown } from '@/components/ui/Dropdown';
-import { FRIENDSHIP_LEVELS, SURFACE, FriendshipLabel } from '@/constants/theme';
+import { FRIENDSHIP_LEVELS, SURFACE } from '@/constants/theme';
 import { fmtDust } from '@/lib/format';
 import { useTradeStore } from '@/store/trade-store';
-import { TradeType } from '@/data/types';
-
-const TRADE_COST_MATRIX: Record<TradeType, Record<FriendshipLabel, number>> = {
-  'Standard / Registered': { Good: 100, Great: 100, Ultra: 100, Best: 100 },
-  'Special (Shiny/Legendary) Registered': { Good: 20000, Great: 16000, Ultra: 1600, Best: 800 },
-  'Unregistered (Standard)': { Good: 20000, Great: 16000, Ultra: 1600, Best: 800 },
-  'Unregistered (Shiny/Legendary)': { Good: 1000000, Great: 800000, Ultra: 80000, Best: 40000 },
-};
+import { TRADE_COST_MATRIX, TradeType } from '@/data/types';
 
 const TRADE_TYPES: TradeType[] = [
   'Standard / Registered',
@@ -23,7 +16,8 @@ const TRADE_TYPES: TradeType[] = [
 ];
 
 export function StardustCard({ initialTradeType }: { initialTradeType: TradeType }) {
-  const { friendship, setFriendship } = useTradeStore();
+  const friendship = useTradeStore((s) => s.friendship);
+  const setFriendship = useTradeStore((s) => s.setFriendship);
   const [friendOpen, setFriendOpen] = useState(false);
   const friendAnchorRef = useRef<View>(null);
 
@@ -32,7 +26,7 @@ export function StardustCard({ initialTradeType }: { initialTradeType: TradeType
   const typeAnchorRef = useRef<View>(null);
 
   const level = FRIENDSHIP_LEVELS.find((f) => f.label === friendship)!;
-  const finalDust = TRADE_COST_MATRIX[tradeType][level.label as FriendshipLabel];
+  const finalDust = TRADE_COST_MATRIX[tradeType][level.label];
 
   return (
     <View className="mb-4 rounded-2xl border border-border p-4" style={SURFACE.stardustCard}>
