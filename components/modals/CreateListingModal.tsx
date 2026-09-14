@@ -189,7 +189,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
               This is how your listing will appear in the feed. Nothing is posted yet.
             </Text>
           </View>
-          <View pointerEvents="none">
+          <View style={{ pointerEvents: 'none' }}>
             <ListingCard listing={previewListing} />
           </View>
           {previewListing.tags && previewListing.tags.length > 0 && (

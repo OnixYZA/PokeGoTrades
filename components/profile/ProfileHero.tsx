@@ -8,9 +8,8 @@ export function ProfileHero({ trainer }: { trainer: Trainer }) {
   return (
     <View className="relative mb-3.5 overflow-hidden rounded-[22px] border border-border p-5" style={SURFACE.profileHero}>
       <View
-        pointerEvents="none"
         className="absolute h-[160px] w-[160px] rounded-full"
-        style={{ top: -30, right: -20, backgroundImage: 'radial-gradient(circle, rgba(245,197,24,.16), transparent 70%)' }}
+        style={{ top: -30, right: -20, pointerEvents: 'none', backgroundImage: 'radial-gradient(circle, rgba(245,197,24,.16), transparent 70%)' }}
       />
 
       <View className="flex-row items-start gap-3.5">

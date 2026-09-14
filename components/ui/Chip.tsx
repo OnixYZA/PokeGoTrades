@@ -31,7 +31,7 @@ export function Chip({ pokemonId, hue, shiny = false, lucky = false, size = 48 }
       {shiny && (
         <Text
           className="absolute"
-          style={{ top: 4, right: 5, fontSize: 10, color: '#fff', textShadowColor: '#ff6bd6', textShadowRadius: 4 }}
+          style={{ top: 4, right: 5, fontSize: 10, color: '#fff', textShadow: '0 0 4px #ff6bd6' } as any}
           accessibilityElementsHidden
           importantForAccessibility="no"
         >
