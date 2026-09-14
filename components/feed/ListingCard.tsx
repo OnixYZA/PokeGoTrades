@@ -14,7 +14,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
     <Pressable
       onPress={() => router.push(`/listing/${listing.id}`)}
       accessibilityRole="button"
-      accessibilityLabel={`${listing.name}, ${listing.dist.toFixed(1)} km away, from ${listing.seller}`}
+      accessibilityHint="View listing details"
       className="relative flex-row gap-3.5 overflow-hidden rounded-[18px] border border-border bg-bg-card p-3.5 active:opacity-90"
       style={SURFACE.card}
     >
@@ -52,7 +52,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
                 router.push(`/profile/${encodeURIComponent(listing.seller)}`);
               }}
               accessibilityRole="button"
-              accessibilityLabel={`View ${listing.seller}'s profile`}
+              accessibilityHint="View profile"
               hitSlop={4}
               className="flex-row items-center gap-1 active:opacity-70"
             >

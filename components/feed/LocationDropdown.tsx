@@ -18,7 +18,7 @@ export function LocationDropdown() {
         ref={anchorRef}
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
-        accessibilityLabel={`Filter by location, currently ${filterLocation}`}
+        accessibilityHint="Change the location filter"
         accessibilityState={{ expanded: open }}
         className="flex-row items-center gap-2 rounded-xl border border-border-strong px-3 py-2.5 active:opacity-80"
         style={SURFACE.control}
