@@ -19,7 +19,7 @@ export function FormalOfferCard({ offer = formalOffer }: { offer?: FormalOffer }
           <Text className="font-display-semi text-text-primary" style={{ fontSize: 13 }}>
             {offer.name}
           </Text>
-          <Text className="font-mono text-text-subtle" style={{ fontSize: 10 }}>
+          <Text className="font-mono" style={{ fontSize: 10, color: '#94a3b8' }}>
             {[offer.move, offer.iv].filter(Boolean).join(' · ') || 'Awaiting details'}
           </Text>
         </View>

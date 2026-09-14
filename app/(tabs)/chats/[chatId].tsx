@@ -124,7 +124,7 @@ export default function ActiveChatScreen() {
 
       <View
         className="gap-2.5 border-t border-border-subtle px-4 pt-2.5"
-        style={{ paddingBottom: Math.max(insets.bottom, 20) }}
+        style={{ paddingBottom: insets.bottom }}
       >
         <ChatActionRow
           locked={locked}

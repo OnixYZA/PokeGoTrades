@@ -21,7 +21,7 @@ export function HandshakeModal({ onCopyMyCode, onCopyTheirCode, onMarkCompleted,
     <View
       className="flex-1 px-5"
       style={{
-        backgroundColor: 'rgba(5, 8, 16, 0.96)',
+        backgroundColor: C.bgBase,
         paddingTop: insets.top + 20,
         paddingBottom: insets.bottom + 24,
       }}
