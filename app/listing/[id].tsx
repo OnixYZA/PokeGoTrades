@@ -99,7 +99,7 @@ export default function ListingDetailScreen() {
   };
 
   return (
-    <View className="flex-1 items-center justify-end" pointerEvents="box-none">
+    <View className="flex-1 items-center justify-end" style={{ pointerEvents: 'box-none' }}>
       <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, overlayStyle]}>
         <Pressable
           onPress={() => close()}
@@ -152,7 +152,7 @@ export default function ListingDetailScreen() {
               </Text>
               <View className="mt-1 flex-row items-center gap-1.5">
                 {listing.shiny && (
-                  <Text style={{ color: '#ff6bd6', textShadowColor: '#ff6bd6', textShadowRadius: 8, fontSize: 22 }}>✦</Text>
+                  <Text style={{ color: '#ff6bd6', textShadow: '0 0 8px #ff6bd6', fontSize: 22 } as any}>✦</Text>
                 )}
                 <Text className="font-display text-text-primary" style={{ fontSize: 22, letterSpacing: -0.44 }}>
                   {listing.name}

@@ -35,8 +35,8 @@ export function LuckyBadge({ size = 'default' }: { size?: 'default' | 'sm' }) {
       style={{ boxShadow: '0 0 16px rgba(245,197,24,.35), inset 0 1px 0 rgba(255,255,255,.6)' }}
     >
       <Animated.View
-        pointerEvents="none"
         style={[
+          { pointerEvents: 'none' },
           {
             position: 'absolute',
             top: -20,

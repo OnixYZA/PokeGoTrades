@@ -19,7 +19,7 @@ export default function TabLayout() {
   return (
     <PhoneFrame>
       <Tabs style={{ flex: 1 }}>
-        <TabSlot />
+        <TabSlot style={{ flex: 1 }} />
         {/*
           `expo-router/ui`'s Tabs only walks Fragment/TabList wrappers when collecting triggers
           (see expo-router/build/ui/Tabs.js `parseTriggersFromChildren`) — wrapping TabList in a

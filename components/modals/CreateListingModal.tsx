@@ -16,6 +16,7 @@ import {
 } from 'lucide-react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
+import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
 import type { BackgroundHint, CreatureRef, Listing, TradeType } from '@/data/types';
 
@@ -59,6 +60,25 @@ const WANTED_POOL: WantedCreature[] = [
   { label: 'Dn', from: '#93c5fd', to: '#1d4ed8', name: 'Dragonite', dex: '#149', pokemonId: 149, hue: 205 },
 ];
 
+interface ProofUpload {
+  id: string;
+  kind: 'Appraisal' | 'Movesets' | 'Event Badge';
+  filename: string;
+  meta: string;
+}
+
+/** No real camera/gallery picker is wired up in this mock app — "adding a proof" cycles through a
+ *  small preset pool, same simulated-upload pattern as `WANTED_POOL` above. */
+const PROOF_POOL: ProofUpload[] = [
+  { id: 'proof-appraisal', kind: 'Appraisal', filename: 'IMG_2049.jpg', meta: '2.1 MB · scanned in 1.2s' },
+  { id: 'proof-movesets', kind: 'Movesets', filename: 'IMG_2051.jpg', meta: '1.8 MB · scanned in 0.9s' },
+  { id: 'proof-badges', kind: 'Event Badge', filename: 'IMG_2058.jpg', meta: '956 KB · scanned in 0.6s' },
+];
+
+const TAG_OPTIONS = ['Legacy Move', 'Community Day', 'PvP Ready', 'Raid Exclusive', 'Hundo IV'];
+
+const NOTES_MAX_LENGTH = 280;
+
 type Step = 'form' | 'preview';
 
 interface CreateListingModalProps {
@@ -83,6 +103,9 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [purified, setPurified] = useState(false);
   const [specialBackground, setSpecialBackground] = useState(true);
   const [wanted, setWanted] = useState<WantedCreature[]>(WANTED_POOL.slice(0, 2));
+  const [uploads, setUploads] = useState<ProofUpload[]>(PROOF_POOL.slice(0, 1));
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [notes, setNotes] = useState('');
 
   const previewListing = useMemo<Listing | null>(() => {
     if (!selectedCreature) return null;
@@ -109,8 +132,11 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       tradeType,
       iv: 'Unrated',
       looking,
+      screenshots: uploads.map((u) => u.filename),
+      tags: selectedTags,
+      notes: notes.trim() || undefined,
     };
-  }, [selectedCreature, shiny, purified, specialBackground, wanted, filterLocation]);
+  }, [selectedCreature, shiny, purified, specialBackground, wanted, filterLocation, uploads, selectedTags, notes]);
 
   const addWanted = () => {
     if (wanted.length >= 3) return;
@@ -120,6 +146,20 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
 
   const removeWanted = (name: string) => {
     setWanted((prev) => prev.filter((w) => w.name !== name));
+  };
+
+  const addProof = () => {
+    if (uploads.length >= 3) return;
+    const next = PROOF_POOL.find((p) => !uploads.some((existing) => existing.kind === p.kind));
+    if (next) setUploads((prev) => [...prev, next]);
+  };
+
+  const removeProof = (id: string) => {
+    setUploads((prev) => prev.filter((u) => u.id !== id));
+  };
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
   };
 
   const goToPreview = () => {
@@ -149,9 +189,26 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
               This is how your listing will appear in the feed. Nothing is posted yet.
             </Text>
           </View>
-          <View pointerEvents="none">
+          <View style={{ pointerEvents: 'none' }}>
             <ListingCard listing={previewListing} />
           </View>
+          {previewListing.tags && previewListing.tags.length > 0 && (
+            <View>
+              <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+                TAGS ON THIS LISTING
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
+                {previewListing.tags.map((tag) => (
+                  <TextBadge key={tag} label={tag} accent={C.gold} selected />
+                ))}
+              </View>
+            </View>
+          )}
+          {previewListing.screenshots && previewListing.screenshots.length > 0 && (
+            <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
+              {previewListing.screenshots.length} proof photo{previewListing.screenshots.length === 1 ? '' : 's'} attached
+            </Text>
+          )}
         </ScrollView>
         <PreviewFooter onBack={() => setStep('form')} onPublish={publish} bottomInset={insets.bottom} />
       </View>
@@ -180,7 +237,9 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           specialBackground={specialBackground}
           onToggleSpecialBackground={() => setSpecialBackground((v) => !v)}
         />
-        <AppraisalSection />
+        <ListingTags selectedTags={selectedTags} onToggleTag={toggleTag} />
+        <SellerNotes notes={notes} onChangeNotes={setNotes} />
+        <ProofUploadsSection uploads={uploads} onAddProof={addProof} onRemoveProof={removeProof} />
         <WantedInReturn wanted={wanted} onAddWanted={addWanted} onRemoveWanted={removeWanted} />
       </ScrollView>
       <Footer onContinue={goToPreview} disabled={!selectedCreature} bottomInset={insets.bottom} />
@@ -471,88 +530,205 @@ function AttributesCard({
   );
 }
 
-function AppraisalSection() {
+function ListingTags({
+  selectedTags,
+  onToggleTag,
+}: {
+  selectedTags: string[];
+  onToggleTag: (tag: string) => void;
+}) {
   return (
     <View>
       <View className="mb-2.5 flex-row items-center justify-between">
         <Text className="font-mono-semi" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
-          APPRAISAL SCREENSHOT
+          LISTING TAGS
         </Text>
-        <View className="flex-row items-center gap-1.5">
-          <View className="h-2 w-2 rounded-full" style={{ backgroundColor: C.success, boxShadow: '0 0 8px #22c55e' }} />
-          <Text className="font-mono-bold" style={{ fontSize: 12, color: C.success, letterSpacing: 1.2 }}>
-            OCR VERIFIED
+        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>
+          {selectedTags.length} SELECTED
+        </Text>
+      </View>
+      <View className="flex-row flex-wrap gap-2">
+        {TAG_OPTIONS.map((tag) => (
+          <TextBadge
+            key={tag}
+            label={tag}
+            accent={C.gold}
+            selected={selectedTags.includes(tag)}
+            onPress={() => onToggleTag(tag)}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function SellerNotes({ notes, onChangeNotes }: { notes: string; onChangeNotes: (value: string) => void }) {
+  return (
+    <View>
+      <View className="mb-2.5 flex-row items-center justify-between">
+        <Text className="font-mono-semi" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+          ADDITIONAL NOTES (OPTIONAL)
+        </Text>
+        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>
+          {notes.length} / {NOTES_MAX_LENGTH}
+        </Text>
+      </View>
+      <TextInput
+        value={notes}
+        onChangeText={onChangeNotes}
+        maxLength={NOTES_MAX_LENGTH}
+        placeholder="Meet-up preferences, add-ons you'd accept, anything buyers should know…"
+        placeholderTextColor={C.textDim}
+        multiline
+        numberOfLines={4}
+        accessibilityLabel="Additional notes for buyers"
+        className="rounded-[14px] border px-4 py-3.5"
+        style={{
+          backgroundColor: C.bgCard,
+          borderColor: C.borderDefault,
+          color: C.textPrimary,
+          fontSize: 14,
+          lineHeight: 21,
+          minHeight: 96,
+          textAlignVertical: 'top',
+        }}
+      />
+    </View>
+  );
+}
+
+function ProofRow({ upload, onRemove }: { upload: ProofUpload; onRemove: () => void }) {
+  return (
+    <View
+      className="flex-row items-center gap-4 rounded-[14px] border px-4 py-3.5"
+      style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+    >
+      <View
+        className="h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-xl"
+        style={MODAL_SURFACE.stripedTile}
+      >
+        <ImageIcon size={18} color={C.textDim} />
+      </View>
+      <View className="flex-1">
+        <Text className="font-mono-semi" style={{ fontSize: 9, color: C.gold, letterSpacing: 0.8 }}>
+          {upload.kind.toUpperCase()}
+        </Text>
+        <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary, marginTop: 2 }}>
+          {upload.filename}
+        </Text>
+        <Text className="font-mono" style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>
+          {upload.meta}
+        </Text>
+      </View>
+      <Pressable
+        onPress={onRemove}
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${upload.kind} upload`}
+        className="h-9 w-9 items-center justify-center rounded-[10px] border active:opacity-70"
+        style={{ borderColor: C.borderDefault }}
+      >
+        <X size={14} color={C.textSecondary} strokeWidth={2.5} />
+      </Pressable>
+    </View>
+  );
+}
+
+function ProofUploadsSection({
+  uploads,
+  onAddProof,
+  onRemoveProof,
+}: {
+  uploads: ProofUpload[];
+  onAddProof: () => void;
+  onRemoveProof: (id: string) => void;
+}) {
+  const nextKind = PROOF_POOL.find((p) => !uploads.some((u) => u.kind === p.kind))?.kind;
+
+  return (
+    <View>
+      <View className="mb-2.5 flex-row items-center justify-between">
+        <Text className="font-mono-semi" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+          PROOF UPLOADS (MAX 3)
+        </Text>
+        {uploads.length > 0 ? (
+          <View className="flex-row items-center gap-1.5">
+            <View className="h-2 w-2 rounded-full" style={{ backgroundColor: C.success, boxShadow: '0 0 8px #22c55e' }} />
+            <Text className="font-mono-bold" style={{ fontSize: 12, color: C.success, letterSpacing: 1.2 }}>
+              {uploads.length} / 3 VERIFIED
+            </Text>
+          </View>
+        ) : (
+          <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>
+            NONE YET
           </Text>
-        </View>
+        )}
       </View>
 
-      <View
-        className="flex-row items-center gap-4 rounded-[14px] border border-dashed px-5 py-[22px]"
-        style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
-      >
-        <View
-          className="h-[68px] w-[68px] items-center justify-center overflow-hidden rounded-xl"
-          style={MODAL_SURFACE.stripedTile}
-        >
-          <Text
-            className="font-mono text-center"
-            style={{ fontSize: 9, color: C.textDim, letterSpacing: 0.9, lineHeight: 12 }}
+      <View className="gap-2.5">
+        {uploads.map((upload) => (
+          <ProofRow key={upload.id} upload={upload} onRemove={() => onRemoveProof(upload.id)} />
+        ))}
+
+        {uploads.length < 3 && (
+          <Pressable
+            onPress={onAddProof}
+            accessibilityRole="button"
+            accessibilityLabel={`Add ${nextKind ?? 'proof'} upload`}
+            className="flex-row items-center justify-center gap-2 rounded-[14px] border border-dashed py-3.5 active:opacity-70"
+            style={{ borderColor: C.borderDefault }}
           >
-            APPRAISAL{'\n'}SCREEN
-          </Text>
-        </View>
-        <View className="flex-1">
-          <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '600', color: C.textPrimary }}>
-            IMG_2049.jpg
-          </Text>
-          <Text className="font-mono" style={{ fontSize: 13, color: C.textSecondary, marginTop: 4 }}>
-            2.1 MB · scanned in 1.2s
-          </Text>
-        </View>
+            <Plus size={16} color={C.textDim} strokeWidth={2} />
+            <Text className="font-mono" style={{ fontSize: 11, color: C.textDim, letterSpacing: 0.6 }}>
+              ADD PROOF{nextKind ? ` · ${nextKind.toUpperCase()}` : ''}
+            </Text>
+          </Pressable>
+        )}
       </View>
 
-      <View
-        className="relative mt-3 overflow-hidden rounded-[14px] border p-[18px]"
-        style={[MODAL_SURFACE.extractedCard, { borderColor: 'rgba(251,191,36,0.3)' }]}
-      >
-        <View className="absolute left-0 right-0 top-0 h-0.5" style={[MODAL_SURFACE.sheenLine, { opacity: 0.5 }]} />
-
-        <View className="mb-3.5 flex-row items-center gap-2">
-          <CheckSquare size={16} color={C.gold} strokeWidth={2.5} />
-          <Text className="font-mono-bold" style={{ fontSize: 13, color: C.gold, letterSpacing: 1.3 }}>
-            EXTRACTED FROM SCAN
-          </Text>
-        </View>
-
+      {uploads.length > 0 && (
         <View
-          className="mb-2.5 flex-row items-center gap-3.5 rounded-xl px-4 py-3.5"
-          style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}
+          className="relative mt-3 overflow-hidden rounded-[14px] border p-[18px]"
+          style={[MODAL_SURFACE.extractedCard, { borderColor: 'rgba(251,191,36,0.3)' }]}
         >
-          <Calendar size={22} color="#d4d4d8" strokeWidth={2} />
-          <View className="flex-1">
-            <Text className="font-mono-semi" style={{ fontSize: 12, color: C.textSecondary, letterSpacing: 1.2 }}>
-              CAUGHT
-            </Text>
-            <Text className="font-mono-bold" style={{ fontSize: 20, color: C.textPrimary, marginTop: 4 }}>
-              08 / 14 / 2019
-            </Text>
-          </View>
-        </View>
+          <View className="absolute left-0 right-0 top-0 h-0.5" style={[MODAL_SURFACE.sheenLine, { opacity: 0.5 }]} />
 
-        <View className="flex-row items-center gap-3 rounded-xl px-3.5 py-3" style={MODAL_SURFACE.luckyBadge}>
-          <View className="h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
-            <Star size={18} color="#0a0a0f" fill="#0a0a0f" />
+          <View className="mb-3.5 flex-row items-center gap-2">
+            <CheckSquare size={16} color={C.gold} strokeWidth={2.5} />
+            <Text className="font-mono-bold" style={{ fontSize: 13, color: C.gold, letterSpacing: 1.3 }}>
+              EXTRACTED FROM SCAN
+            </Text>
           </View>
-          <View className="flex-1">
-            <Text className="font-display" style={{ fontSize: 16, color: '#0a0a0f', letterSpacing: -0.16 }}>
-              Guaranteed Lucky
-            </Text>
-            <Text style={{ fontSize: 12, fontWeight: '500', color: 'rgba(10,10,15,0.75)', marginTop: 2 }}>
-              Caught before 07/2019 · auto-applied
-            </Text>
+
+          <View
+            className="mb-2.5 flex-row items-center gap-3.5 rounded-xl px-4 py-3.5"
+            style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}
+          >
+            <Calendar size={22} color="#d4d4d8" strokeWidth={2} />
+            <View className="flex-1">
+              <Text className="font-mono-semi" style={{ fontSize: 12, color: C.textSecondary, letterSpacing: 1.2 }}>
+                CAUGHT
+              </Text>
+              <Text className="font-mono-bold" style={{ fontSize: 20, color: C.textPrimary, marginTop: 4 }}>
+                08 / 14 / 2019
+              </Text>
+            </View>
+          </View>
+
+          <View className="flex-row items-center gap-3 rounded-xl px-3.5 py-3" style={MODAL_SURFACE.luckyBadge}>
+            <View className="h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
+              <Star size={18} color="#0a0a0f" fill="#0a0a0f" />
+            </View>
+            <View className="flex-1">
+              <Text className="font-display" style={{ fontSize: 16, color: '#0a0a0f', letterSpacing: -0.16 }}>
+                Guaranteed Lucky
+              </Text>
+              <Text style={{ fontSize: 12, fontWeight: '500', color: 'rgba(10,10,15,0.75)', marginTop: 2 }}>
+                Caught before 07/2019 · auto-applied
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }

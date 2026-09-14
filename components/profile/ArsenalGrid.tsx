@@ -16,7 +16,7 @@ export function ArsenalGrid({ arsenal }: { arsenal: CreatureRef[] }) {
             className="relative items-center gap-2 overflow-hidden rounded-2xl border border-border bg-bg-card p-2.5"
             style={{ width: '31.5%' }}
           >
-            <View pointerEvents="none" className="absolute h-20 w-20 self-center" style={[{ top: -20 }, hueBleed(p.hue)]} />
+            <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(p.hue)]} />
             <Chip pokemonId={p.pokemonId} hue={p.hue} shiny={p.shiny} size={52} />
             <Text className="text-center font-display-semi text-text-primary" style={{ fontSize: 11, lineHeight: 13.2 }}>
               {p.name}

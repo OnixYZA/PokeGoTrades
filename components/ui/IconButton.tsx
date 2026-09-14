@@ -30,7 +30,7 @@ export function IconButton({
       className={`items-center justify-center active:opacity-70 ${className}`}
       style={[{ width: size, height: size, borderRadius: radius }, style]}
     >
-      <View pointerEvents="none">{children}</View>
+      <View style={{ pointerEvents: 'none' }}>{children}</View>
     </Pressable>
   );
 }
