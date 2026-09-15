@@ -29,15 +29,21 @@ export const TabBarButton = forwardRef<View, TabBarButtonProps>(
             style={{
               position: 'absolute',
               top: -10,
-              left: '50%',
-              transform: [{ translateX: -13 }],
-              width: 26,
-              height: 3,
-              borderRadius: 3,
-              backgroundColor: '#4fb3ff',
-              boxShadow: '0 0 12px #4fb3ff',
+              left: 0,
+              right: 0,
+              alignItems: 'center',
             }}
-          />
+          >
+            <View
+              style={{
+                width: 26,
+                height: 3,
+                borderRadius: 3,
+                backgroundColor: '#4fb3ff',
+                boxShadow: '0 0 12px #4fb3ff',
+              }}
+            />
+          </View>
         )}
         {icon(color)}
         <Text
