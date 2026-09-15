@@ -9,7 +9,7 @@ interface AvatarProps {
   fontSize?: number;
 }
 
-/** Deterministic HSL-gradient monogram avatar, derived from the trading partner's name. */
+/** Deterministic solid-color monogram avatar, derived from the trading partner's name. */
 export function Avatar({ name, size = 42, radius = 12, fontSize = 15 }: AvatarProps) {
   return (
     <View

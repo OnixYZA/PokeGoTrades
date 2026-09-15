@@ -135,12 +135,16 @@ export function hueBadgeStyle(hue: number): ViewStyle {
   };
 }
 
+// Solid fills only — avatars need a plain `backgroundColor` that's guaranteed to render on every
+// platform, not a gradient (native only paints those via `experimental_backgroundImage`; see
+// constants/gradient.ts).
+const PARTNER_AVATAR_COLORS = ['#ef4444', '#3b82f6', '#10b981', '#8b5cf6', '#f59e0b'];
+
 export function partnerAvatarGradient(partner: string): ViewStyle {
   const c0 = partner.charCodeAt(0);
   const c1 = partner.charCodeAt(1);
-  const a = (c0 * 7) % 360;
   // charCodeAt returns NaN (not undefined) past the string's end, so `??` never
   // catches a single-character name — fall back to c0 explicitly instead.
-  const b = ((Number.isNaN(c1) ? c0 : c1) * 11) % 360;
-  return { backgroundImage: `linear-gradient(135deg, hsl(${a}, 55%, 45%), hsl(${b}, 55%, 25%))` };
+  const index = (c0 + (Number.isNaN(c1) ? c0 : c1)) % PARTNER_AVATAR_COLORS.length;
+  return { backgroundColor: PARTNER_AVATAR_COLORS[index] };
 }
