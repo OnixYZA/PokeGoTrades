@@ -10,7 +10,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { luckyShimmerGradient } from '@/constants/theme';
+import { COLORS, luckyShimmerGradient } from '@/constants/theme';
 
 /** Guaranteed-lucky pill with the handoff's `shimmer` sweep (3s linear, background-position). */
 export function LuckyBadge({ size = 'default' }: { size?: 'default' | 'sm' }) {
@@ -32,8 +32,13 @@ export function LuckyBadge({ size = 'default' }: { size?: 'default' | 'sm' }) {
   return (
     <View
       className="flex-row items-center gap-1 overflow-hidden rounded-full px-2 py-[3px]"
-      style={{ boxShadow: '0 0 16px rgba(245,197,24,.35), inset 0 1px 0 rgba(255,255,255,.6)' }}
+      style={{
+        backgroundColor: COLORS.accentGold,
+        boxShadow: '0 0 16px rgba(245,197,24,.35), inset 0 1px 0 rgba(255,255,255,.6)',
+      }}
     >
+      {/* Shimmer sweep is web-only (native ignores `backgroundImage`) — the solid gold fill
+          above is what actually renders the badge on native, this is a bonus flourish on web. */}
       <Animated.View
         style={[
           { pointerEvents: 'none' },

@@ -6,6 +6,8 @@
  */
 import type { ViewStyle } from 'react-native';
 
+import { gradient } from '@/constants/gradient';
+
 export const MODAL_COLORS = {
   bgBase: '#08080c',
   bgSurface: '#0d0d14',
@@ -36,46 +38,42 @@ const C = MODAL_COLORS;
 
 export const MODAL_SURFACE: Record<string, ViewStyle> = {
   ctaGold: {
-    backgroundImage: `linear-gradient(135deg, ${C.gold}, ${C.goldDark})`,
+    ...gradient(`linear-gradient(135deg, ${C.gold}, ${C.goldDark})`, C.gold),
     boxShadow: '0 8px 24px -8px rgba(251,191,36,0.5)',
   },
   ctaGreen: {
-    backgroundImage: `linear-gradient(135deg, ${C.success}, ${C.successDark})`,
+    ...gradient(`linear-gradient(135deg, ${C.success}, ${C.successDark})`, C.success),
     boxShadow: '0 8px 24px -8px rgba(34,197,94,0.5)',
   },
   ctaDanger: {
-    backgroundImage: `linear-gradient(135deg, ${C.danger}, ${C.dangerDark})`,
+    ...gradient(`linear-gradient(135deg, ${C.danger}, ${C.dangerDark})`, C.danger),
     boxShadow: '0 8px 24px -8px rgba(239,68,68,0.5)',
   },
   toggleGold: {
-    backgroundImage: `linear-gradient(135deg, ${C.gold}, ${C.goldDark})`,
+    ...gradient(`linear-gradient(135deg, ${C.gold}, ${C.goldDark})`, C.gold),
     boxShadow: '0 0 12px rgba(251,191,36,0.4)',
   },
   togglePink: {
-    backgroundImage: `linear-gradient(135deg, ${C.pink}, ${C.pinkDark})`,
+    ...gradient(`linear-gradient(135deg, ${C.pink}, ${C.pinkDark})`, C.pink),
     boxShadow: '0 0 12px rgba(236,72,153,0.4)',
   },
   toggleBlue: {
-    backgroundImage: `linear-gradient(135deg, ${C.blue}, ${C.blueDark})`,
+    ...gradient(`linear-gradient(135deg, ${C.blue}, ${C.blueDark})`, C.blue),
     boxShadow: '0 0 12px rgba(56,189,248,0.4)',
   },
-  extractedCard: {
-    backgroundImage: 'linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.02))',
-  },
-  sheenLine: {
-    backgroundImage: 'linear-gradient(90deg, transparent, #fbbf24, transparent)',
-  },
-  luckyBadge: {
-    backgroundImage: `linear-gradient(135deg, ${C.gold}, ${C.goldDark})`,
-  },
-  stripedTile: {
-    backgroundImage: 'repeating-linear-gradient(45deg, #1c1c28, #1c1c28 6px, #22222e 6px, #22222e 12px)',
-  },
-  dangerIcon: {
-    backgroundImage: 'linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.05))',
-  },
+  extractedCard: gradient(
+    'linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.02))',
+    'rgba(251,191,36,0.05)'
+  ),
+  sheenLine: gradient('linear-gradient(90deg, transparent, #fbbf24, transparent)', 'rgba(251,191,36,0.3)'),
+  luckyBadge: gradient(`linear-gradient(135deg, ${C.gold}, ${C.goldDark})`, C.gold),
+  stripedTile: gradient(
+    'repeating-linear-gradient(45deg, #1c1c28, #1c1c28 6px, #22222e 6px, #22222e 12px)',
+    C.bgCardAlt
+  ),
+  dangerIcon: gradient('linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.05))', 'rgba(239,68,68,0.08)'),
 };
 
 export function monogramGradient(from: string, to: string): ViewStyle {
-  return { backgroundImage: `linear-gradient(135deg, ${from}, ${to})` };
+  return gradient(`linear-gradient(135deg, ${from}, ${to})`, from);
 }

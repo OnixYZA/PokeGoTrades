@@ -15,6 +15,15 @@ const TRADE_TYPES: TradeType[] = [
   'Unregistered (Shiny/Legendary)',
 ];
 
+/** Shortened labels for the compact trigger — the dropdown's own menu items have room to show
+ *  the full `TradeType` string, this is only for the tight space next to the friendship pill. */
+const TRADE_TYPE_LABELS: Record<TradeType, string> = {
+  'Standard / Registered': 'Standard (Reg)',
+  'Special (Shiny/Legendary) Registered': 'Shiny/Legendary (Reg)',
+  'Unregistered (Standard)': 'Standard (Unreg)',
+  'Unregistered (Shiny/Legendary)': 'Shiny/Legendary (Unreg)',
+};
+
 export function StardustCard({ initialTradeType }: { initialTradeType: TradeType }) {
   const friendship = useTradeStore((s) => s.friendship);
   const setFriendship = useTradeStore((s) => s.setFriendship);
@@ -35,10 +44,15 @@ export function StardustCard({ initialTradeType }: { initialTradeType: TradeType
           ref={typeAnchorRef}
           onPress={() => setTypeOpen((v) => !v)}
           accessibilityRole="button"
-          className="flex-row items-center gap-1.5 active:opacity-80"
+          className="mr-2 flex-1 flex-row items-center gap-1.5 active:opacity-80"
         >
-          <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 10, letterSpacing: 1 }}>
-            {tradeType}
+          <Text
+            className="flex-1 font-mono uppercase text-text-subtle"
+            style={{ fontSize: 10, letterSpacing: 1 }}
+            numberOfLines={2}
+            ellipsizeMode="tail"
+          >
+            {TRADE_TYPE_LABELS[tradeType]}
           </Text>
           <ChevronDown size={12} color="#7d87a0" />
         </Pressable>
@@ -49,7 +63,7 @@ export function StardustCard({ initialTradeType }: { initialTradeType: TradeType
           accessibilityRole="button"
           accessibilityLabel={`Friendship level, currently ${level.label}`}
           accessibilityState={{ expanded: friendOpen }}
-          className="flex-row items-center gap-1.5 rounded-lg border border-border-strong bg-bg-panel px-2.5 py-1.5 active:opacity-80"
+          className="shrink-0 flex-row items-center gap-1.5 rounded-lg border border-border-strong bg-bg-panel px-2.5 py-1.5 active:opacity-80"
         >
           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: level.color, boxShadow: `0 0 6px ${level.color}` }} />
           <Text className="font-display-semi" style={{ fontSize: 11, color: level.color }}>
