@@ -456,17 +456,20 @@ function AttributeRow({
       accessibilityRole="switch"
       accessibilityLabel={title}
       accessibilityState={{ checked: on }}
-      className="flex-row items-center gap-3.5 px-4 py-3.5 active:opacity-80"
+      className="flex-row items-center justify-between px-4 py-3 active:opacity-80"
       style={!isLast ? { borderBottomWidth: 1, borderBottomColor: C.borderSubtle } : undefined}
     >
       <View className="h-9 w-9 items-center justify-center rounded-[10px]" style={{ backgroundColor: tint }}>
         {icon}
       </View>
-      <View className="flex-1">
+      <View className="flex-1 px-3">
         <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>{title}</Text>
         <Text style={{ fontSize: 12, color: C.textMuted, marginTop: 1 }}>{description}</Text>
       </View>
-      <View className="relative h-7 w-12 rounded-full" style={on ? onGradient : { backgroundColor: C.borderDefault }}>
+      <View
+        className="relative h-7 w-12 rounded-full"
+        style={[on ? onGradient : { backgroundColor: C.borderDefault }, { transform: [{ scale: 0.9 }] }]}
+      >
         <ToggleKnob on={on} />
       </View>
     </Pressable>
