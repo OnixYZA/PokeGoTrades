@@ -421,9 +421,10 @@ function CreatureSelector({
 function ToggleKnob({ on }: { on: boolean }) {
   return (
     <View
-      className="absolute top-[3px] h-[22px] w-[22px] rounded-full"
+      className="absolute rounded-full"
       style={[
-        on ? { right: 3 } : { left: 3 },
+        { top: 2, width: 20, height: 20 },
+        on ? { right: 2 } : { left: 2 },
         { backgroundColor: on ? '#fff' : C.textMuted },
         on ? { boxShadow: '0 2px 4px rgba(0,0,0,0.3)' } : null,
       ]}
@@ -456,8 +457,11 @@ function AttributeRow({
       accessibilityRole="switch"
       accessibilityLabel={title}
       accessibilityState={{ checked: on }}
-      className="flex-row items-center justify-between px-4 py-3 active:opacity-80"
-      style={!isLast ? { borderBottomWidth: 1, borderBottomColor: C.borderSubtle } : undefined}
+      className="flex-row px-4 py-3 active:opacity-80"
+      style={[
+        { alignItems: 'center', justifyContent: 'space-between' },
+        !isLast ? { borderBottomWidth: 1, borderBottomColor: C.borderSubtle } : undefined,
+      ]}
     >
       <View className="h-9 w-9 items-center justify-center rounded-[10px]" style={{ backgroundColor: tint }}>
         {icon}
@@ -467,8 +471,11 @@ function AttributeRow({
         <Text style={{ fontSize: 12, color: C.textMuted, marginTop: 1 }}>{description}</Text>
       </View>
       <View
-        className="relative h-7 w-12 rounded-full"
-        style={[on ? onGradient : { backgroundColor: C.borderDefault }, { transform: [{ scale: 0.9 }] }]}
+        className="relative rounded-full"
+        style={[
+          { width: 44, height: 24, alignSelf: 'center' },
+          on ? onGradient : { backgroundColor: C.borderDefault },
+        ]}
       >
         <ToggleKnob on={on} />
       </View>
