@@ -28,8 +28,8 @@ export function TextBadge({ label, selected = false, onPress, accent = COLORS.ac
   const compact = size === 'sm';
 
   const containerStyle = selected
-    ? { backgroundColor: withAlpha(accent, 0.18) }
-    : { backgroundColor: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.12)' };
+    ? { backgroundColor: withAlpha(accent, 0.2) }
+    : { backgroundColor: 'rgba(255,255,255,0.06)' };
 
   const content = (
     <>
@@ -47,7 +47,7 @@ export function TextBadge({ label, selected = false, onPress, accent = COLORS.ac
     </>
   );
 
-  const className = `flex-row items-center rounded-full ${selected ? '' : 'border'} ${
+  const className = `flex-row items-center rounded-full ${
     compact ? 'gap-1 px-2 py-[3px]' : 'gap-1 px-3.5 py-2.5'
   }`;
 
