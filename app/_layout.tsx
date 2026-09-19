@@ -15,6 +15,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
+import { SessionProvider, useSession } from '@/lib/session';
+
 export { ErrorBoundary } from 'expo-router';
 
 export const unstable_settings = {
@@ -24,6 +26,19 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <SessionProvider>
+          <RootNavigator />
+        </SessionProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+function RootNavigator() {
+  const { isLoading: sessionLoading } = useSession();
   const [loaded, error] = useFonts({
     SpaceGrotesk_500Medium,
     SpaceGrotesk_600SemiBold,
@@ -37,37 +52,39 @@ export default function RootLayout() {
     if (error) throw error;
   }, [error]);
 
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
+  // The splash stays up until fonts AND the stored/anonymous session have resolved.
+  const ready = loaded && !sessionLoading;
 
-  if (!loaded) {
+  useEffect(() => {
+    if (ready) {
+      SplashScreen.hide();
+    }
+  }, [ready]);
+
+  if (!ready) {
     return null;
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <StatusBar style="light" />
-        <Head>
-          <title>PokeGoTrades</title>
-          <meta name="description" content="Trade Pokemon easily in your local area." />
-        </Head>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050810' } }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen
-            name="listing/[id]"
-            options={{ presentation: 'transparentModal', animation: 'none' }}
-          />
-          <Stack.Screen name="profile/[userId]" />
-          <Stack.Screen
-            name="test-bail"
-            options={{ presentation: 'transparentModal', animation: 'fade' }}
-          />
-        </Stack>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <>
+      <StatusBar style="light" />
+      <Head>
+        <title>PokeGoTrades</title>
+        <meta name="description" content="Trade Pokemon easily in your local area." />
+      </Head>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050810' } }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="listing/[id]"
+          options={{ presentation: 'transparentModal', animation: 'none' }}
+        />
+        <Stack.Screen name="profile/[userId]" />
+        <Stack.Screen name="onboarding" />
+        <Stack.Screen
+          name="test-bail"
+          options={{ presentation: 'transparentModal', animation: 'fade' }}
+        />
+      </Stack>
+    </>
   );
 }

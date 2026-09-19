@@ -45,3 +45,12 @@ yarn-error.*
 
 # modals
 *.zip
+
+# Supabase — generated types (§3.1: `supabase gen types … > lib/database.types.ts`)
+lib/database.types.ts
+
+# OCR worker pipeline — isolated workspace, not part of the Expo app (§5.5)
+workers/
+
+# expo-sqlite local session DB
+*.db

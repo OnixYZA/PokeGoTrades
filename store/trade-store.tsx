@@ -68,6 +68,10 @@ interface TradeState {
   /** Appends a fully-formed listing — including its `screenshots` (multi-image proof) and
    *  `tags` picked during creation — to the feed. */
   addListing: (listing: Listing) => void;
+  /** Merges Supabase-loaded listings into the cache, replacing entries with the same id, so screens
+   *  that resolve `listings[id]` (the detail sheet, chat headers) can find them. Feed *membership*
+   *  stays with `useFeed`; this only makes the records reachable. */
+  upsertListings: (listings: Listing[]) => void;
   /** Removes a listing entirely — used once its trade is marked completed. */
   removeListing: (listingId: string) => void;
 
@@ -102,6 +106,7 @@ export const useTradeStore = create<TradeState>((set) => ({
   setFriendship: (level) => set({ friendship: level }),
 
   addListing: (listing) => set((state) => ({ listings: { [listing.id]: listing, ...state.listings } })),
+  upsertListings: (incoming) => set((state) => ({ listings: { ...state.listings, ...byId(incoming) } })),
   removeListing: (listingId) => set((state) => ({ listings: omit(state.listings, listingId) })),
 
   addChat: (chatSeed) =>

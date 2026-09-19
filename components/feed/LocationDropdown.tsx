@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { SURFACE } from '@/constants/theme';
 import { locations } from '@/data/listings';
+import { USE_SUPABASE } from '@/lib/data-source';
 import { useTradeStore } from '@/store/trade-store';
 
 export function LocationDropdown() {
@@ -29,7 +30,7 @@ export function LocationDropdown() {
         <MapPin size={14} color="#4fb3ff" />
         <View className="flex-1">
           <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 9, letterSpacing: 0.9 }}>
-            Sorted by proximity
+            {USE_SUPABASE ? 'Newest first' : 'Sorted by proximity'}
           </Text>
           <Text className="font-display-semi text-text-primary" style={{ fontSize: 14 }}>
             {filterLocation}
@@ -64,9 +65,12 @@ export function LocationDropdown() {
               >
                 {loc}
               </Text>
-              <Text className="font-mono text-text-subtle" style={{ fontSize: 10 }}>
-                {count} live
-              </Text>
+              {/* Per-area counts come from the local mock store; the feed only loads the selected area. */}
+              {USE_SUPABASE ? null : (
+                <Text className="font-mono text-text-subtle" style={{ fontSize: 10 }}>
+                  {count} live
+                </Text>
+              )}
             </Pressable>
           );
         })}

@@ -29,6 +29,9 @@ export interface CreatureRef {
   lucky?: boolean;
 }
 
+/** Server-side lifecycle of a listing. The feed shows `open` and `locked`. */
+export type ListingStatus = 'open' | 'locked' | 'completed' | 'withdrawn';
+
 export interface Listing extends CreatureRef {
   id: string;
   form: string;
@@ -38,7 +41,11 @@ export interface Listing extends CreatureRef {
   accent: string;
   bg: BackgroundHint;
   seller: string;
-  dist: number;
+  /** Profile uuid of the seller. Only Supabase-backed listings carry it. */
+  sellerId?: string;
+  /** Kilometres from the viewer. Mock data only: proximity is not persisted (SUPABASE_PLAN.md D3),
+   *  so Supabase-backed listings leave it undefined and the UI hides the badge. */
+  dist?: number;
   loc: string;
   pvp: string;
   demand: string;
@@ -53,6 +60,8 @@ export interface Listing extends CreatureRef {
   tags?: string[];
   /** Seller's own terms / context, shown to buyers on the card. */
   notes?: string;
+  /** Only Supabase-backed listings carry a status; the mock data predates it. */
+  status?: ListingStatus;
 }
 
 export interface FormalOffer {
