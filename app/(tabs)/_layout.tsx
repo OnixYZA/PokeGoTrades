@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PhoneFrame } from '@/components/layout/PhoneFrame';
 import { TabBarButton } from '@/components/layout/TabBarButton';
-import { totalUnread } from '@/data/chats';
+import { selectTotalUnread, useTradeStore } from '@/store/trade-store';
 
 // `StyleSheet.absoluteFillObject` was removed from RN's public types in 0.86 (only the
 // registered-style `StyleSheet.absoluteFill` remains) — spell the fill out explicitly so it
@@ -17,6 +17,8 @@ const fill: ViewStyle = { position: 'absolute', top: 0, left: 0, right: 0, botto
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const segments = useSegments();
+  // Unread across the inbox: the server's per-chat count with Supabase, the seeded one with the mock.
+  const totalUnread = useTradeStore(selectTotalUnread);
   // Dynamic segments keep their file-name bracket syntax here (e.g. "[chatId]"), not the
   // resolved id — see expo-router's getRouteInfoFromState. An open thread should read edge to
   // edge, so hide the tab bar rather than stack it under the composer.

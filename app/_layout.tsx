@@ -15,6 +15,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
+import { ToastHost } from '@/components/ui/ToastHost';
+import { LiveSync } from '@/lib/live-sync';
 import { SessionProvider, useSession } from '@/lib/session';
 
 export { ErrorBoundary } from 'expo-router';
@@ -67,6 +69,7 @@ function RootNavigator() {
 
   return (
     <>
+      <LiveSync />
       <StatusBar style="light" />
       <Head>
         <title>PokeGoTrades</title>
@@ -85,6 +88,7 @@ function RootNavigator() {
           options={{ presentation: 'transparentModal', animation: 'fade' }}
         />
       </Stack>
+      <ToastHost />
     </>
   );
 }

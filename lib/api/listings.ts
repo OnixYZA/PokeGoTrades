@@ -153,6 +153,17 @@ export async function fetchFeedListings(loc: string): Promise<Listing[]> {
   return data.map(toListing);
 }
 
+/**
+ * Specific listings, whatever their status. The feed only shows open and locked ones, but a trainer
+ * keeps seeing a completed or withdrawn listing their chats reference (`listings_read` allows it).
+ */
+export async function fetchListingsByIds(ids: string[]): Promise<Listing[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await selectListings().in('id', ids);
+  if (error) throw apiError(error);
+  return data.map(toListing);
+}
+
 // ——— writes ———
 
 /**

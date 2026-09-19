@@ -1,3 +1,4 @@
+import type { CreatureRef } from '@/data/types';
 import type { Database } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
 
@@ -79,6 +80,26 @@ export async function getPostingReadiness(): Promise<'anonymous' | 'incomplete' 
   const { data } = await supabase.auth.getSession();
   if (!data.session || data.session.user.is_anonymous) return 'anonymous';
   return isProfileReady(await fetchMyProfile()) ? 'ready' : 'incomplete';
+}
+
+/** The signed-in trainer's Arsenal (what they can offer), in slot order. Readable by anyone; owned by them. */
+export async function fetchMyArsenal(): Promise<CreatureRef[]> {
+  const id = await currentUserId();
+  const { data, error } = await supabase
+    .from('trainer_creatures')
+    .select('creature')
+    .eq('owner_id', id)
+    .eq('list', 'arsenal')
+    .order('sort_order', { ascending: true });
+  if (error) throw new ProfileError('form', error.message);
+  const creatures: CreatureRef[] = [];
+  for (const { creature } of data) {
+    if (typeof creature !== 'object' || creature === null || Array.isArray(creature)) continue;
+    const { name, pokemonId, hue, shiny, lucky } = creature;
+    if (typeof name !== 'string' || typeof pokemonId !== 'number' || typeof hue !== 'number') continue;
+    creatures.push({ name, pokemonId, hue, ...(shiny === true ? { shiny } : {}), ...(lucky === true ? { lucky } : {}) });
+  }
+  return creatures;
 }
 
 export interface ProfileInput {

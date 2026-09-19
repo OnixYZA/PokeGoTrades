@@ -1,10 +1,13 @@
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Send } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
 import { trainer } from '@/data/trainer';
 import type { CreatureRef } from '@/data/types';
+import { fetchMyArsenal } from '@/lib/api/profile';
+import { USE_SUPABASE } from '@/lib/data-source';
 
 interface ArsenalOfferSheetProps {
   onSelect: (creature: CreatureRef) => void;
@@ -15,6 +18,25 @@ interface ArsenalOfferSheetProps {
  *  send into the chat as a FormalOfferCard. */
 export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps) {
   const insets = useSafeAreaInsets();
+  // Supabase: the trainer's own `trainer_creatures` (arsenal). Mock: the seeded DriftCoral profile.
+  const [arsenal, setArsenal] = useState<CreatureRef[] | null>(USE_SUPABASE ? null : trainer.arsenal);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let active = true;
+    fetchMyArsenal().then(
+      (creatures) => active && setArsenal(creatures),
+      () => {
+        if (!active) return;
+        setLoadFailed(true);
+        setArsenal([]);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <View
@@ -42,7 +64,13 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
         </Text>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
-          {trainer.arsenal.map((creature) => (
+          {arsenal === null ? <ActivityIndicator color="#4fb3ff" style={{ paddingVertical: 24 }} /> : null}
+          {arsenal !== null && arsenal.length === 0 ? (
+            <Text className="py-6 text-center text-text-subtle" style={{ fontSize: 13, lineHeight: 19 }}>
+              {loadFailed ? 'Could not load your Arsenal. Close this and try again.' : 'Your Arsenal is empty, so there is nothing to offer yet. You can still describe your offer in the chat.'}
+            </Text>
+          ) : null}
+          {(arsenal ?? []).map((creature) => (
             <Pressable
               key={creature.name}
               onPress={() => onSelect(creature)}
