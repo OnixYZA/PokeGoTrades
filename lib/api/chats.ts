@@ -173,10 +173,13 @@ export async function confirmTrade(chatId: string): Promise<ConfirmResult> {
   return { state: 'awaiting_partner' };
 }
 
-/** Allowed until the partner confirms. */
-export async function withdrawTradeConfirmation(chatId: string): Promise<void> {
-  const { error } = await supabase.rpc('withdraw_trade_confirmation', { p_chat_id: chatId });
+/** Allowed until the partner confirms. Returns the lock row's new server `updated_at`, so the caller can
+ *  version `lockEventVersion` with the server clock instead of its own (clock-skew safety; see the stale-
+ *  frame guard in store/lock-state.ts). */
+export async function withdrawTradeConfirmation(chatId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('withdraw_trade_confirmation', { p_chat_id: chatId });
   if (error) throw apiError(error);
+  return data;
 }
 
 /** Closes every open chat between the pair, releases any lock, blocks, and files a report for 'spoofer' or a note. */

@@ -19,6 +19,17 @@ import { USE_SUPABASE } from '@/lib/data-source';
 import { openPrivateChannel } from '@/lib/realtime';
 import { describeError, type ErrorInfo } from '@/lib/rpc-errors';
 import { toast } from '@/lib/toast';
+import {
+  applyListingStatus,
+  applyLockEvent,
+  lockSnapshot,
+  LOCK_HELD_ELSEWHERE,
+  type LockConfirmations,
+} from './lock-state';
+
+// The lock rules live in ./lock-state so they can be tested without the Expo/Supabase module graph.
+// Re-exported here because this is where the rest of the app already imports them from.
+export { LOCK_HELD_ELSEWHERE, type LockConfirmations };
 
 function byId<T extends { id: string }>(records: T[]): Record<string, T> {
   const out: Record<string, T> = {};
@@ -46,9 +57,6 @@ function splitChatSeeds(
   return { chats, messages };
 }
 
-/** `lockByListing` value when the listing is locked but the lock is not visible to me: a competing
- *  buyer only ever learns "frozen", never who won (SUPABASE_PLAN.md §4.2). */
-export const LOCK_HELD_ELSEWHERE = '__elsewhere__' as const;
 
 /**
  * A chat's negotiation state, derived purely from the chat's server status and `lockByListing` —
@@ -75,11 +83,6 @@ export function selectChatPhase(
   return 'open';
 }
 
-/** Each side's confirmation timestamp for the chat that holds a listing's lock (D2). */
-export interface LockConfirmations {
-  sellerConfirmedAt: string | null;
-  buyerConfirmedAt: string | null;
-}
 
 export type Confirmation = 'none' | 'awaiting_partner' | 'awaiting_me';
 
@@ -277,107 +280,6 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMe
 
 function newestServerTimestamp(list: ChatMessage[] | undefined): string | undefined {
   return list ? [...list].reverse().find((m) => m.createdAt && !m.delivery)?.createdAt : undefined;
-}
-
-// ——— lock reconciliation ———
-
-/**
- * Rebuilds lock state from a fresh read (SUPABASE_PLAN.md §4.2): for each listing whose status is known,
- * `locked` maps to the visible lock's chat, or to `LOCK_HELD_ELSEWHERE` when its holder is hidden from me,
- * and anything else clears it. Confirmations come from the locks I am a party to.
- */
-function lockSnapshot(
-  state: Pick<TradeState, 'lockByListing' | 'lockConfirmations' | 'lockEventVersion'>,
-  locks: chatsApi.TradeLockRow[],
-  listings: Listing[],
-  /** When this read left the client. Anything learned since is newer than the read, by construction. */
-  readAt: string,
-): Pick<TradeState, 'lockByListing' | 'lockConfirmations' | 'lockEventVersion'> {
-  const holders = new Map(locks.map((lock) => [lock.listing_id, lock.chat_id]));
-  const lockByListing = { ...state.lockByListing };
-  for (const listing of listings) {
-    if (listing.status === 'locked') lockByListing[listing.id] = holders.get(listing.id) ?? LOCK_HELD_ELSEWHERE;
-    else if (listing.status !== undefined) delete lockByListing[listing.id];
-  }
-
-  const lockConfirmations: Record<string, LockConfirmations> = {};
-  const lockEventVersion: Record<string, string> = {};
-
-  // A lock we learned about after this read was issued cannot be overruled by it — not its confirmations,
-  // and not the fact that it exists. Rebuilding blindly from the response is what let a slow hydrate
-  // un-confirm a trade that had been confirmed while it was in flight.
-  for (const [chatId, version] of Object.entries(state.lockEventVersion)) {
-    const current = state.lockConfirmations[chatId];
-    if (version >= readAt && current) {
-      lockConfirmations[chatId] = current;
-      lockEventVersion[chatId] = version;
-    }
-  }
-
-  for (const lock of locks) {
-    if (lock.chat_id in lockConfirmations) continue; // a newer local observation already won
-    lockConfirmations[lock.chat_id] = {
-      sellerConfirmedAt: lock.seller_confirmed_at,
-      buyerConfirmedAt: lock.buyer_confirmed_at,
-    };
-    lockEventVersion[lock.chat_id] = lock.updated_at;
-  }
-  return { lockByListing, lockConfirmations, lockEventVersion };
-}
-
-/**
- * True when this observation of a lock is older than what we already applied for that chat.
- *
- * A release is never stale: the row is gone, and `updated_at` on a DELETE is the value the row held before
- * it was removed, so it can legitimately look older than a confirmation that preceded it. Ignoring a
- * release would strand the UI on a lock that no longer exists, which is far worse than replaying one.
- */
-function isStaleLock(state: TradeState, chatId: string, updatedAt: string | null, released: boolean): boolean {
-  if (released || !updatedAt) return false; // unordered payload (pre-migration server): apply it
-  const seen = state.lockEventVersion[chatId];
-  return seen !== undefined && updatedAt < seen;
-}
-
-function applyLockEvent(state: TradeState, event: chatsApi.LockEvent): Partial<TradeState> {
-  if (isStaleLock(state, event.chatId, event.updatedAt, event.released)) return {};
-
-  const lockByListing = { ...state.lockByListing };
-  const lockConfirmations = { ...state.lockConfirmations };
-  const lockEventVersion = { ...state.lockEventVersion };
-  let handshakeRequest = state.handshakeRequest;
-
-  if (event.updatedAt) lockEventVersion[event.chatId] = event.updatedAt;
-
-  if (event.released) {
-    if (lockByListing[event.listingId] === event.chatId) delete lockByListing[event.listingId];
-    delete lockConfirmations[event.chatId];
-    delete lockEventVersion[event.chatId]; // the lock is gone; a later lock on this chat starts fresh
-    if (handshakeRequest === event.chatId) handshakeRequest = null;
-  } else {
-    lockByListing[event.listingId] = event.chatId;
-    lockConfirmations[event.chatId] = {
-      sellerConfirmedAt: event.sellerConfirmedAt,
-      buyerConfirmedAt: event.buyerConfirmedAt,
-    };
-    // D1: the seller locked *my* offer, so my Handshake opens by itself.
-    if (event.op === 'insert' && state.chats[event.chatId]?.myRole === 'buyer') handshakeRequest = event.chatId;
-  }
-  return { lockByListing, lockConfirmations, lockEventVersion, handshakeRequest };
-}
-
-function applyListingStatus(state: TradeState, listingId: string, status: ListingStatus): Partial<TradeState> {
-  const listing = state.listings[listingId];
-  const lockByListing = { ...state.lockByListing };
-  if (status === 'locked') {
-    // A `lock` event names the holder and always wins; without one, the lock is held elsewhere.
-    lockByListing[listingId] ??= LOCK_HELD_ELSEWHERE;
-  } else {
-    delete lockByListing[listingId];
-  }
-  return {
-    lockByListing,
-    listings: listing ? { ...state.listings, [listingId]: { ...listing, status } } : state.listings,
-  };
 }
 
 function dropChat(state: TradeState, chatId: string): Partial<TradeState> {
@@ -777,7 +679,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
     withdrawConfirmation: async (chatId) => {
       if (!USE_SUPABASE) return ok(undefined);
       return attempt(async () => {
-        await chatsApi.withdrawTradeConfirmation(chatId);
+        const updatedAt = await chatsApi.withdrawTradeConfirmation(chatId);
         const chat = get().chats[chatId];
         set((state) => {
           const current = state.lockConfirmations[chatId];
@@ -787,7 +689,11 @@ export const useTradeStore = create<TradeState>((set, get) => {
               ...state.lockConfirmations,
               [chatId]: chat?.myRole === 'seller' ? { ...current, sellerConfirmedAt: null } : { ...current, buyerConfirmedAt: null },
             },
-            lockEventVersion: { ...state.lockEventVersion, [chatId]: new Date().toISOString() },
+            // Stamped with the server's own `trade_locks.updated_at` (the RPC now returns it), not the
+            // client clock: `lockSnapshot` and `isStaleLock` compare this against other server timestamps,
+            // and a client clock running ahead of the server could make a partner's later, genuinely newer
+            // confirmation frame look older and get dropped.
+            lockEventVersion: { ...state.lockEventVersion, [chatId]: updatedAt },
           };
         });
         void syncMessages(chatId);
