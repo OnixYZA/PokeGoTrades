@@ -3,8 +3,12 @@
 # dependencies
 node_modules/
 
-# tests 
+# tests
 /LHtests/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
 
 # Expo
 .expo/

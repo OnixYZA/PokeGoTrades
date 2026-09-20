@@ -10,11 +10,14 @@ import { getHandshake, type Handshake } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { describeError } from '@/lib/rpc-errors';
 import { toast } from '@/lib/toast';
-import { selectTradeView, useTradeStore } from '@/store/trade-store';
+import { selectChatPhase, selectTradeView, useTradeStore, type ChatPhase } from '@/store/trade-store';
 
 import { MODAL_COLORS, MODAL_SURFACE, monogramGradient } from './tokens';
 
 const C = MODAL_COLORS;
+
+/** How long the lock may be gone before the modal asks the server why (see the phase watcher below). */
+const SETTLE_MS = 300;
 
 /** One trainer's card: who they are and the code to add them by. */
 interface Trainer {
@@ -78,6 +81,7 @@ export function HandshakeModal({
   const partnerName = useTradeStore((s) => s.chats[id]?.partner) ?? 'your partner';
   const confirmTrade = useTradeStore((s) => s.confirmTrade);
   const withdrawConfirmation = useTradeStore((s) => s.withdrawConfirmation);
+  const loadChat = useTradeStore((s) => s.loadChat);
 
   const [data, setData] = useState<Handshake | null>(null);
   const [busy, setBusy] = useState<'confirm' | 'withdraw' | null>(null);
@@ -107,14 +111,41 @@ export function HandshakeModal({
   // The trade moved on underneath us: the partner confirmed (completed) or someone released the lock.
   useEffect(() => {
     if (!live || closing.current || trade.phase === 'locked') return;
-    closing.current = true;
+
+    const finish = (phase: ChatPhase) => {
+      if (closing.current) return;
+      closing.current = true;
+      if (phase === 'completed') {
+        toast('Trade completed.', 'success');
+        onCompleted?.();
+      } else {
+        toast('This trade is no longer locked.', 'info');
+        onReturnToChat?.();
+      }
+    };
+
     if (trade.phase === 'completed') {
-      toast('Trade completed.', 'success');
-      onCompleted?.();
-    } else {
-      toast('This trade is no longer locked.', 'info');
-      onReturnToChat?.();
+      finish('completed');
+      return;
     }
+
+    // A completion first looks exactly like a release: `confirm_trade` deletes the lock (a `lock` event with
+    // `released: true`, the same as an unlock) *before* it closes the listing and the chat, whose status then
+    // arrives as a separate event and refetch. So don't trust the first sighting: wait a moment, ask the
+    // server what the chat is now, and only call it a release if it really is not completed.
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (closing.current) return;
+      void loadChat(id).then(() => {
+        if (cancelled) return;
+        const phase = selectChatPhase(useTradeStore.getState(), id);
+        if (phase !== 'locked') finish(phase);
+      });
+    }, SETTLE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the phase only
   }, [live, trade.phase]);
 
@@ -137,7 +168,8 @@ export function HandshakeModal({
       setError(result.error.message);
       return;
     }
-    if (result.value === 'completed') {
+    // The watcher above may already have seen the completion arrive and closed the modal.
+    if (result.value === 'completed' && !closing.current) {
       closing.current = true;
       toast('Trade completed.', 'success');
       onCompleted?.();
