@@ -1,4 +1,8 @@
-import 'expo-sqlite/localStorage/install'; // no-op on web; provides localStorage on native
+// Provides `localStorage` on native and resolves to a no-op on web. It must stay a static import so it
+// is hoisted ahead of the `createClient` call below, which reads that global. The native-only dependency
+// is kept out of the web bundle by a platform extension rather than a runtime check — Metro's resolver
+// decides that, and a runtime `if` comes far too late; see ./install-local-storage.native.ts.
+import './install-local-storage';
 import { createClient } from '@supabase/supabase-js';
 import { AppState, Platform } from 'react-native';
 

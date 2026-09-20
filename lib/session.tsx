@@ -16,6 +16,12 @@ interface SessionContextValue {
   /** Set when the first-launch anonymous sign-in failed. The app still renders; call `retry`. */
   error: Error | null;
   retry: () => void;
+  /**
+   * Ends the current session. The `onAuthStateChange` listener below reacts to the resulting
+   * `SIGNED_OUT` event the same way it does on first launch: it bumps `attempt`, so a fresh
+   * anonymous session starts right away and the app never sits in a signed-out limbo.
+   */
+  signOut: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -99,6 +105,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
+  const signOut = useCallback(async () => {
+    const { error: signOutError } = await supabase.auth.signOut();
+    if (signOutError) throw signOutError;
+  }, []);
+
   const value = useMemo<SessionContextValue>(
     () => ({
       session,
@@ -107,8 +118,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       isAnonymous: session?.user.is_anonymous ?? false,
       error,
       retry,
+      signOut,
     }),
-    [session, isLoading, error, retry]
+    [session, isLoading, error, retry, signOut]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
