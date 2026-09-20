@@ -171,10 +171,14 @@ export async function fetchListingsByIds(ids: string[]): Promise<Listing[]> {
  * column writable, but the `authenticated` role is granted just these (SUPABASE_PLAN.md §2.1):
  * `seller_id` defaults to `auth.uid()`, and `status`, `pvp_rank`, `demand_rank`, `untradable` and
  * the timestamps are server-owned. Shadow backgrounds are rejected by a CHECK constraint.
+ *
+ * `lucky` is server-owned too: only the OCR worker may set it, once an appraisal proof backs the claim
+ * (migration …000200_lock_lucky_to_service_role). PostgREST turns every key in the body into a column,
+ * so sending it here — even as `false` — would now fail the insert with 42501. It is absent on purpose.
  */
 export type NewListingInput = Pick<
   Listing,
-  'id' | 'name' | 'pokemonId' | 'hue' | 'form' | 'year' | 'lucky' | 'shiny' | 'accent' | 'loc' | 'tradeType' | 'iv' | 'looking'
+  'id' | 'name' | 'pokemonId' | 'hue' | 'form' | 'year' | 'shiny' | 'accent' | 'loc' | 'tradeType' | 'iv' | 'looking'
 > & {
   bg: Exclude<BackgroundHint, 'shadow'>;
   tags: ListingTag[];
@@ -188,7 +192,6 @@ function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
     pokemon_id: input.pokemonId,
     form: input.form,
     catch_year: input.year,
-    lucky: input.lucky,
     shiny: input.shiny,
     hue: input.hue,
     accent: input.accent,

@@ -143,8 +143,6 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       form: purified ? 'Purified' : 'Standard',
       // Placeholder until OCR reads the real catch date from the proof (SUPABASE_PLAN.md §5.2 Q9).
       year: new Date().getFullYear(),
-      // The mock flow claimed "Guaranteed Lucky" from a faked scan. Real listings only say lucky once OCR can back it.
-      lucky: !USE_SUPABASE,
       shiny,
       accent: '#fbbf24',
       bg,
@@ -157,11 +155,13 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     };
   }, [draftId, selectedCreature, shiny, purified, specialBackground, wanted, filterLocation, selectedTags, notes]);
 
-  /** The draft as the feed card renders it. Seller, ranks and distance are server-owned, so they are display-only here. */
+  /** The draft as the feed card renders it. Seller, ranks, distance and lucky are server-owned, so they are display-only here. */
   const previewListing = useMemo<Listing | null>(
     () =>
       draft && {
         ...draft,
+        // A new listing is never Lucky: only the OCR worker sets that, after an appraisal proof backs it.
+        lucky: false,
         seller: 'You',
         dist: USE_SUPABASE ? undefined : 0,
         pvp: 'NEW',

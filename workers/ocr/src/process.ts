@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import sharp from 'sharp';
 
 import { PROOF_BUCKET, type Config } from './env';
 import { log } from './log';
@@ -39,6 +40,23 @@ export interface RunOptions {
 const SELECT = 'id, listing_id, kind, storage_path';
 
 const UNREADABLE = { reason: 'unreadable' } as const;
+
+const TOO_LARGE = { reason: 'image_too_large' } as const;
+
+/**
+ * The most decoded pixels we will hand to tesseract.js. A proof screenshot is a phone screen; anything
+ * past this is not one.
+ *
+ * The bucket's 5 MB upload cap (migration …000600) bounds bytes, not pixels, and those are very different
+ * numbers: a mostly-flat PNG a few dozen kB long can carry 20000x20000 and expand past a gigabyte once
+ * decoded. Tesseract decodes before anything in this worker gets a chance to look, and the resulting OOM
+ * is a process kill rather than a thrown error — so `handle`'s catch never runs, the row is never
+ * released, and it sits `processing` until the lease expires. `recoverStaleClaims` then puts it back to
+ * `pending`, where, being the oldest, it is claimed first on the next run and kills that one too. One
+ * upload is enough to stall the queue indefinitely, which is why the check below has to come first and
+ * why failing it is terminal.
+ */
+const MAX_PIXELS = 4000 * 4000;
 
 /**
  * One pass over the queue: recover stale claims, then take up to `config.batchSize` pending proofs,
@@ -138,6 +156,16 @@ async function handle(supabase: SupabaseClient, config: Config, row: ProofRow, s
     const image = await download(supabase, row.storage_path);
     if (!image) return await finish('failed', UNREADABLE, { cause: 'file_missing' });
 
+    // Header-only read: sharp parses the dimensions without decoding the pixels, so an oversized image is
+    // rejected on the strength of its header and never reaches a decoder. Both outcomes here are terminal
+    // — releasing for retry would rebuild the crash loop this check exists to break.
+    const size = await measure(image);
+    if (!size) return await finish('failed', UNREADABLE, { cause: 'decode_error' });
+    const pixels = size.width * size.height;
+    if (pixels > MAX_PIXELS) {
+      return await finish('failed', TOO_LARGE, { cause: 'image_too_large', ...size, pixels, maxPixels: MAX_PIXELS });
+    }
+
     const text = await recognizeText(image, { langPath: config.langPath, timeoutMs: config.imageTimeoutMs });
     const verdict = interpretProof(row.kind, text, { order: config.dateOrder });
     if (verdict.status === 'failed') return await finish('failed', verdict.extracted, { cause: verdict.cause });
@@ -194,6 +222,24 @@ async function download(supabase: SupabaseClient, path: string): Promise<Buffer 
     throw new Error(`download failed: ${error.message}`);
   }
   return Buffer.from(await data.arrayBuffer());
+}
+
+/**
+ * The image's pixel dimensions from its header, or `null` when the bytes are not a readable image at all.
+ * `metadata()` does not decode, so this stays cheap and bounded whatever the file claims to be — which is
+ * the whole point of asking before handing the buffer to tesseract.js.
+ */
+async function measure(image: Buffer): Promise<{ width: number; height: number } | null> {
+  try {
+    // `limitInputPixels: false` turns off sharp's own ~268 MP ceiling. Nothing is decoded here, so it
+    // allocates nothing; it just stops sharp throwing on the very images this check exists to catch,
+    // which would otherwise report them as `decode_error` and hide a bomb among the corrupt uploads.
+    // MAX_PIXELS above stays the single place the limit is decided.
+    const { width, height } = await sharp(image, { limitInputPixels: false }).metadata();
+    return width && height ? { width, height } : null;
+  } catch {
+    return null; // not an image, or a truncated/corrupt one: a permanent failure, not a retry.
+  }
 }
 
 /** processing -> a terminal status. False when the row is no longer `processing` (someone else moved it). */

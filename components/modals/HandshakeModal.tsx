@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertTriangle, CheckSquare, Copy, Lock, Star, X } from 'lucide-react-native';
 import { useShallow } from 'zustand/react/shallow';
@@ -193,80 +193,91 @@ export function HandshakeModal({
       style={{
         backgroundColor: C.bgBase,
         paddingTop: insets.top + 20,
-        paddingBottom: insets.bottom + 24,
       }}
     >
-      <LockRibbon />
-      <TitleBlock />
+      {/*
+        Everything above the CTA scrolls. The friend-code cards, the warning callout and (in the
+        awaiting_partner state) the withdraw row add up to more than a 667pt screen holds, and while this
+        was one non-scrolling column the confirm button and the way out both sat below the fold with no
+        gesture that could reach them — the trade could neither be completed nor abandoned. `flexGrow: 1`
+        keeps the short states looking as they did, filling the space rather than bunching at the top.
+      */}
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+        <LockRibbon />
+        <TitleBlock />
 
-      {trainers ? (
-        <>
-          <HandshakeAvatars me={trainers.me} partner={trainers.partner} />
-          <View className="mb-5">
-            <FriendCodeCard
-              stripeFrom={C.pink}
-              stripeTo={C.pinkDark}
-              trainer={trainers.me}
-              onCopy={() => void copy(trainers.me, onCopyMyCode)}
-            />
-            <FriendCodeCard
-              stripeFrom={C.blue}
-              stripeTo={C.blueDark}
-              trainer={trainers.partner}
-              ratingStar={!live}
-              isLast
-              onCopy={() => void copy(trainers.partner, onCopyTheirCode)}
-            />
+        {trainers ? (
+          <>
+            <HandshakeAvatars me={trainers.me} partner={trainers.partner} />
+            <View className="mb-5">
+              <FriendCodeCard
+                stripeFrom={C.pink}
+                stripeTo={C.pinkDark}
+                trainer={trainers.me}
+                onCopy={() => void copy(trainers.me, onCopyMyCode)}
+              />
+              <FriendCodeCard
+                stripeFrom={C.blue}
+                stripeTo={C.blueDark}
+                trainer={trainers.partner}
+                ratingStar={!live}
+                isLast
+                onCopy={() => void copy(trainers.partner, onCopyTheirCode)}
+              />
+            </View>
+          </>
+        ) : (
+          <View className="mb-5 items-center py-16">
+            <ActivityIndicator color={C.blue} />
+            <Text className="mt-3" style={{ fontSize: 12, color: C.textMuted }}>
+              Loading friend codes…
+            </Text>
           </View>
-        </>
-      ) : (
-        <View className="mb-5 items-center py-16">
-          <ActivityIndicator color={C.blue} />
-          <Text className="mt-3" style={{ fontSize: 12, color: C.textMuted }}>
-            Loading friend codes…
+        )}
+
+        <WarningCallout safeLoc={live ? data?.partnerSafeLoc : null} />
+
+        {error ? (
+          <Text accessibilityRole="alert" className="mb-3 text-center" style={{ fontSize: 13, lineHeight: 19, color: C.danger }}>
+            {error}
           </Text>
-        </View>
-      )}
+        ) : null}
+      </ScrollView>
 
-      <WarningCallout safeLoc={live ? data?.partnerSafeLoc : null} />
-
-      {error ? (
-        <Text accessibilityRole="alert" className="mb-3 text-center" style={{ fontSize: 13, lineHeight: 19, color: C.danger }}>
-          {error}
-        </Text>
-      ) : null}
-
-      {live ? (
-        <ConfirmControls
-          confirmation={trade.confirmation}
-          partnerName={partnerName}
-          busy={busy}
-          ready={data !== null}
-          onConfirm={() => void confirm()}
-          onWithdraw={() => void withdraw()}
-        />
-      ) : (
+      {/* Pinned below the scroll view, so the CTA and the way back are reachable in every phase. */}
+      <View style={{ paddingBottom: insets.bottom + 24 }}>
+        {live ? (
+          <ConfirmControls
+            confirmation={trade.confirmation}
+            partnerName={partnerName}
+            busy={busy}
+            ready={data !== null}
+            onConfirm={() => void confirm()}
+            onWithdraw={() => void withdraw()}
+          />
+        ) : (
+          <Pressable
+            onPress={onMarkCompleted}
+            accessibilityRole="button"
+            accessibilityLabel="Mark trade completed"
+            className="flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] active:opacity-90"
+            style={MODAL_SURFACE.ctaGreen}
+          >
+            <CheckSquare size={20} color={C.successText} strokeWidth={2.8} />
+            <Text className="font-display" style={{ fontSize: 16, color: C.successText, letterSpacing: -0.16 }}>
+              Mark Trade Completed
+            </Text>
+          </Pressable>
+        )}
         <Pressable
-          onPress={onMarkCompleted}
+          onPress={onReturnToChat}
           accessibilityRole="button"
-          accessibilityLabel="Mark trade completed"
-          className="flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] active:opacity-90"
-          style={[MODAL_SURFACE.ctaGreen, { marginTop: 'auto' }]}
+          accessibilityLabel="Return to chat"
+          className="items-center py-3 active:opacity-70"
         >
-          <CheckSquare size={20} color={C.successText} strokeWidth={2.8} />
-          <Text className="font-display" style={{ fontSize: 16, color: C.successText, letterSpacing: -0.16 }}>
-            Mark Trade Completed
-          </Text>
+          <Text style={{ fontSize: 13, fontWeight: '500', color: C.textMuted }}>Return to chat</Text>
         </Pressable>
-      )}
-      <Pressable
-        onPress={onReturnToChat}
-        accessibilityRole="button"
-        accessibilityLabel="Return to chat"
-        className="items-center py-3 active:opacity-70"
-      >
-        <Text style={{ fontSize: 13, fontWeight: '500', color: C.textMuted }}>Return to chat</Text>
-      </Pressable>
+      </View>
       <ToastHost />
     </View>
   );
@@ -299,7 +310,9 @@ function ConfirmControls({
           : 'Mark Trade Completed';
 
   return (
-    <View style={{ marginTop: 'auto' }}>
+    // No `marginTop: 'auto'`: the parent pins this below the scroll view, so pushing it down is both
+    // unnecessary and what used to drive it off the bottom of short screens.
+    <View>
       <Pressable
         onPress={onConfirm}
         disabled={waiting || busy !== null || !ready}
