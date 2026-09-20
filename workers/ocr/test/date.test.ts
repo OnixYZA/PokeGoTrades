@@ -44,12 +44,25 @@ describe('parseCatchDate', () => {
       assert.equal(parse('Caught 03/14/2021', 'DMY')?.caughtAt, '2021-03-14');
     });
 
-    it('flags a date whose order had to be assumed, month first by default', () => {
-      assert.deepEqual(parse('Caught 07/04/2018'), { caughtAt: '2018-07-04', ambiguous: true });
+    it('flags a date whose order had to be assumed, month first by default, and offers the other reading', () => {
+      assert.deepEqual(parse('Caught 07/04/2018'), { caughtAt: '2018-07-04', ambiguous: true, alternate: '2018-04-07' });
     });
 
     it('follows the configured order when it has to assume', () => {
-      assert.deepEqual(parse('Caught 07/04/2018', 'DMY'), { caughtAt: '2018-04-07', ambiguous: true });
+      assert.deepEqual(parse('Caught 07/04/2018', 'DMY'), { caughtAt: '2018-04-07', ambiguous: true, alternate: '2018-07-04' });
+    });
+
+    it('gives an unambiguous date no alternate', () => {
+      assert.equal('alternate' in (parse('Caught 25/12/2019') ?? {}), false);
+      assert.equal('alternate' in (parse('Caught 05/05/2019') ?? {}), false);
+    });
+
+    it('drops a reading that is not a real date in range, so it is not ambiguous after all', () => {
+      // 06/07/2016: June 7 is before the game existed, so it can only be July 6.
+      assert.deepEqual(parse('Caught 06/07/2016'), { caughtAt: '2016-07-06', ambiguous: false });
+      // 09/12/2026, read on 2026-09-20: December 9 has not happened yet, so it can only be September 12.
+      assert.deepEqual(parse('Caught 09/12/2026'), { caughtAt: '2026-09-12', ambiguous: false });
+      assert.deepEqual(parse('Caught 09/12/2026', 'DMY'), { caughtAt: '2026-09-12', ambiguous: false });
     });
 
     it('does not flag a date that reads the same either way', () => {

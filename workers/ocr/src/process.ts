@@ -1,9 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { parseCatchDate } from './date';
 import { PROOF_BUCKET, type Config } from './env';
 import { log } from './log';
 import { recognizeText, UnreadableImageError } from './ocr';
+import { interpretProof } from './parser';
 
 interface ProofRow {
   id: string;
@@ -23,6 +23,10 @@ export interface Summary {
   lostClaim: number;
   /** Stale `processing` rows from a crashed run, returned to `pending` at the start. */
   recovered: number;
+  /** Listings this run set to `lucky = true`, on the strength of an appraisal proof caught before the cutoff. */
+  luckyGranted: number;
+  /** Listings that earned the badge but could not be given it because an offer already exists (see `grantLucky`). */
+  luckyBlocked: number;
   /** True when the run stopped early because the time budget was nearly used up. */
   outOfTime: boolean;
 }
@@ -33,6 +37,8 @@ export interface RunOptions {
 }
 
 const SELECT = 'id, listing_id, kind, storage_path';
+
+const UNREADABLE = { reason: 'unreadable' } as const;
 
 /**
  * One pass over the queue: recover stale claims, then take up to `config.batchSize` pending proofs,
@@ -45,7 +51,17 @@ const SELECT = 'id, listing_id, kind, storage_path';
  * That is what `for update skip locked` gives, without a database function: PostgREST cannot express it.
  */
 export async function processPending(supabase: SupabaseClient, config: Config, options: RunOptions = {}): Promise<Summary> {
-  const summary: Summary = { claimed: 0, verified: 0, failed: 0, released: 0, lostClaim: 0, recovered: 0, outOfTime: false };
+  const summary: Summary = {
+    claimed: 0,
+    verified: 0,
+    failed: 0,
+    released: 0,
+    lostClaim: 0,
+    recovered: 0,
+    luckyGranted: 0,
+    luckyBlocked: 0,
+    outOfTime: false,
+  };
   summary.recovered = await recoverStaleClaims(supabase, config);
 
   const { data: candidates, error } = await supabase
@@ -120,18 +136,24 @@ async function handle(supabase: SupabaseClient, config: Config, row: ProofRow, s
 
   try {
     const image = await download(supabase, row.storage_path);
-    if (!image) return await finish('failed', { reason: 'unreadable' }, { cause: 'file_missing' });
+    if (!image) return await finish('failed', UNREADABLE, { cause: 'file_missing' });
 
     const text = await recognizeText(image, { langPath: config.langPath, timeoutMs: config.imageTimeoutMs });
-    const found = parseCatchDate(text, { order: config.dateOrder });
-    if (!found) return await finish('failed', { reason: 'unreadable' }, { cause: 'no_date' });
+    const verdict = interpretProof(row.kind, text, { order: config.dateOrder });
+    if (verdict.status === 'failed') return await finish('failed', verdict.extracted, { cause: verdict.cause });
 
-    // `ambiguous` is only written when true: the date order was assumed, so day and month may be swapped.
-    const extracted = found.ambiguous ? { caughtAt: found.caughtAt, ambiguous: true } : { caughtAt: found.caughtAt };
-    await finish('verified', extracted, { caughtAt: found.caughtAt, ambiguous: found.ambiguous });
+    // An appraisal that puts the catch before the cutoff earns its listing the Guaranteed Lucky badge. This
+    // happens BEFORE the proof is saved as verified, on purpose: if the run dies in between, the proof is still
+    // `processing`, so it is released and redone and the badge update (which is idempotent) simply repeats.
+    // The other order could leave a verified proof whose listing never got its badge, and nothing would retry it.
+    const lucky = verdict.lucky === 'early' ? await grantLucky(supabase, row.listing_id) : undefined;
+    if (lucky === 'granted') summary.luckyGranted++;
+    if (lucky === 'blocked') summary.luckyBlocked++;
+
+    await finish('verified', verdict.extracted, { ...verdict.extracted, catchVsCutoff: verdict.lucky, lucky });
   } catch (error) {
     if (error instanceof UnreadableImageError) {
-      return await finish('failed', { reason: 'unreadable' }, { cause: 'decode_error', detail: error.message });
+      return await finish('failed', UNREADABLE, { cause: 'decode_error', detail: error.message });
     }
     // Storage or database trouble, or the OCR worker itself could not start. None of that says the proof is
     // bad, so put it back for the next run rather than failing it for good.
@@ -139,6 +161,27 @@ async function handle(supabase: SupabaseClient, config: Config, row: ProofRow, s
     await release(supabase, row.id).catch(() => undefined); // if this fails too, the lease brings it back
     summary.released++;
   }
+}
+
+type LuckyOutcome = 'granted' | 'unchanged' | 'blocked';
+
+/**
+ * Sets `listings.lucky = true`, which is what puts the Guaranteed Lucky badge on the feed card.
+ * - `granted`: the listing was not Lucky and now is.
+ * - `unchanged`: it already was (or the listing is gone), so nothing was written.
+ * - `blocked`: someone has already made an offer on it. `guard_listing_update` refuses any change to a listing's
+ *   trade details from then on (the bait-and-switch rule) and has no exception for the service role. That is a
+ *   final answer, not a fault, so it does not fail the proof or retry it every minute: the proof still verifies,
+ *   the listing stays as it is, and the `luckyBlocked` count and log line say it happened.
+ * Any other error is thrown, and the proof is retried.
+ */
+async function grantLucky(supabase: SupabaseClient, listingId: string): Promise<LuckyOutcome> {
+  const { data, error } = await supabase.from('listings').update({ lucky: true }).eq('id', listingId).eq('lucky', false).select('id');
+  if (error) {
+    if (error.message === 'listing_has_offers') return 'blocked';
+    throw new Error(`Could not update listing ${listingId}: ${error.message}`);
+  }
+  return (data?.length ?? 0) > 0 ? 'granted' : 'unchanged';
 }
 
 /** The image bytes, or `null` when the object does not exist (a permanent failure). Any other error throws. */

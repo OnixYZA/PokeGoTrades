@@ -21,6 +21,8 @@ const FIXTURES = path.resolve(__dirname, '..', 'test', 'fixtures');
 const fixture = (name: string) => fs.readFileSync(path.join(FIXTURES, name));
 type Kind = 'appraisal' | 'movesets' | 'event_badge';
 
+// One handler run has to cover every case in scenario 1, and the default batch of 10 would not.
+process.env.OCR_BATCH_SIZE = '50';
 const config = loadConfig();
 const host = new URL(config.supabaseUrl).hostname;
 if (host !== '127.0.0.1' && host !== 'localhost') {
@@ -43,12 +45,20 @@ async function sellerId(): Promise<string> {
   return data.id as string;
 }
 
-async function newListing(seller: string, label: string): Promise<string> {
+/** A second trainer, to make an offer with. */
+async function buyerId(seller: string): Promise<string> {
+  const { data, error } = await supabase.from('profiles').select('id').neq('id', seller).order('created_at').limit(1).single();
+  if (error || !data) throw new Error(`No second profile to make an offer: ${error?.message}`);
+  return data.id as string;
+}
+
+async function newListing(seller: string, label: string, options: { lucky?: boolean } = {}): Promise<string> {
   const { data, error } = await supabase
     .from('listings')
     .insert({
       seller_id: seller,
       name: `OCR smoke ${label}`,
+      lucky: options.lucky ?? false,
       pokemon_id: 150,
       catch_year: 2024,
       hue: 220,
@@ -61,6 +71,18 @@ async function newListing(seller: string, label: string): Promise<string> {
   if (error || !data) throw new Error(`Could not create a listing: ${error?.message}`);
   listingIds.push(data.id as string);
   return data.id as string;
+}
+
+/** An open chat on the listing, i.e. an offer. From then on `guard_listing_update` freezes the listing's trade details. */
+async function newOffer(listing: string, seller: string, buyer: string): Promise<void> {
+  const { error } = await supabase.from('chats').insert({ listing_id: listing, seller_id: seller, buyer_id: buyer });
+  if (error) throw new Error(`Could not create the offer: ${error.message}`);
+}
+
+async function isLucky(listing: string): Promise<boolean> {
+  const { data, error } = await supabase.from('listings').select('lucky').eq('id', listing).single();
+  if (error || !data) throw new Error(`Could not read listing ${listing}: ${error?.message}`);
+  return data.lucky as boolean;
 }
 
 /** A proof row, with its image uploaded first (as the app does). `image: null` leaves the object missing. */
@@ -100,25 +122,60 @@ async function main(): Promise<void> {
   await sweepLeftovers();
   const seller = await sellerId();
 
-  // --- 1. Every outcome, through the Lambda handler -------------------------------------------------------------
+  // --- 1. Every kind and outcome, through the Lambda handler ------------------------------------------------------
   console.log('\n1. One batch through the Lambda handler');
-  const a = await newListing(seller, 'formats');
-  const b = await newListing(seller, 'failures');
-  const cases: { name: string; id: string; status: string; extracted: unknown }[] = [
-    { name: 'PNG, MM/DD/YYYY', id: await newProof(seller, a, 'appraisal', { bytes: fixture('caught-mdy.png'), contentType: 'image/png' }), status: 'verified', extracted: { caughtAt: '2021-03-14' } },
-    { name: 'JPEG, spaced DD / MM / YYYY', id: await newProof(seller, a, 'movesets', { bytes: fixture('caught-dmy-spaced.jpg'), contentType: 'image/jpeg' }), status: 'verified', extracted: { caughtAt: '2019-12-25' } },
-    { name: 'WebP, 7/4/2018 (day or month first?)', id: await newProof(seller, a, 'event_badge', { bytes: fixture('caught-ambiguous.webp'), contentType: 'image/webp' }), status: 'verified', extracted: { caughtAt: '2018-07-04', ambiguous: true } },
-    { name: 'no catch date (only an unrelated date)', id: await newProof(seller, b, 'appraisal', { bytes: fixture('no-date.png'), contentType: 'image/png' }), status: 'failed', extracted: { reason: 'unreadable' } },
-    { name: 'bytes that are not an image', id: await newProof(seller, b, 'movesets', { bytes: Buffer.from('this is not an image'), contentType: 'image/png' }), status: 'failed', extracted: { reason: 'unreadable' } },
-    { name: 'object missing from storage', id: await newProof(seller, b, 'event_badge', null), status: 'failed', extracted: { reason: 'unreadable' } },
+  const buyer = await buyerId(seller);
+  const png = (name: string) => ({ bytes: fixture(name), contentType: 'image/png' });
+  const notAnImage = { bytes: Buffer.from('this is not an image'), contentType: 'image/png' };
+
+  interface Case {
+    name: string;
+    kind: Kind;
+    image: { bytes: Buffer; contentType: string } | null;
+    status: 'verified' | 'failed';
+    extracted: unknown;
+    /** Whether the listing ends up Guaranteed Lucky. */
+    lucky: boolean;
+    /** The listing starts out Lucky already, or has an offer on it. */
+    listing?: { lucky?: boolean; offer?: boolean };
+  }
+  const UNREADABLE = { reason: 'unreadable' };
+  const cases: Case[] = [
+    // appraisal: the catch date is required, and decides the badge (cutoff 2019-07-01)
+    { name: 'appraisal, PNG, caught 2018-11-23 -> verified, listing earns Lucky', kind: 'appraisal', image: png('caught-2018.png'), status: 'verified', extracted: { caughtAt: '2018-11-23' }, lucky: true },
+    { name: 'appraisal, WebP, 7/4/2018 (either reading is before the cutoff) -> Lucky', kind: 'appraisal', image: { bytes: fixture('caught-ambiguous.webp'), contentType: 'image/webp' }, status: 'verified', extracted: { caughtAt: '2018-07-04', ambiguous: true }, lucky: true },
+    { name: 'appraisal, PNG, caught 2021-03-14 -> verified, no badge', kind: 'appraisal', image: png('caught-mdy.png'), status: 'verified', extracted: { caughtAt: '2021-03-14' }, lucky: false },
+    { name: 'appraisal, JPEG, spaced 25 / 12 / 2019 -> verified, no badge', kind: 'appraisal', image: { bytes: fixture('caught-dmy-spaced.jpg'), contentType: 'image/jpeg' }, status: 'verified', extracted: { caughtAt: '2019-12-25' }, lucky: false },
+    { name: 'appraisal, 03/09/2019 (9 March or 3 September) -> verified, badge NOT granted on a guess', kind: 'appraisal', image: png('caught-straddle.png'), status: 'verified', extracted: { caughtAt: '2019-03-09', ambiguous: true }, lucky: false },
+    { name: 'appraisal, already-Lucky listing -> verified, stays Lucky', kind: 'appraisal', image: png('caught-2018.png'), status: 'verified', extracted: { caughtAt: '2018-11-23' }, lucky: true, listing: { lucky: true } },
+    { name: 'appraisal, listing already has an offer -> verified, badge blocked by the guard', kind: 'appraisal', image: png('caught-2018.png'), status: 'verified', extracted: { caughtAt: '2018-11-23' }, lucky: false, listing: { offer: true } },
+    { name: 'appraisal, no catch date (only an unrelated date) -> failed', kind: 'appraisal', image: png('no-date.png'), status: 'failed', extracted: UNREADABLE, lucky: false },
+    { name: 'appraisal, bytes that are not an image -> failed', kind: 'appraisal', image: notAnImage, status: 'failed', extracted: UNREADABLE, lucky: false },
+    { name: 'appraisal, object missing from storage -> failed', kind: 'appraisal', image: null, status: 'failed', extracted: UNREADABLE, lucky: false },
+    // movesets / event_badge: no date needed, readable text is enough, and they never touch the badge
+    { name: 'movesets, readable screen with no date -> verified', kind: 'movesets', image: png('no-date.png'), status: 'verified', extracted: {}, lucky: false },
+    { name: 'event_badge, screen with a 2018 date -> verified, date ignored, no badge', kind: 'event_badge', image: png('caught-2018.png'), status: 'verified', extracted: {}, lucky: false },
+    { name: 'movesets, blank image (no text) -> failed', kind: 'movesets', image: png('blank.png'), status: 'failed', extracted: UNREADABLE, lucky: false },
+    { name: 'event_badge, bytes that are not an image -> failed', kind: 'event_badge', image: notAnImage, status: 'failed', extracted: UNREADABLE, lucky: false },
   ];
+
+  const prepared: { case: Case; proof: string; listing: string }[] = [];
+  for (const [i, c] of cases.entries()) {
+    const listing = await newListing(seller, `case ${i + 1}`, { lucky: c.listing?.lucky });
+    if (c.listing?.offer) await newOffer(listing, seller, buyer);
+    prepared.push({ case: c, listing, proof: await newProof(seller, listing, c.kind, c.image) });
+  }
+
   const summary = await handler({}, { getRemainingTimeInMillis: () => 5 * 60_000 });
   console.log(`  handler returned ${JSON.stringify(summary)}`);
-  for (const c of cases) {
-    const got = await state(c.id);
-    check(got.status === c.status && same(got.extracted, c.extracted), c.name, got);
+  for (const { case: c, proof, listing } of prepared) {
+    const got = await state(proof);
+    const lucky = await isLucky(listing);
+    check(got.status === c.status && same(got.extracted, c.extracted) && lucky === c.lucky, c.name, { ...got, lucky });
   }
   check(summary.claimed >= cases.length && summary.released === 0, 'nothing was released for retry', summary);
+  check(summary.luckyGranted === 2, 'two listings were newly made Lucky (not the one that already was)', summary.luckyGranted);
+  check(summary.luckyBlocked === 1, 'one listing could not be, because it has an offer', summary.luckyBlocked);
 
   // --- 2. Two workers, same queue: no proof is claimed twice ---------------------------------------------------
   console.log('\n2. Two overlapping workers over three pending proofs');

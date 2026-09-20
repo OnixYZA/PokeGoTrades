@@ -6,6 +6,8 @@ export interface CatchDate {
   caughtAt: string;
   /** Both parts could have been the month, so `order` decided. The date may be off by a swap of day and month. */
   ambiguous: boolean;
+  /** Only when `ambiguous`: the same digits read the other way round. Which of the two is right is unknown. */
+  alternate?: string;
 }
 
 export interface ParseOptions {
@@ -29,13 +31,26 @@ const ANCHOR = /\bc[ao]ught\b/gi;
 // Spaces are allowed anywhere, because the screenshot is often read as "03 / 14 / 2021". The year is 4 digits.
 const DATE = /(\d{1,2})\s*[/\\|.-]\s*(\d{1,2})\s*[/\\|.-]\s*((?:19|20)\d{2})(?!\d)/;
 
+/** `YYYY-MM-DD` if this is a real calendar date inside the plausible range, else `null`. */
+function plausible(year: number, month: number, day: number, latest: number): string | null {
+  const time = Date.UTC(year, month - 1, day);
+  const real = new Date(time);
+  // Date.UTC rolls 31/02 over to March, and month 14 into the next year: only accept a date that survives the round trip.
+  if (real.getUTCFullYear() !== year || real.getUTCMonth() !== month - 1 || real.getUTCDate() !== day) return null;
+  if (time < EARLIEST || time > latest) return null;
+  return real.toISOString().slice(0, 10);
+}
+
 /**
  * Finds the catch date in OCR text. Pokémon GO prints it after "Caught", as MM/DD/YYYY or DD/MM/YYYY
  * depending on the game's language. Returns `null` when there is no believable date, and prefers that to a
  * guess: a wrong date could wrongly grant or deny a listing's "Guaranteed Lucky" badge.
  *
- * Reading the order: a part above 12 has to be the day, which settles it. When both parts could be the
- * month, `order` decides (default month first) and the result is flagged `ambiguous`.
+ * The order is settled by elimination: each way of reading the two numbers (month first, day first) counts
+ * only if it is a real date in range, so `25/12/2019` can only be day first, and `09/12/2026` cannot be
+ * December in a year that has not reached December. If exactly one reading survives, that is the date. If both
+ * do (`07/04/2018`), `order` picks (default month first), the result is flagged `ambiguous`, and the other
+ * reading is returned as `alternate` so callers can tell whether the doubt matters to them.
  */
 export function parseCatchDate(text: string, options: ParseOptions = {}): CatchDate | null {
   const { order = 'MDY', now = new Date() } = options;
@@ -52,24 +67,17 @@ export function parseCatchDate(text: string, options: ParseOptions = {}): CatchD
     const second = Number(match[2]);
     const year = Number(match[3]);
 
-    let month: number;
-    let day: number;
-    let ambiguous = false;
-    if (first > 12 && second <= 12) [day, month] = [first, second];
-    else if (second > 12 && first <= 12) [month, day] = [first, second];
-    else if (first > 12 && second > 12) continue;
-    else {
-      [month, day] = order === 'MDY' ? [first, second] : [second, first];
-      ambiguous = first !== second;
-    }
+    const monthFirst: [number, number] = [first, second]; // [month, day]
+    const dayFirst: [number, number] = [second, first];
+    const readings = new Set(
+      (order === 'MDY' ? [monthFirst, dayFirst] : [dayFirst, monthFirst])
+        .map(([month, day]) => plausible(year, month, day, latest))
+        .filter((date): date is string => date !== null),
+    );
 
-    const time = Date.UTC(year, month - 1, day);
-    const real = new Date(time);
-    // Date.UTC rolls 31/02 over to March: only accept a date that survives the round trip.
-    if (real.getUTCFullYear() !== year || real.getUTCMonth() !== month - 1 || real.getUTCDate() !== day) continue;
-    if (time < EARLIEST || time > latest) continue;
-
-    return { caughtAt: real.toISOString().slice(0, 10), ambiguous };
+    const [caughtAt, alternate] = [...readings];
+    if (caughtAt === undefined) continue;
+    return alternate === undefined ? { caughtAt, ambiguous: false } : { caughtAt, ambiguous: true, alternate };
   }
   return null;
 }
