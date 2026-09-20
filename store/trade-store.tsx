@@ -25,11 +25,12 @@ import {
   lockSnapshot,
   LOCK_HELD_ELSEWHERE,
   type LockConfirmations,
+  type LockVersion,
 } from './lock-state';
 
 // The lock rules live in ./lock-state so they can be tested without the Expo/Supabase module graph.
 // Re-exported here because this is where the rest of the app already imports them from.
-export { LOCK_HELD_ELSEWHERE, type LockConfirmations };
+export { LOCK_HELD_ELSEWHERE, type LockConfirmations, type LockVersion };
 
 function byId<T extends { id: string }>(records: T[]): Record<string, T> {
   const out: Record<string, T> = {};
@@ -165,7 +166,7 @@ interface TradeState {
    * trade the server still holds as confirmed. Optimistic local writes stamp it with the client clock —
    * see `applyLockEvent`, which also explains why a release ignores it.
    */
-  lockEventVersion: Record<string, string>;
+  lockEventVersion: Record<string, LockVersion>;
   /** chatId -> each side's confirmation of the trade that chat holds. Live chats only. */
   lockConfirmations: Record<string, LockConfirmations>;
   /** The signed-in trainer. Set by `LiveSync`; message roles are derived against it. */
@@ -309,6 +310,16 @@ let inboxRefreshTimer: ReturnType<typeof setTimeout> | null = null;
  */
 let inboxRead = 0;
 const chatReads = new Map<string, number>();
+
+/**
+ * The device's own clock-free ordering. Every read and every lock observation takes the next number, so
+ * "did this happen after that read was issued?" is answered by comparing two integers produced here —
+ * never by comparing a `new Date()` against a server timestamp, which are two unrelated clocks.
+ */
+let lockSeq = 0;
+function nextLockSeq(): number {
+  return ++lockSeq;
+}
 
 function beginChatRead(chatId: string): number {
   const seq = (chatReads.get(chatId) ?? 0) + 1;
@@ -596,15 +607,19 @@ export const useTradeStore = create<TradeState>((set, get) => {
         // Do not wait for the Realtime echo: freeze the siblings right away. 'update', not 'insert':
         // the buyer's Handshake auto-opens on the *other* party's device, never on the seller's.
         set((state) =>
-          applyLockEvent(state, {
-            op: 'update',
-            released: false,
-            listingId: lock.listing_id,
-            chatId: lock.chat_id,
-            sellerConfirmedAt: lock.seller_confirmed_at,
-            buyerConfirmedAt: lock.buyer_confirmed_at,
-            updatedAt: lock.updated_at,
-          }),
+          applyLockEvent(
+            state,
+            {
+              op: 'update',
+              released: false,
+              listingId: lock.listing_id,
+              chatId: lock.chat_id,
+              sellerConfirmedAt: lock.seller_confirmed_at,
+              buyerConfirmedAt: lock.buyer_confirmed_at,
+              updatedAt: lock.updated_at,
+            },
+            nextLockSeq(),
+          ),
         );
         void syncMessages(chatId);
       });
@@ -624,15 +639,19 @@ export const useTradeStore = create<TradeState>((set, get) => {
         const chat = get().chats[chatId];
         if (chat) {
           set((state) =>
-            applyLockEvent(state, {
-              op: 'delete',
-              released: true,
-              listingId: chat.listingId,
-              chatId,
-              sellerConfirmedAt: null,
-              buyerConfirmedAt: null,
-              updatedAt: null, // a release always applies; see isStaleLock
-            }),
+            applyLockEvent(
+              state,
+              {
+                op: 'delete',
+                released: true,
+                listingId: chat.listingId,
+                chatId,
+                sellerConfirmedAt: null,
+                buyerConfirmedAt: null,
+                updatedAt: null, // a release always applies; see isStaleLock
+              },
+              nextLockSeq(),
+            ),
           );
         }
         void syncMessages(chatId);
@@ -659,12 +678,15 @@ export const useTradeStore = create<TradeState>((set, get) => {
                 ...state.lockConfirmations,
                 [chatId]: chat?.myRole === 'seller' ? { ...current, sellerConfirmedAt: now } : { ...current, buyerConfirmedAt: now },
               },
-              // Stamped with the client clock so an older in-flight read cannot undo it: `lockSnapshot`
-              // compares this against its own `readAt`, and both come from this same clock. The server
-              // cannot contradict it either — `trade_locks_not_both_confirmed` means the only lock event
-              // that can follow my confirmation is my own withdrawal or a release, and a release always
-              // applies regardless of version.
-              lockEventVersion: { ...state.lockEventVersion, [chatId]: now },
+              // `confirm_trade` reports the resulting state, not the row, so there is no server timestamp
+              // to record here — `updatedAt` stays whatever we already held. What protects this write is
+              // the local sequence: an in-flight read carries a lower one and cannot overrule it. The
+              // server cannot contradict it either — `trade_locks_not_both_confirmed` means the only lock
+              // event that can follow my confirmation is my own withdrawal or a release.
+              lockEventVersion: {
+                ...state.lockEventVersion,
+                [chatId]: { updatedAt: state.lockEventVersion[chatId]?.updatedAt ?? null, seq: nextLockSeq() },
+              },
             };
           });
         } else {
@@ -692,8 +714,9 @@ export const useTradeStore = create<TradeState>((set, get) => {
             // Stamped with the server's own `trade_locks.updated_at` (the RPC now returns it), not the
             // client clock: `lockSnapshot` and `isStaleLock` compare this against other server timestamps,
             // and a client clock running ahead of the server could make a partner's later, genuinely newer
-            // confirmation frame look older and get dropped.
-            lockEventVersion: { ...state.lockEventVersion, [chatId]: updatedAt },
+            // confirmation frame look older and get dropped. The local sequence rides alongside it so an
+            // in-flight read cannot overrule this write either.
+            lockEventVersion: { ...state.lockEventVersion, [chatId]: { updatedAt, seq: nextLockSeq() } },
           };
         });
         void syncMessages(chatId);
@@ -719,7 +742,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
     hydrate: async () => {
       if (!USE_SUPABASE || !get().me) return;
       const seq = ++inboxRead;
-      const readAt = new Date().toISOString();
+      const readSeq = nextLockSeq();
       try {
         const [inbox, locks] = await Promise.all([chatsApi.fetchInbox(), chatsApi.fetchMyLocks()]);
         const listings = await fetchListingsByIds([...new Set(inbox.map((chat) => chat.listingId))]);
@@ -730,7 +753,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
             chats, // replaces: a chat RLS no longer shows must vanish locally too
             messages: Object.fromEntries(Object.entries(state.messages).filter(([id]) => id in chats)),
             listings: { ...state.listings, ...byId(listings) },
-            ...lockSnapshot(state, locks, listings, readAt),
+            ...lockSnapshot(state, locks, listings, readSeq),
           };
         });
       } catch (error) {
@@ -747,7 +770,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
       const me = get().me;
       if (!USE_SUPABASE || !me) return 'missing';
       const seq = beginChatRead(chatId);
-      const readAt = new Date().toISOString();
+      const readSeq = nextLockSeq();
       try {
         const row = await chatsApi.fetchInboxRow(chatId);
         if (!row) {
@@ -764,7 +787,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
           chats: { ...state.chats, [chatId]: row },
           listings: { ...state.listings, ...byId(listings) },
           messages: { ...state.messages, [chatId]: mergeMessages(state.messages[chatId] ?? [], messages) },
-          ...lockSnapshot(state, locks, listings, readAt),
+          ...lockSnapshot(state, locks, listings, readSeq),
         }));
         return 'found';
       } catch (error) {
@@ -786,7 +809,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
           chat_updated: () => scheduleInboxRefresh(),
           lock: (payload) => {
             const event = chatsApi.parseLockEvent(payload);
-            if (event) set((state) => applyLockEvent(state, event));
+            if (event) set((state) => applyLockEvent(state, event, nextLockSeq()));
           },
           listing_status: (payload) => {
             const event = chatsApi.parseListingStatusEvent(payload);

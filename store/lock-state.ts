@@ -22,6 +22,27 @@ export interface LockConfirmations {
 }
 
 /**
+ * How one chat's lock state is ordered. Two questions need answering and they need different answers,
+ * which is why this is a pair and not a single value:
+ *
+ * - "Is this frame older than the server state I already applied?" orders two *server* writes, possibly
+ *   made on the partner's device. Only the server can order those, so that is `updatedAt`
+ *   (`trade_locks.updated_at`). A local counter cannot answer it: frames arrive carrying no local
+ *   sequence, so stamping them on arrival would make every frame look newest and the guard a no-op.
+ * - "Did I learn this after that read was issued?" is entirely about events on *this device*, so it needs
+ *   no clock at all — just `seq`, a local counter that only ever goes up. This used to be a client
+ *   `new Date()` compared against a server timestamp, which is a comparison between two unrelated clocks:
+ *   a device running fast would discard lock state it had correctly learned.
+ *
+ * `updatedAt` is null when the entry came from a purely local optimistic write (an RPC that reports no
+ * timestamp) or from a server too old to send one. `seq` is always meaningful.
+ */
+export interface LockVersion {
+  updatedAt: string | null;
+  seq: number;
+}
+
+/**
  * The slice of the store these reducers read. Narrower than `TradeState` so the rules can be exercised
  * with a handful of literals instead of a whole store.
  */
@@ -30,8 +51,8 @@ export interface LockSlice {
   lockByListing: Record<string, string>;
   /** chatId -> each side's confirmation of the trade that chat holds. */
   lockConfirmations: Record<string, LockConfirmations>;
-  /** chatId -> `trade_locks.updated_at` of the newest lock state applied. See `isStaleLock`. */
-  lockEventVersion: Record<string, string>;
+  /** chatId -> what we know about the ordering of that chat's lock state. See `LockVersion`. */
+  lockEventVersion: Record<string, LockVersion>;
   /** A chat whose Handshake should open by itself: the buyer's, when the seller locks (D1). */
   handshakeRequest: string | null;
   /** Only `myRole` is read, to decide whose Handshake auto-opens. */
@@ -53,8 +74,10 @@ export function isStaleLock(
   released: boolean,
 ): boolean {
   if (released || !updatedAt) return false; // unordered payload (pre-migration server): apply it
-  const seen = state.lockEventVersion[chatId];
-  return seen !== undefined && updatedAt < seen;
+  const seen = state.lockEventVersion[chatId]?.updatedAt;
+  // Nothing server-stamped to compare against (first sighting, or the last write was a local one whose
+  // server timestamp we never learned): there is no basis to call this frame stale, so let it through.
+  return seen !== undefined && seen !== null && updatedAt < seen;
 }
 
 /**
@@ -65,7 +88,11 @@ export type LockPatch = Partial<
   Pick<LockSlice, 'lockByListing' | 'lockConfirmations' | 'lockEventVersion' | 'handshakeRequest'>
 >;
 
-export function applyLockEvent(state: LockSlice, event: LockEvent): LockPatch {
+/**
+ * @param seq the caller's next local sequence number — see `LockVersion.seq`. Passed in rather than read
+ * from a counter here so these reducers stay pure and can be exercised with plain literals.
+ */
+export function applyLockEvent(state: LockSlice, event: LockEvent, seq: number): LockPatch {
   if (isStaleLock(state, event.chatId, event.updatedAt, event.released)) return {};
 
   const lockByListing = { ...state.lockByListing };
@@ -73,7 +100,13 @@ export function applyLockEvent(state: LockSlice, event: LockEvent): LockPatch {
   const lockEventVersion = { ...state.lockEventVersion };
   let handshakeRequest = state.handshakeRequest;
 
-  if (event.updatedAt) lockEventVersion[event.chatId] = event.updatedAt;
+  // Applying anything at all is something this device just learned, so `seq` always advances — even for a
+  // payload that carried no server timestamp, which is what keeps `lockSnapshot` from overruling it.
+  // A frame without its own `updatedAt` keeps whatever server token we already held.
+  lockEventVersion[event.chatId] = {
+    updatedAt: event.updatedAt ?? state.lockEventVersion[event.chatId]?.updatedAt ?? null,
+    seq,
+  };
 
   if (event.released) {
     if (lockByListing[event.listingId] === event.chatId) delete lockByListing[event.listingId];
@@ -101,8 +134,11 @@ export function lockSnapshot(
   state: Pick<LockSlice, 'lockByListing' | 'lockConfirmations' | 'lockEventVersion'>,
   locks: TradeLockRow[],
   listings: Listing[],
-  /** When this read left the client. Anything learned since is newer than the read, by construction. */
-  readAt: string,
+  /**
+   * The local sequence number taken when this read was issued. Anything this device learned afterwards
+   * carries a higher `seq`, by construction — no clock is consulted on either side of that comparison.
+   */
+  readSeq: number,
 ): Pick<LockSlice, 'lockByListing' | 'lockConfirmations' | 'lockEventVersion'> {
   const holders = new Map(locks.map((lock) => [lock.listing_id, lock.chat_id]));
   const lockByListing = { ...state.lockByListing };
@@ -112,14 +148,14 @@ export function lockSnapshot(
   }
 
   const lockConfirmations: Record<string, LockConfirmations> = {};
-  const lockEventVersion: Record<string, string> = {};
+  const lockEventVersion: Record<string, LockVersion> = {};
 
   // A lock we learned about after this read was issued cannot be overruled by it — not its confirmations,
   // and not the fact that it exists. Rebuilding blindly from the response is what let a slow hydrate
   // un-confirm a trade that had been confirmed while it was in flight.
   for (const [chatId, version] of Object.entries(state.lockEventVersion)) {
     const current = state.lockConfirmations[chatId];
-    if (version >= readAt && current) {
+    if (version.seq > readSeq && current) {
       lockConfirmations[chatId] = current;
       lockEventVersion[chatId] = version;
     }
@@ -131,7 +167,8 @@ export function lockSnapshot(
       sellerConfirmedAt: lock.seller_confirmed_at,
       buyerConfirmedAt: lock.buyer_confirmed_at,
     };
-    lockEventVersion[lock.chat_id] = lock.updated_at;
+    // These rows are what this read knows, so they carry the read's own sequence number.
+    lockEventVersion[lock.chat_id] = { updatedAt: lock.updated_at, seq: readSeq };
   }
   return { lockByListing, lockConfirmations, lockEventVersion };
 }
