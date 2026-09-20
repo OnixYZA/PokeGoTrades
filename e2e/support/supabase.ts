@@ -106,13 +106,53 @@ export async function createListingFixture(admin: SupabaseClient, seller: Traine
 export async function removeListingFixture(
   admin: SupabaseClient,
   listingId: string,
-  tradesCounts: Record<string, number>,
+  trainers: Trainer[],
 ): Promise<void> {
+  // Count before deleting: this is how much *this* fixture added, which is what we have to take back.
+  const { data: trades, error } = await admin.from('completed_trades').select('id').eq('listing_id', listingId);
+  if (error) throw new Error(`Could not read the fixture's trades: ${error.message}`);
+  const added = trades?.length ?? 0;
+
   await admin.from('completed_trades').delete().eq('listing_id', listingId);
   await admin.from('listings').delete().eq('id', listingId);
-  for (const [id, trades_count] of Object.entries(tradesCounts)) {
-    await admin.from('profiles').update({ trades_count }).eq('id', id);
+  if (added > 0) await Promise.all(trainers.map((t) => decrementTrades(admin, t.id, added)));
+}
+
+/**
+ * Takes `by` off a trainer's `trades_count` relatively, so teardown only ever undoes what its own run
+ * added.
+ *
+ * This used to snapshot every counter in `beforeAll` and write the snapshots back in `afterAll`. Two
+ * things were wrong with that. A run killed between the trade and the teardown (CI timeout, SIGKILL) left
+ * the increment in place, and the next run read the inflated number as its baseline and restored *that* —
+ * so every crash ratcheted the counter up permanently, and nothing asserted an absolute count, so nothing
+ * ever noticed. And with `workers > 1`, two specs sharing these trainers would both snapshot the same
+ * starting value and the later teardown would stamp its stale snapshot over the other's work.
+ *
+ * PostgREST cannot express `set trades_count = trades_count - 1`, so the relative update is done as a
+ * compare-and-swap: read, then write conditioned on the value not having moved. A concurrent writer makes
+ * the update match zero rows, and we re-read and try again rather than clobbering it.
+ */
+async function decrementTrades(admin: SupabaseClient, id: string, by: number, attempts = 5): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const { data: row, error: readError } = await admin
+      .from('profiles')
+      .select('trades_count')
+      .eq('id', id)
+      .single();
+    if (readError) throw new Error(`Could not read trades_count for ${id}: ${readError.message}`);
+
+    const current = row.trades_count as number;
+    const { data: updated, error: writeError } = await admin
+      .from('profiles')
+      .update({ trades_count: Math.max(0, current - by) })
+      .eq('id', id)
+      .eq('trades_count', current) // the compare half: nobody moved it since the read
+      .select('id');
+    if (writeError) throw new Error(`Could not restore trades_count for ${id}: ${writeError.message}`);
+    if (updated && updated.length > 0) return;
   }
+  throw new Error(`Could not restore trades_count for ${id}: it kept changing under ${attempts} attempts`);
 }
 
 export async function tradesCounts(admin: SupabaseClient, trainers: Trainer[]): Promise<Record<string, number>> {

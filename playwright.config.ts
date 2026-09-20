@@ -39,7 +39,10 @@ export default defineConfig({
   webServer: {
     command: `npx expo export -p web && npx expo serve --port ${PORT}`,
     url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
+    // Never reuse: the whole point of the `expo export` above is that the suite runs against the code as
+    // it is right now. Reusing a server left over from an earlier session silently tests that older
+    // bundle and reports it green — a fix can look verified without ever having been exercised.
+    reuseExistingServer: false,
     timeout: 240_000,
     env: { EXPO_PUBLIC_DATA_SOURCE: 'supabase', CI: '1' },
   },

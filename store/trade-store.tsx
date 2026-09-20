@@ -156,6 +156,13 @@ interface TradeState {
   /** listingId -> the one chat currently holding that listing's trade lock, if any
    *  (or `LOCK_HELD_ELSEWHERE` when it is locked but the holder is not visible to me). */
   lockByListing: Record<string, string>;
+  /**
+   * Per chat, the `trade_locks.updated_at` of the newest lock state applied. Any frame or snapshot row
+   * older than this is stale and is dropped, which is what stops a slow `hydrate()` from un-confirming a
+   * trade the server still holds as confirmed. Optimistic local writes stamp it with the client clock —
+   * see `applyLockEvent`, which also explains why a release ignores it.
+   */
+  lockEventVersion: Record<string, string>;
   /** chatId -> each side's confirmation of the trade that chat holds. Live chats only. */
   lockConfirmations: Record<string, LockConfirmations>;
   /** The signed-in trainer. Set by `LiveSync`; message roles are derived against it. */
@@ -280,34 +287,71 @@ function newestServerTimestamp(list: ChatMessage[] | undefined): string | undefi
  * and anything else clears it. Confirmations come from the locks I am a party to.
  */
 function lockSnapshot(
-  state: Pick<TradeState, 'lockByListing'>,
+  state: Pick<TradeState, 'lockByListing' | 'lockConfirmations' | 'lockEventVersion'>,
   locks: chatsApi.TradeLockRow[],
   listings: Listing[],
-): Pick<TradeState, 'lockByListing' | 'lockConfirmations'> {
+  /** When this read left the client. Anything learned since is newer than the read, by construction. */
+  readAt: string,
+): Pick<TradeState, 'lockByListing' | 'lockConfirmations' | 'lockEventVersion'> {
   const holders = new Map(locks.map((lock) => [lock.listing_id, lock.chat_id]));
   const lockByListing = { ...state.lockByListing };
   for (const listing of listings) {
     if (listing.status === 'locked') lockByListing[listing.id] = holders.get(listing.id) ?? LOCK_HELD_ELSEWHERE;
     else if (listing.status !== undefined) delete lockByListing[listing.id];
   }
+
   const lockConfirmations: Record<string, LockConfirmations> = {};
+  const lockEventVersion: Record<string, string> = {};
+
+  // A lock we learned about after this read was issued cannot be overruled by it — not its confirmations,
+  // and not the fact that it exists. Rebuilding blindly from the response is what let a slow hydrate
+  // un-confirm a trade that had been confirmed while it was in flight.
+  for (const [chatId, version] of Object.entries(state.lockEventVersion)) {
+    const current = state.lockConfirmations[chatId];
+    if (version >= readAt && current) {
+      lockConfirmations[chatId] = current;
+      lockEventVersion[chatId] = version;
+    }
+  }
+
   for (const lock of locks) {
+    if (lock.chat_id in lockConfirmations) continue; // a newer local observation already won
     lockConfirmations[lock.chat_id] = {
       sellerConfirmedAt: lock.seller_confirmed_at,
       buyerConfirmedAt: lock.buyer_confirmed_at,
     };
+    lockEventVersion[lock.chat_id] = lock.updated_at;
   }
-  return { lockByListing, lockConfirmations };
+  return { lockByListing, lockConfirmations, lockEventVersion };
+}
+
+/**
+ * True when this observation of a lock is older than what we already applied for that chat.
+ *
+ * A release is never stale: the row is gone, and `updated_at` on a DELETE is the value the row held before
+ * it was removed, so it can legitimately look older than a confirmation that preceded it. Ignoring a
+ * release would strand the UI on a lock that no longer exists, which is far worse than replaying one.
+ */
+function isStaleLock(state: TradeState, chatId: string, updatedAt: string | null, released: boolean): boolean {
+  if (released || !updatedAt) return false; // unordered payload (pre-migration server): apply it
+  const seen = state.lockEventVersion[chatId];
+  return seen !== undefined && updatedAt < seen;
 }
 
 function applyLockEvent(state: TradeState, event: chatsApi.LockEvent): Partial<TradeState> {
+  if (isStaleLock(state, event.chatId, event.updatedAt, event.released)) return {};
+
   const lockByListing = { ...state.lockByListing };
   const lockConfirmations = { ...state.lockConfirmations };
+  const lockEventVersion = { ...state.lockEventVersion };
   let handshakeRequest = state.handshakeRequest;
+
+  if (event.updatedAt) lockEventVersion[event.chatId] = event.updatedAt;
 
   if (event.released) {
     if (lockByListing[event.listingId] === event.chatId) delete lockByListing[event.listingId];
     delete lockConfirmations[event.chatId];
+    delete lockEventVersion[event.chatId]; // the lock is gone; a later lock on this chat starts fresh
     if (handshakeRequest === event.chatId) handshakeRequest = null;
   } else {
     lockByListing[event.listingId] = event.chatId;
@@ -318,7 +362,7 @@ function applyLockEvent(state: TradeState, event: chatsApi.LockEvent): Partial<T
     // D1: the seller locked *my* offer, so my Handshake opens by itself.
     if (event.op === 'insert' && state.chats[event.chatId]?.myRole === 'buyer') handshakeRequest = event.chatId;
   }
-  return { lockByListing, lockConfirmations, handshakeRequest };
+  return { lockByListing, lockConfirmations, lockEventVersion, handshakeRequest };
 }
 
 function applyListingStatus(state: TradeState, listingId: string, status: ListingStatus): Partial<TradeState> {
@@ -343,6 +387,7 @@ function dropChat(state: TradeState, chatId: string): Partial<TradeState> {
     chats: omit(state.chats, chatId),
     messages: omit(state.messages, chatId),
     lockConfirmations: omit(state.lockConfirmations, chatId),
+    lockEventVersion: omit(state.lockEventVersion, chatId),
     lockByListing: state.lockByListing[chat.listingId] === chatId ? omit(state.lockByListing, chat.listingId) : state.lockByListing,
   };
 }
@@ -352,6 +397,22 @@ function dropChat(state: TradeState, chatId: string): Partial<TradeState> {
 /** Chats whose `chat:<id>` channel is open right now, so `resync` knows which threads to gap-fill. */
 const focusedChats = new Set<string>();
 let inboxRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Request sequencing for the reads that replace a whole slice of state, so a slow one landing after a
+ * newer one cannot put the older answer back (the same guard `lib/use-feed.ts` uses for the feed).
+ *
+ * `hydrate` and `refreshInbox` share a counter because both replace the inbox wholesale; `loadChat` is
+ * counted per chat, so opening one chat never invalidates a load already running for another.
+ */
+let inboxRead = 0;
+const chatReads = new Map<string, number>();
+
+function beginChatRead(chatId: string): number {
+  const seq = (chatReads.get(chatId) ?? 0) + 1;
+  chatReads.set(chatId, seq);
+  return seq;
+}
 
 const NOT_SIGNED_IN: ErrorInfo = {
   code: 'no_session',
@@ -390,10 +451,12 @@ export const useTradeStore = create<TradeState>((set, get) => {
   /** Cheaper than `hydrate`: just the inbox (preview / unread / status), for the frequent `chat_updated`. */
   async function refreshInbox(): Promise<void> {
     if (!get().me) return;
+    const seq = ++inboxRead;
     try {
       const inbox = await chatsApi.fetchInbox();
       const missing = [...new Set(inbox.map((c) => c.listingId))].filter((id) => !get().listings[id]);
       const listings = await fetchListingsByIds(missing);
+      if (seq !== inboxRead) return; // a newer inbox read started while this one was in flight
       set((state) => {
         const chats = byId(inbox);
         return {
@@ -490,6 +553,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
     messages: seededChats.messages,
     lockByListing: {},
     lockConfirmations: {},
+    lockEventVersion: {},
     me: null,
     handshakeRequest: null,
     clearHandshakeRequest: () => set({ handshakeRequest: null }),
@@ -637,6 +701,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
             chatId: lock.chat_id,
             sellerConfirmedAt: lock.seller_confirmed_at,
             buyerConfirmedAt: lock.buyer_confirmed_at,
+            updatedAt: lock.updated_at,
           }),
         );
         void syncMessages(chatId);
@@ -664,6 +729,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
               chatId,
               sellerConfirmedAt: null,
               buyerConfirmedAt: null,
+              updatedAt: null, // a release always applies; see isStaleLock
             }),
           );
         }
@@ -691,6 +757,12 @@ export const useTradeStore = create<TradeState>((set, get) => {
                 ...state.lockConfirmations,
                 [chatId]: chat?.myRole === 'seller' ? { ...current, sellerConfirmedAt: now } : { ...current, buyerConfirmedAt: now },
               },
+              // Stamped with the client clock so an older in-flight read cannot undo it: `lockSnapshot`
+              // compares this against its own `readAt`, and both come from this same clock. The server
+              // cannot contradict it either — `trade_locks_not_both_confirmed` means the only lock event
+              // that can follow my confirmation is my own withdrawal or a release, and a release always
+              // applies regardless of version.
+              lockEventVersion: { ...state.lockEventVersion, [chatId]: now },
             };
           });
         } else {
@@ -715,6 +787,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
               ...state.lockConfirmations,
               [chatId]: chat?.myRole === 'seller' ? { ...current, sellerConfirmedAt: null } : { ...current, buyerConfirmedAt: null },
             },
+            lockEventVersion: { ...state.lockEventVersion, [chatId]: new Date().toISOString() },
           };
         });
         void syncMessages(chatId);
@@ -739,16 +812,19 @@ export const useTradeStore = create<TradeState>((set, get) => {
 
     hydrate: async () => {
       if (!USE_SUPABASE || !get().me) return;
+      const seq = ++inboxRead;
+      const readAt = new Date().toISOString();
       try {
         const [inbox, locks] = await Promise.all([chatsApi.fetchInbox(), chatsApi.fetchMyLocks()]);
         const listings = await fetchListingsByIds([...new Set(inbox.map((chat) => chat.listingId))]);
+        if (seq !== inboxRead) return; // a newer inbox read started while this one was in flight
         set((state) => {
           const chats = byId(inbox);
           return {
             chats, // replaces: a chat RLS no longer shows must vanish locally too
             messages: Object.fromEntries(Object.entries(state.messages).filter(([id]) => id in chats)),
             listings: { ...state.listings, ...byId(listings) },
-            ...lockSnapshot(state, locks, listings),
+            ...lockSnapshot(state, locks, listings, readAt),
           };
         });
       } catch (error) {
@@ -764,10 +840,12 @@ export const useTradeStore = create<TradeState>((set, get) => {
     loadChat: async (chatId) => {
       const me = get().me;
       if (!USE_SUPABASE || !me) return 'missing';
+      const seq = beginChatRead(chatId);
+      const readAt = new Date().toISOString();
       try {
         const row = await chatsApi.fetchInboxRow(chatId);
         if (!row) {
-          set((state) => dropChat(state, chatId));
+          if (seq === chatReads.get(chatId)) set((state) => dropChat(state, chatId));
           return 'missing';
         }
         const [listings, messages, locks] = await Promise.all([
@@ -775,11 +853,12 @@ export const useTradeStore = create<TradeState>((set, get) => {
           chatsApi.fetchMessages(chatId, me.id),
           chatsApi.fetchMyLocks(),
         ]);
+        if (seq !== chatReads.get(chatId)) return 'found'; // superseded by a newer load of this chat
         set((state) => ({
           chats: { ...state.chats, [chatId]: row },
           listings: { ...state.listings, ...byId(listings) },
           messages: { ...state.messages, [chatId]: mergeMessages(state.messages[chatId] ?? [], messages) },
-          ...lockSnapshot(state, locks, listings),
+          ...lockSnapshot(state, locks, listings, readAt),
         }));
         return 'found';
       } catch (error) {
@@ -849,7 +928,9 @@ export const useTradeStore = create<TradeState>((set, get) => {
       if (inboxRefreshTimer) clearTimeout(inboxRefreshTimer);
       inboxRefreshTimer = null;
       focusedChats.clear();
-      set({ chats: {}, messages: {}, lockByListing: {}, lockConfirmations: {}, handshakeRequest: null, me: null });
+      chatReads.clear();
+      inboxRead++; // invalidate anything already in flight
+      set({ chats: {}, messages: {}, lockByListing: {}, lockConfirmations: {}, lockEventVersion: {}, handshakeRequest: null, me: null });
     },
   };
 });

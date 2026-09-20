@@ -11,7 +11,6 @@ import {
   removeListingFixture,
   sessionStorageKey,
   signIn,
-  tradesCounts,
   type ListingFixture,
   type Trainer,
 } from './support/supabase';
@@ -103,16 +102,14 @@ async function openListing(page: Page, name: string): Promise<void> {
 
 let admin: SupabaseClient;
 let fixture: ListingFixture | undefined;
-let countsBefore: Record<string, number> = {};
 
 test.beforeAll(async () => {
   admin = adminClient();
-  countsBefore = await tradesCounts(admin, [DRIFTCORAL, MINTRUNNER]);
   fixture = await createListingFixture(admin, DRIFTCORAL, runId);
 });
 
 test.afterAll(async () => {
-  if (fixture) await removeListingFixture(admin, fixture.id, countsBefore);
+  if (fixture) await removeListingFixture(admin, fixture.id, [DRIFTCORAL, MINTRUNNER]);
 });
 
 test.afterEach(async ({}, testInfo) => {

@@ -33,6 +33,15 @@ const KNOWN: Record<string, Omit<ErrorInfo, 'code' | 'sqlState'>> = {
   no_active_lock: { message: 'This trade is no longer locked.', followUp: 'resync', lockGone: true },
   handshake_unavailable: { message: 'This trade is no longer locked.', followUp: 'resync', lockGone: true },
   nothing_to_withdraw: { message: 'Your confirmation already changed. Refreshing.', followUp: 'resync' },
+  // `withdraw_listing` (…000500 rpcs.sql). Both mean the client is acting on a stale listing status.
+  unlock_first: { message: 'Unlock this trade before withdrawing the listing.', followUp: 'resync' },
+  not_open: { message: 'This listing is no longer open.', followUp: 'resync' },
+  // Raised by the `guard_listing_update` trigger on a plain table update, not an RPC: a listing's trade
+  // details are frozen from the first offer onwards (the bait-and-switch rule, …000300 helpers_triggers).
+  listing_has_offers: {
+    message: 'This listing already has offers, so its trade details can no longer be changed.',
+    followUp: 'resync',
+  },
   chat_not_open: { message: 'This chat was closed.', followUp: 'resync' },
   not_participant: { message: 'You are not part of this trade.', followUp: 'resync' },
   listing_not_open: {

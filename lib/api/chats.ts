@@ -229,12 +229,22 @@ export async function getHandshake(chatId: string): Promise<Handshake> {
 
 // ——— initial state ———
 
+/**
+ * The newest `INBOX_PAGE_SIZE` chats, most recently active first. This runs on every mount, every resync
+ * and every realtime reconnect, so it is bounded: an unbounded read grows with the trainer's whole history
+ * and is refetched on each of those. Ordering is by activity, so the cut is at the quiet end — the chats a
+ * trainer is actually trading in are always in the page. A trainer past this many active chats would need
+ * inbox paging to see the rest, which the UI does not offer yet.
+ */
+export const INBOX_PAGE_SIZE = 50;
+
 /** Every chat the signed-in trainer is in, with the server-computed preview and unread count. */
 export async function fetchInbox(): Promise<Chat[]> {
   const { data, error } = await supabase
     .from('my_inbox')
     .select('*')
-    .order('last_message_at', { ascending: false, nullsFirst: false });
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(INBOX_PAGE_SIZE);
   if (error) throw apiError(error);
   return data.map(toChat).filter((chat): chat is Chat => chat !== null);
 }
@@ -258,21 +268,79 @@ export async function fetchMessages(
   meId: string | null,
   options: { since?: string; limit?: number } = {}
 ): Promise<ChatMessage[]> {
-  const base = supabase.from('chat_messages').select('*').eq('chat_id', chatId);
-  if (options.since) {
-    const { data, error } = await base
-      .gte('created_at', options.since)
-      .order('created_at', { ascending: true })
-      .order('id', { ascending: true });
-    if (error) throw apiError(error);
-    return data.map((row) => toChatMessage(row, meId));
-  }
-  const { data, error } = await base
+  if (options.since !== undefined) return gapFill(chatId, meId, options.since);
+  return latestPage(chatId, meId, options.limit ?? MESSAGE_PAGE_SIZE);
+}
+
+/** The newest `limit` messages, returned oldest-first like every other read here. */
+async function latestPage(chatId: string, meId: string | null, limit: number): Promise<ChatMessage[]> {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select('*')
+    .eq('chat_id', chatId)
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
-    .limit(options.limit ?? MESSAGE_PAGE_SIZE);
+    .limit(limit);
   if (error) throw apiError(error);
   return data.reverse().map((row) => toChatMessage(row, meId));
+}
+
+/**
+ * How much of a backlog a reconnect will walk before it gives up on filling the gap message by message.
+ * Reached only after a very long absence from a very busy chat.
+ */
+export const GAP_FILL_MAX_MESSAGES = 500;
+
+/**
+ * The reconnect gap fill: every row at or after `since`, walked a page at a time.
+ *
+ * This used to be one unbounded request, which after a long offline spell could pull thousands of rows
+ * into one render. A plain `.limit()` would bound it but silently drop everything past the first page —
+ * the trainer would reconnect and never see the rest — so the fill pages instead and stops only when the
+ * gap is genuinely drained.
+ *
+ * Paging is keyset, on the same `(created_at, id)` the query orders by, because `created_at` alone is not
+ * unique: messages written in the same transaction share a timestamp, and a cursor of `created_at > last`
+ * would step straight over any that straddle a page boundary. The first page keeps the inclusive `>=` of
+ * the original (rows sharing `since` must not be skipped); the store de-duplicates by id.
+ */
+async function gapFill(chatId: string, meId: string | null, since: string): Promise<ChatMessage[]> {
+  const rows: MessageRow[] = [];
+  let cursor: { createdAt: string; id: string } | null = null;
+
+  for (;;) {
+    const page = await gapFillPage(chatId, since, cursor);
+    rows.push(...page);
+    if (page.length < MESSAGE_PAGE_SIZE) break; // drained: the last page was short
+
+    if (rows.length >= GAP_FILL_MAX_MESSAGES) {
+      // The gap is bigger than we are willing to walk. Returning what we have would leave the thread
+      // ending hundreds of messages in the past, which reads as a broken chat; the newest page at least
+      // shows the conversation as it stands now. The hole is above it, where the UI does not look yet.
+      return latestPage(chatId, meId, MESSAGE_PAGE_SIZE);
+    }
+    const last = page[page.length - 1];
+    cursor = { createdAt: last.created_at, id: last.id };
+  }
+  return rows.map((row) => toChatMessage(row, meId));
+}
+
+/** One page of the gap fill: from `since` inclusive, or strictly after `cursor` in `(created_at, id)`. */
+async function gapFillPage(
+  chatId: string,
+  since: string,
+  cursor: { createdAt: string; id: string } | null,
+): Promise<MessageRow[]> {
+  const base = supabase.from('chat_messages').select('*').eq('chat_id', chatId);
+  const filtered = cursor
+    ? base.or(`created_at.gt."${cursor.createdAt}",and(created_at.eq."${cursor.createdAt}",id.gt.${cursor.id})`)
+    : base.gte('created_at', since);
+  const { data, error } = await filtered
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(MESSAGE_PAGE_SIZE);
+  if (error) throw apiError(error);
+  return data;
 }
 
 /** Every trade lock the signed-in trainer is a party to (RLS hides all others). */
@@ -364,6 +432,12 @@ export interface LockEvent {
   chatId: string;
   sellerConfirmedAt: string | null;
   buyerConfirmedAt: string | null;
+  /**
+   * `trade_locks.updated_at`: the token that orders two observations of the same lock, so a frame that
+   * overtakes a newer one can be recognised and dropped (migration …000300). Null only for a payload from
+   * a server that predates that migration, which the store treats as "unordered, apply it".
+   */
+  updatedAt: string | null;
 }
 
 export function parseLockEvent(payload: unknown): LockEvent | null {
@@ -377,6 +451,7 @@ export function parseLockEvent(payload: unknown): LockEvent | null {
     chatId: chat_id,
     sellerConfirmedAt: nullableString(payload.seller_confirmed_at),
     buyerConfirmedAt: nullableString(payload.buyer_confirmed_at),
+    updatedAt: nullableString(payload.updated_at),
   };
 }
 
