@@ -1,5 +1,6 @@
 @AGENTS.md
 # PokeGoTrades - Architecture & Onboarding
+NOTE: If there are any bugs in the app, its most probably the architecture's fault. Don't fix the bug, fix the architecture. as a good architecture does not let bugs appear in the first place.
 
 ## WHAT & WHY
 PokeGoTrades is a mobile-first, proximity-based trading marketplace for Pokémon GO players. The goal is to provide a safe, OLX-style negotiation hub with a strict UI aesthetic (dark mode slate/zinc with neon gaming accents).

@@ -54,7 +54,7 @@ yarn-error.*
 lib/database.types.ts
 
 # OCR worker pipeline — isolated workspace, not part of the Expo app (§5.5)
-workers/
+# workers/
 
 # expo-sqlite local session DB
 *.db

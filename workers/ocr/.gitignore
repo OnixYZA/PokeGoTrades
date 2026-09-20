@@ -1,0 +1,8 @@
+# Self-contained: this workspace does not rely on the app's root .gitignore.
+node_modules/
+dist/
+# `npm run package` output (staging folder and the Lambda zip)
+build/
+*.zip
+# Holds the service role key
+.env

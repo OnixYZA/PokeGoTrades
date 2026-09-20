@@ -1,0 +1,32 @@
+{
+  "name": "pokego-trades-ocr-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reads the catch date from uploaded listing proof screenshots. Runs on AWS Lambda; deliberately separate from the Expo app.",
+  "type": "commonjs",
+  "main": "dist/handler.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "once": "tsx src/local.ts --once",
+    "dev": "tsx src/local.ts",
+    "try": "tsx src/try.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "package": "bash scripts/package.sh"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "dotenv": "^18.0.1",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.13",
+    "typescript": "~6.0.3"
+  }
+}
