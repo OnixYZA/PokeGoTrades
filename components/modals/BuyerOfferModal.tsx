@@ -1,10 +1,15 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, Send, Sparkles } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
+import { ToastHost } from '@/components/ui/ToastHost';
 import type { CreatureRef, Listing } from '@/data/types';
+import { creatureToOffer } from '@/lib/api/chats';
+import { USE_SUPABASE } from '@/lib/data-source';
+import { useTradeStore, type OfferSelection } from '@/store/trade-store';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
 
@@ -14,15 +19,48 @@ export type BuyerOfferSelection = { kind: 'creature'; creature: CreatureRef } | 
 
 interface BuyerOfferModalProps {
   listing: Listing;
-  onConfirm?: (selection: BuyerOfferSelection) => void;
+  /** The offer went through. Receives the chat's id: the real one from `open_offer` with Supabase, or a
+   *  local one with the mock. The caller navigates to it. */
+  onOffered?: (chatId: string) => void;
   onCancel?: () => void;
 }
 
+/** What the store sends for a picked row. The mock's card also called a lucky creature's subtitle "Lucky". */
+function toOfferSelection(selection: BuyerOfferSelection): OfferSelection {
+  if (selection.kind === 'custom') return { kind: 'custom' };
+  const { creature } = selection;
+  return {
+    kind: 'creature',
+    offer: { ...creatureToOffer(creature), ...(!USE_SUPABASE && creature.lucky ? { iv: 'Lucky' } : {}) },
+  };
+}
+
 /** Pre-chat "Make Offer" picker — bottom sheet where the buyer picks one of the seller's Looking
- *  For creatures (or Custom Offer) before a chat is opened and a formal offer is auto-sent. */
-export function BuyerOfferModal({ listing, onConfirm, onCancel }: BuyerOfferModalProps) {
+ *  For creatures (or Custom Offer). Sending opens the chat (`open_offer`) with that offer as its first message. */
+export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModalProps) {
   const insets = useSafeAreaInsets();
+  const openOffer = useTradeStore((s) => s.openOffer);
   const [selection, setSelection] = useState<BuyerOfferSelection | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async () => {
+    if (!selection || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    const result = await openOffer(listing.id, toOfferSelection(selection));
+    setSubmitting(false);
+    if (result.ok) {
+      onOffered?.(result.value);
+      return;
+    }
+    setError(result.error.message);
+    // Not verified / no profile yet: the server refused, so take them to finish setting up.
+    if (result.error.followUp === 'onboarding') {
+      onCancel?.();
+      router.push('/onboarding');
+    }
+  };
 
   return (
     <View
@@ -59,29 +97,36 @@ export function BuyerOfferModal({ listing, onConfirm, onCancel }: BuyerOfferModa
           <CustomOfferRow selected={selection?.kind === 'custom'} onPress={() => setSelection({ kind: 'custom' })} />
         </View>
 
+        {error ? (
+          <Text accessibilityRole="alert" className="mb-3 text-center" style={{ fontSize: 13, lineHeight: 19, color: C.danger }}>
+            {error}
+          </Text>
+        ) : null}
         <Pressable
-          onPress={() => (selection ? onConfirm?.(selection) : undefined)}
-          disabled={!selection}
+          onPress={() => void send()}
+          disabled={!selection || submitting}
           accessibilityRole="button"
           accessibilityLabel="Send offer"
-          accessibilityState={{ disabled: !selection }}
-          className={`flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] ${selection ? 'active:opacity-90' : 'opacity-40'}`}
+          accessibilityState={{ disabled: !selection || submitting, busy: submitting }}
+          className={`flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] ${!selection ? 'opacity-40' : submitting ? 'opacity-70' : 'active:opacity-90'}`}
           style={MODAL_SURFACE.ctaGreen}
         >
-          <Send size={18} color={C.successText} strokeWidth={2.5} />
+          {submitting ? <ActivityIndicator color={C.successText} /> : <Send size={18} color={C.successText} strokeWidth={2.5} />}
           <Text className="font-display" style={{ fontSize: 16, color: C.successText, letterSpacing: -0.16 }}>
-            Send Offer
+            {submitting ? 'Sending…' : 'Send Offer'}
           </Text>
         </Pressable>
         <Pressable
           onPress={onCancel}
+          disabled={submitting}
           accessibilityRole="button"
           accessibilityLabel="Cancel"
-          className="items-center py-3 active:opacity-70"
+          className={`items-center py-3 ${submitting ? 'opacity-40' : 'active:opacity-70'}`}
         >
           <Text style={{ fontSize: 14, fontWeight: '600', color: C.textSecondary }}>Not now</Text>
         </Pressable>
       </View>
+      <ToastHost />
     </View>
   );
 }

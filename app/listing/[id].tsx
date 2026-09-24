@@ -15,15 +15,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LookingForRow } from '@/components/listing/LookingForRow';
 import { StardustCard } from '@/components/listing/StardustCard';
-import { BuyerOfferModal, type BuyerOfferSelection } from '@/components/modals/BuyerOfferModal';
+import { BuyerOfferModal } from '@/components/modals/BuyerOfferModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Sprite } from '@/components/ui/Sprite';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
+import { ToastHost } from '@/components/ui/ToastHost';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
-import type { FormalOffer } from '@/data/types';
+import { getPostingReadiness } from '@/lib/api/profile';
+import { USE_SUPABASE } from '@/lib/data-source';
+import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
 const SHEET_TRAVEL = 900;
@@ -32,7 +35,8 @@ const DISMISS_THRESHOLD = 120;
 export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const listing = useTradeStore((s) => (id ? s.listings[id] : undefined));
-  const addChat = useTradeStore((s) => s.addChat);
+  const me = useTradeStore((s) => s.me);
+  const subscribeToListing = useTradeStore((s) => s.subscribeToListing);
   const insets = useSafeAreaInsets();
   const [showOfferModal, setShowOfferModal] = useState(false);
 
@@ -43,6 +47,14 @@ export default function ListingDetailScreen() {
     translateY.value = withTiming(0, { duration: 260, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
     overlayOpacity.value = withTiming(1, { duration: 260 });
   }, [translateY, overlayOpacity]);
+
+  // Supabase: follow this listing live, so "Make Offer" disables itself the moment it locks, completes or
+  // is withdrawn. Only for a server-backed listing; the channel is authorized for open / locked ones.
+  const serverBacked = listing?.sellerId !== undefined;
+  useEffect(() => {
+    if (!USE_SUPABASE || !id || !serverBacked) return;
+    return subscribeToListing(id);
+  }, [id, serverBacked, subscribeToListing]);
 
   const defaultNavigate = () => router.back();
 
@@ -71,32 +83,42 @@ export default function ListingDetailScreen() {
 
   if (!listing) return null;
 
-  const handleConfirmOffer = (selection: BuyerOfferSelection) => {
-    const offer: FormalOffer =
-      selection.kind === 'creature'
-        ? {
-            name: selection.creature.name,
-            pokemonId: selection.creature.pokemonId,
-            hue: selection.creature.hue,
-            iv: selection.creature.lucky ? 'Lucky' : undefined,
-          }
-        : { name: 'Custom Offer', pokemonId: listing.pokemonId, hue: listing.hue };
-
-    const chatId = `c-${Date.now()}`;
-    const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    addChat({
-      id: chatId,
-      listingId: listing.id,
-      partner: listing.seller,
-      preview: `Formal offer sent · ${offer.name}`,
-      unread: 0,
-      active: true,
-      offers: [{ role: 'me', text: '', time, offer }],
-    });
-
+  // The modal runs `open_offer` itself and hands back the chat it opened (or created locally, with the mock).
+  const handleOffered = (chatId: string) => {
     setShowOfferModal(false);
     close(() => router.dismissTo(`/chats/${chatId}`));
   };
+
+  // Writes need a verified account with a finished profile, so send anyone who is not there yet to
+  // onboarding rather than into a sheet the server would refuse.
+  const startOffer = async () => {
+    if (USE_SUPABASE) {
+      try {
+        if ((await getPostingReadiness()) !== 'ready') {
+          router.push('/onboarding');
+          return;
+        }
+      } catch {
+        toast('Could not check your account. Check your connection and try again.');
+        return;
+      }
+    }
+    setShowOfferModal(true);
+  };
+
+  // With Supabase the button reflects the listing's real state: yours, no longer open, or fair game.
+  const isOwn = USE_SUPABASE && listing.sellerId !== undefined && listing.sellerId === me?.id;
+  const notOpen = USE_SUPABASE && listing.status !== undefined && listing.status !== 'open';
+  const offerDisabled = listing.untradable || isOwn || notOpen;
+  const offerLabel = listing.untradable
+    ? 'Untradable'
+    : isOwn
+      ? 'Your listing'
+      : notOpen
+        ? listing.status === 'locked'
+          ? 'Locked'
+          : 'No longer available'
+        : 'Make Offer';
 
   return (
     <View className="flex-1 items-center justify-end" style={{ pointerEvents: 'box-none' }}>
@@ -208,13 +230,13 @@ export default function ListingDetailScreen() {
             <MapPin size={20} color="#4fb3ff" />
           </IconButton>
           <PrimaryButton
-            label={listing.untradable ? 'Untradable' : 'Make Offer'}
+            label={offerLabel}
             flex={1}
             style={SURFACE.ctaBlue}
             textColor="#04121f"
-            icon={!listing.untradable ? <Send size={16} color="#04121f" /> : undefined}
-            onPress={() => setShowOfferModal(true)}
-            disabled={listing.untradable}
+            icon={!offerDisabled ? <Send size={16} color="#04121f" /> : undefined}
+            onPress={() => void startOffer()}
+            disabled={offerDisabled}
           />
         </View>
       </Animated.View>
@@ -225,8 +247,9 @@ export default function ListingDetailScreen() {
         transparent
         onRequestClose={() => setShowOfferModal(false)}
       >
-        <BuyerOfferModal listing={listing} onCancel={() => setShowOfferModal(false)} onConfirm={handleConfirmOffer} />
+        <BuyerOfferModal listing={listing} onCancel={() => setShowOfferModal(false)} onOffered={handleOffered} />
       </Modal>
+      <ToastHost />
     </View>
   );
 }

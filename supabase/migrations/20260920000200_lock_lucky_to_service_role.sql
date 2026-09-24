@@ -1,0 +1,23 @@
+-- Removes `lucky` from the columns the `authenticated` role may write (originally migration …000400).
+--
+-- `listings.lucky` drives the "Guaranteed Lucky" badge, and the only thing that is supposed to set it is
+-- the OCR worker, after an appraisal proof shows a catch date before the 2019-07-01 cutoff
+-- (workers/ocr/src/process.ts `grantLucky`, which connects with SUPABASE_SERVICE_ROLE_KEY).
+--
+-- The original grant listed `lucky` in both the insert and the update column lists, so any seller could
+-- send `{"lucky": true}` with nothing but their own session and the publishable key, and skip the proof
+-- pipeline entirely. RLS did not help: `listings_insert_own` / `listings_update_own_open` check *who* and
+-- *what status*, never *which columns*. `private.guard_listing_update` freezes `lucky` only once a chat
+-- exists on the listing, so the window was every listing up to its first offer — and once an offer landed,
+-- the forged value was frozen in. `public.confirm_trade` then copies `listings.lucky` verbatim into the
+-- immutable `completed_trades.seller_gave` ledger, so a forged badge became permanent trade history.
+--
+-- After this migration the column is service-role-only. `service_role` bypasses table grants and RLS, so
+-- `grantLucky` is unaffected; the column already defaults to false (migration …000200), which is the value
+-- every client-created listing now gets.
+--
+-- NOTE: PostgREST sends every key in the request body as a column, so a client that still puts `lucky` in
+-- its insert payload — even as `false` — now fails with 42501 rather than silently dropping it. The
+-- matching client change is in lib/api/listings.ts (`NewListingInput` / `toFields`), which no longer sends
+-- it at all. Regression test: supabase/tests/lucky_is_service_role_only.test.sql.
+revoke insert (lucky), update (lucky) on public.listings from authenticated;

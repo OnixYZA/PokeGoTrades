@@ -35,7 +35,16 @@
           "backgroundColor": "#050810"
         }
       ],
-      "expo-image"
+      "expo-image",
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PokeGoTrades needs your photos so you can attach proof screenshots to a listing.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

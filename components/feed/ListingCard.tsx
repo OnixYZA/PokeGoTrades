@@ -69,10 +69,14 @@ export function ListingCard({ listing }: { listing: Listing }) {
 
         <View className="mt-1.5 flex-row items-center justify-between" style={{ pointerEvents: 'box-none' }}>
           <View className="flex-row items-center gap-1" style={{ pointerEvents: 'box-none' }}>
-            <MapPin size={12} color="#6d7690" />
-            <Text className="font-mono text-text-muted" style={{ fontSize: 11, pointerEvents: 'none' }}>
-              {listing.dist.toFixed(1)} km ·
-            </Text>
+            {listing.dist !== undefined ? (
+              <>
+                <MapPin size={12} color="#6d7690" />
+                <Text className="font-mono text-text-muted" style={{ fontSize: 11, pointerEvents: 'none' }}>
+                  {listing.dist.toFixed(1)} km ·
+                </Text>
+              </>
+            ) : null}
             <Pressable
               onPress={(e) => {
                 e.stopPropagation();
