@@ -115,7 +115,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       session,
       user: session?.user ?? null,
       isLoading,
-      isAnonymous: session?.user.is_anonymous ?? false,
+      // `is_anonymous` is typed optional in auth-js (a session minted before a GoTrue upgrade, or
+      // from an older cached JWT, may carry no claim at all). Every caller treats `isAnonymous` as
+      // the gate for a registered-only affordance (Log Out, a live profile fetch) — an undefined
+      // claim must fail CLOSED into the guest state, not fail open into a trusted one.
+      isAnonymous: session?.user.is_anonymous ?? true,
       error,
       retry,
       signOut,

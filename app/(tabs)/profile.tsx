@@ -76,7 +76,7 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
 }
 
 export default function ProfileScreen() {
-  const { user, isAnonymous, retry: retrySession, signOut } = useSession();
+  const { user, isAnonymous, error: sessionError, retry: retrySession, signOut } = useSession();
   const resetTradeStore = useTradeStore((s) => s.reset);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -87,9 +87,12 @@ export default function ProfileScreen() {
 
   // Once ANY session lands again (even the fresh anonymous one) this is no longer "signing out" —
   // stops the brief post-sign-out gap from reading as a failed bootstrap (see the `!user` case below).
+  // Also clears on `sessionError`: if the post-sign-out anonymous re-sign-in itself fails (dead
+  // network right after `signOut()` resolves), no `user` is ever coming without a retry, and without
+  // this the screen would sit on the spinner forever instead of reaching the "Retry" notice below.
   useEffect(() => {
-    if (user) setSigningOut(false);
-  }, [user]);
+    if (user || sessionError) setSigningOut(false);
+  }, [user, sessionError]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
