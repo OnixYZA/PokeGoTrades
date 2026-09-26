@@ -2,7 +2,10 @@ import { Snowflake } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
-export function FrozenBanner() {
+import type { ChatRole } from '@/data/types';
+
+/** A competing offer holds the listing's lock. The buyer only learns "frozen"; the seller knows why. */
+export function FrozenBanner({ role = 'buyer' }: { role?: ChatRole }) {
   return (
     <Animated.View
       entering={FadeIn.duration(180)}
@@ -15,7 +18,9 @@ export function FrozenBanner() {
           CHAT FROZEN: TRADE PENDING
         </Text>
         <Text style={{ fontSize: 11, color: '#6b90b8', marginTop: 1 }}>
-          The seller locked in a different offer for this listing.
+          {role === 'seller'
+            ? 'You locked another offer. Unlock it to resume this chat.'
+            : 'The seller locked in a different offer for this listing.'}
         </Text>
       </View>
     </Animated.View>

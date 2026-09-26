@@ -1,7 +1,7 @@
 import { useState } from 'react';
+import { router } from 'expo-router';
 import { ListFilter, Plus, Search } from 'lucide-react-native';
-import { FlatList, Modal, Pressable, Text, View } from 'react-native';
-import { useShallow } from 'zustand/react/shallow';
+import { ActivityIndicator, FlatList, Modal, Pressable, Text, View } from 'react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
 import { LocationDropdown } from '@/components/feed/LocationDropdown';
@@ -9,15 +9,48 @@ import { CreateListingModal } from '@/components/modals/CreateListingModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { StatTile } from '@/components/ui/StatTile';
 import { SURFACE } from '@/constants/theme';
+import { getPostingReadiness } from '@/lib/api/profile';
+import { USE_SUPABASE } from '@/lib/data-source';
+import { useFeed } from '@/lib/use-feed';
 import { useTradeStore } from '@/store/trade-store';
 
 export default function FeedScreen() {
   const filterLocation = useTradeStore((s) => s.filterLocation);
-  const listings = useTradeStore(useShallow((s) => Object.values(s.listings)));
   const addListing = useTradeStore((s) => s.addListing);
+  const feed = useFeed(filterLocation);
   const [showCreateListing, setShowCreateListing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pulling, setPulling] = useState(false);
 
-  const filtered = listings.filter((l) => l.loc === filterLocation).sort((a, b) => a.dist - b.dist);
+  const filtered = feed.listings;
+
+  // Only a user-initiated pull shows the refresh spinner; a refetch on tab focus stays silent.
+  const pullToRefresh = async () => {
+    setPulling(true);
+    try {
+      await feed.refresh();
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  // Writes need a permanent account with a finished profile (RLS, SUPABASE_PLAN.md D9), so anyone
+  // who is not there yet is sent to onboarding instead of into a form the server would refuse.
+  const openCreateListing = async () => {
+    setNotice(null);
+    if (USE_SUPABASE) {
+      try {
+        if ((await getPostingReadiness()) !== 'ready') {
+          router.push('/onboarding');
+          return;
+        }
+      } catch {
+        setNotice('Could not check your account. Check your connection and try again.');
+        return;
+      }
+    }
+    setShowCreateListing(true);
+  };
 
   return (
     <View className="flex-1">
@@ -68,16 +101,42 @@ export default function FeedScreen() {
         />
       </View>
 
+      {notice ? (
+        <Text
+          accessibilityRole="alert"
+          className="px-[22px] pb-3 font-display-med text-accent-danger"
+          style={{ fontSize: 13 }}
+        >
+          {notice}
+        </Text>
+      ) : null}
+
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <ListingCard listing={item} />}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, gap: 10 }}
         showsVerticalScrollIndicator={false}
+        refreshing={pulling}
+        onRefresh={USE_SUPABASE ? () => void pullToRefresh() : undefined}
+        ListEmptyComponent={
+          feed.isLoading ? (
+            <ActivityIndicator color="#4fb3ff" style={{ marginTop: 32 }} />
+          ) : feed.error ? (
+            <FeedMessage
+              title="Couldn't load listings"
+              body={feed.error}
+              actionLabel="Retry"
+              onAction={() => void feed.refresh()}
+            />
+          ) : (
+            <FeedMessage title={`Nothing in ${filterLocation} yet`} body="Post a trade to be the first listing here." />
+          )
+        }
       />
 
       <Pressable
-        onPress={() => setShowCreateListing(true)}
+        onPress={() => void openCreateListing()}
         accessibilityRole="button"
         accessibilityLabel="Create new listing"
         className="absolute bottom-5 right-5 h-14 w-14 items-center justify-center rounded-full active:opacity-90"
@@ -95,11 +154,48 @@ export default function FeedScreen() {
           onClose={() => setShowCreateListing(false)}
           onSave={() => setShowCreateListing(false)}
           onPublish={(listing) => {
-            addListing(listing);
+            // Supabase: the row already exists, so reload the feed. Mock: append to the local store.
+            if (USE_SUPABASE) void feed.refresh();
+            else addListing(listing);
             setShowCreateListing(false);
           }}
         />
       </Modal>
+    </View>
+  );
+}
+
+function FeedMessage({
+  title,
+  body,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  body: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <View className="items-center gap-1.5 px-6 pt-10">
+      <Text className="font-display text-text-primary" style={{ fontSize: 15 }}>
+        {title}
+      </Text>
+      <Text className="text-center font-display-med text-text-muted" style={{ fontSize: 13, lineHeight: 19 }}>
+        {body}
+      </Text>
+      {actionLabel && onAction ? (
+        <Pressable
+          onPress={onAction}
+          accessibilityRole="button"
+          className="mt-2 rounded-xl border border-border-strong px-4 py-2 active:opacity-80"
+          style={SURFACE.control}
+        >
+          <Text className="font-display-semi text-accent-blue" style={{ fontSize: 13 }}>
+            {actionLabel}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

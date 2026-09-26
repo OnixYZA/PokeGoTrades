@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, Handshake } from 'lucide-react-native';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -12,65 +12,140 @@ import { FormalOfferCard } from '@/components/chats/FormalOfferCard';
 import { FrozenBanner } from '@/components/chats/FrozenBanner';
 import { LockedBanner } from '@/components/chats/LockedBanner';
 import { MessageBubble } from '@/components/chats/MessageBubble';
-import type { BailReason } from '@/components/modals/BailBlockModal';
 import { HandshakeModal } from '@/components/modals/HandshakeModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { IconButton } from '@/components/ui/IconButton';
 import type { CreatureRef } from '@/data/types';
-import { selectChatPhase, useTradeStore } from '@/store/trade-store';
+import { creatureToOffer } from '@/lib/api/chats';
+import { USE_SUPABASE } from '@/lib/data-source';
+import { selectTradeView, useTradeStore } from '@/store/trade-store';
+
+/** How a Supabase chat is coming along. The mock has its chats from the first render. */
+type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 
 export default function ActiveChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
 
   const chat = useTradeStore((s) => (chatId ? s.chats[chatId] : undefined));
   const listing = useTradeStore((s) => (chat ? s.listings[chat.listingId] : undefined));
   const messages = useTradeStore(useShallow((s) => (chatId ? (s.messages[chatId] ?? []) : [])));
-  const phase = useTradeStore((s) => selectChatPhase(s, chatId ?? ''));
-  const lockChat = useTradeStore((s) => s.lockChat);
-  const unlockChat = useTradeStore((s) => s.unlockChat);
-  const removeChat = useTradeStore((s) => s.removeChat);
-  const archiveChat = useTradeStore((s) => s.archiveChat);
-  const removeListing = useTradeStore((s) => s.removeListing);
-  const sendMessageToStore = useTradeStore((s) => s.sendMessage);
+  const trade = useTradeStore(useShallow((s) => selectTradeView(s, chatId ?? '')));
+  const handshakeRequest = useTradeStore((s) => s.handshakeRequest);
+  const clearHandshakeRequest = useTradeStore((s) => s.clearHandshakeRequest);
+  const sendMessage = useTradeStore((s) => s.sendMessage);
+  const retryMessage = useTradeStore((s) => s.retryMessage);
+  const confirmTrade = useTradeStore((s) => s.confirmTrade);
+  const loadChat = useTradeStore((s) => s.loadChat);
+  const markRead = useTradeStore((s) => s.markRead);
+  const subscribeToChat = useTradeStore((s) => s.subscribeToChat);
 
   const [draft, setDraft] = useState('');
   const [showArsenal, setShowArsenal] = useState(false);
   const [showHandshake, setShowHandshake] = useState(false);
+  const [loadState, setLoadState] = useState<LoadState>(chat ? 'ready' : 'loading');
+  const [attempt, setAttempt] = useState(0);
 
-  if (!chat || !chatId) return null;
+  // Supabase: load the thread, then follow it live for as long as this screen is focused. The channel is
+  // opened only for a chat that is really in my inbox — a refused join on someone else's topic just fails.
+  useFocusEffect(
+    useCallback(() => {
+      if (!USE_SUPABASE || !chatId) return;
+      let cancelled = false;
+      let unsubscribe: (() => void) | undefined;
+      void (async () => {
+        const result = await loadChat(chatId);
+        if (cancelled) return;
+        if (result === 'missing') return setLoadState('missing');
+        if (result === 'error' && !useTradeStore.getState().chats[chatId]) return setLoadState('error');
+        setLoadState('ready');
+        unsubscribe = subscribeToChat(chatId);
+        markRead(chatId);
+      })();
+      return () => {
+        cancelled = true;
+        unsubscribe?.();
+      };
+    }, [chatId, loadChat, subscribeToChat, markRead, attempt]),
+  );
 
-  const isLocked = phase === 'locked';
-  const locked = phase === 'locked' || phase === 'closed';
-  const frozen = phase === 'frozen';
+  // D1: the seller locked *my* offer, so my Handshake opens by itself (instead of waiting to be tapped).
+  useEffect(() => {
+    if (handshakeRequest !== null && handshakeRequest === chatId && trade.phase === 'locked') {
+      setShowHandshake(true);
+      clearHandshakeRequest();
+    }
+  }, [handshakeRequest, chatId, trade.phase, clearHandshakeRequest]);
 
-  const sendMessage = () => {
+  if (!chat || !chatId) {
+    if (!USE_SUPABASE) return null;
+    return (
+      <View className="flex-1">
+        <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3.5 pt-1.5">
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Back to chats"
+            hitSlop={6}
+            className="h-8 w-8 items-center justify-center active:opacity-70"
+          >
+            <ChevronLeft size={20} color="#8b93a7" />
+          </Pressable>
+        </View>
+        {loadState === 'loading' ? (
+          <ActivityIndicator color="#4fb3ff" style={{ marginTop: 48 }} />
+        ) : (
+          <View className="items-center gap-2 px-6 pt-16">
+            <Text className="font-display text-text-primary" style={{ fontSize: 15 }}>
+              {loadState === 'missing' ? 'This chat is not available' : 'Could not load this chat'}
+            </Text>
+            <Text className="text-center font-display-med text-text-muted" style={{ fontSize: 13, lineHeight: 19 }}>
+              {loadState === 'missing'
+                ? 'It may have been closed, or it belongs to someone else.'
+                : 'Check your connection and try again.'}
+            </Text>
+            {loadState === 'error' ? (
+              <Pressable
+                onPress={() => {
+                  setLoadState('loading');
+                  setAttempt((n) => n + 1);
+                }}
+                accessibilityRole="button"
+                className="mt-2 rounded-xl border border-border-strong px-4 py-2 active:opacity-80"
+              >
+                <Text className="font-display-semi text-accent-blue" style={{ fontSize: 13 }}>
+                  Retry
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  const showLockedBanner = trade.phase === 'locked' || (!trade.live && trade.phase === 'closed');
+  // The mock's inactive chats used to read as "locked" in the composer; keep that.
+  const composerPhase = !trade.live && trade.phase === 'closed' ? 'locked' : trade.phase;
+
+  const send = () => {
     const text = draft.trim();
     if (!text) return;
-    const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    sendMessageToStore(chatId, { role: 'me', text, time });
-    setDraft('');
+    setDraft(''); // optimistic: the bubble is already in the thread, `pending` until the server confirms
+    void sendMessage(chatId, { text });
   };
 
   const sendFormalOffer = (creature: CreatureRef) => {
-    const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    sendMessageToStore(chatId, {
-      role: 'me',
-      text: '',
-      time,
-      offer: { name: creature.name, pokemonId: creature.pokemonId, hue: creature.hue, iv: creature.lucky ? 'Lucky' : undefined },
-    });
     setShowArsenal(false);
+    void sendMessage(chatId, {
+      offer: { ...creatureToOffer(creature), ...(!USE_SUPABASE && creature.lucky ? { iv: 'Lucky' } : {}) },
+    });
   };
 
-  const handleBail = (_reason: BailReason, _note?: string) => {
-    removeChat(chat.id);
-    router.back();
-  };
-
-  const handleMarkCompleted = () => {
-    archiveChat(chat.id);
-    if (listing) removeListing(listing.id);
+  /** Mock only: with Supabase the Handshake confirms (and closes itself) through `get_handshake` / `confirm_trade`. */
+  const handleMarkCompleted = async () => {
+    await confirmTrade(chatId);
     setShowHandshake(false);
     router.back();
   };
@@ -96,7 +171,7 @@ export default function ActiveChatScreen() {
             RE: {listing?.name ?? ''}
           </Text>
         </View>
-        {isLocked && (
+        {trade.canOpenHandshake && (
           <IconButton
             size={34}
             radius={12}
@@ -108,14 +183,30 @@ export default function ActiveChatScreen() {
         )}
       </View>
 
-      {frozen && <FrozenBanner />}
-      {!frozen && locked && <LockedBanner partner={chat.partner} />}
+      {trade.phase === 'frozen' && <FrozenBanner role={trade.live ? trade.role : 'buyer'} />}
+      {showLockedBanner && (
+        <LockedBanner
+          partner={chat.partner}
+          role={trade.live ? trade.role : undefined}
+          confirmation={trade.confirmation}
+        />
+      )}
 
-      <ScrollView contentContainerStyle={{ padding: 18, gap: 8 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={{ padding: 18, gap: 8 }}
+        showsVerticalScrollIndicator={false}
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+      >
         {messages.map((m, i) => (
-          <MessageBubble key={i} message={m} />
+          <MessageBubble
+            key={m.id ?? i}
+            message={m}
+            onRetry={m.clientId ? () => void retryMessage(chatId, m.clientId as string) : undefined}
+          />
         ))}
-        {!locked && !frozen && (
+        {/* The mock's placeholder offer card. Real chats show real offers from the thread instead. */}
+        {!USE_SUPABASE && !showLockedBanner && trade.phase !== 'frozen' && (
           <View style={{ alignItems: 'flex-start' }}>
             <FormalOfferCard />
           </View>
@@ -127,18 +218,17 @@ export default function ActiveChatScreen() {
         style={{ paddingBottom: insets.bottom }}
       >
         <ChatActionRow
-          locked={locked}
-          onBail={handleBail}
-          onLock={() => lockChat(chat.id)}
-          onUnlockRequest={() => unlockChat(chat.id)}
+          chatId={chatId}
+          partner={chat.partner}
           onOpenHandshake={() => setShowHandshake(true)}
+          onBailed={() => router.back()}
         />
         <Composer
           value={draft}
           onChangeText={setDraft}
-          onSend={sendMessage}
-          locked={locked}
-          frozen={frozen}
+          onSend={send}
+          phase={composerPhase}
+          disabled={!trade.canCompose}
           onOpenArsenal={() => setShowArsenal(true)}
         />
       </View>
@@ -154,7 +244,15 @@ export default function ActiveChatScreen() {
         onRequestClose={() => setShowHandshake(false)}
         statusBarTranslucent
       >
-        <HandshakeModal onMarkCompleted={handleMarkCompleted} onReturnToChat={() => setShowHandshake(false)} />
+        <HandshakeModal
+          chatId={USE_SUPABASE ? chatId : undefined}
+          onMarkCompleted={() => void handleMarkCompleted()}
+          onCompleted={() => {
+            setShowHandshake(false);
+            router.back();
+          }}
+          onReturnToChat={() => setShowHandshake(false)}
+        />
       </Modal>
     </View>
   );

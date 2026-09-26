@@ -1,14 +1,36 @@
+import { Plus } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
-import { SectionHeading } from '@/components/ui/SectionHeading';
+import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
-import { hueBleed } from '@/constants/theme';
+import { hueBleed, SURFACE } from '@/constants/theme';
 import type { CreatureRef } from '@/data/types';
 
-export function ArsenalGrid({ arsenal }: { arsenal: CreatureRef[] }) {
+interface ArsenalGridProps {
+  arsenal: CreatureRef[];
+  /** Only passed by the signed-in trainer's own profile screen; a public profile leaves it out. */
+  onEdit?: () => void;
+}
+
+export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
   return (
     <View className="mb-[22px]">
-      <SectionHeading title="Arsenal" meta={`${arsenal.length} high-value`} />
+      {/* Inlines SectionHeading's own layout (title + divider + meta) instead of reusing it, so the
+       *  edit button can sit in the same row as the meta text — SectionHeading has no slot for one. */}
+      <View className="mb-3 flex-row items-center gap-2">
+        <Text className="font-display text-text-primary" style={{ fontSize: 15, letterSpacing: -0.15 }}>
+          Arsenal
+        </Text>
+        <View className="h-px flex-1" style={SURFACE.divider} />
+        <Text className="font-mono text-text-subtle" style={{ fontSize: 10 }}>
+          {`${arsenal.length} high-value`}
+        </Text>
+        {onEdit && (
+          <IconButton size={26} radius={9} accessibilityLabel="Edit Arsenal" onPress={onEdit}>
+            <Plus size={14} color="#4fb3ff" />
+          </IconButton>
+        )}
+      </View>
       <View className="flex-row flex-wrap gap-2">
         {arsenal.map((p, i) => (
           <View

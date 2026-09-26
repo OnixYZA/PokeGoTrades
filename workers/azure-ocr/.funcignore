@@ -1,0 +1,22 @@
+# Excluded from `func azure functionapp publish`'s upload (`func start` does not read this file).
+#
+# Patterns use .gitignore syntax, so an unanchored name matches at ANY depth: a bare `src` would also strip
+# `node_modules/tesseract.js/src/`, which is tesseract.js's entry point, and the deployed Function would die on
+# its first image. Everything below is anchored to this folder with a leading `/` for that reason.
+#
+# `src/` and the tsconfig files are deliberately NOT excluded: a remote build (the default for Flex Consumption,
+# and the only way sharp gets linux-x64 binaries) runs `npm run build` on the server, which needs them.
+
+/test
+/scripts
+/local.settings.json
+/local.settings.json.example
+/.env
+/.env.*
+/.git*
+/.funcignore
+/README.md
+
+# @tesseract.js-data/eng ships more than one accuracy variant of the model (10 MB vs. 2.8 MB); only
+# 4.0.0_best_int is loaded (src/core/env.ts resolveLangPath), so the plain 4.0.0 one is dead weight to deploy.
+/node_modules/@tesseract.js-data/eng/4.0.0/

@@ -1,7 +1,11 @@
 import { useState, type ReactNode } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertTriangle, Ban, Check, ChevronRight } from 'lucide-react-native';
+
+import { ToastHost } from '@/components/ui/ToastHost';
+import type { ChatRole } from '@/data/types';
+import { useTradeStore } from '@/store/trade-store';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
 
@@ -21,16 +25,47 @@ const REASONS: { id: BailReason; title: string; subtitle: string; flag?: boolean
   { id: 'other', title: 'Other', subtitle: 'Add a short note for the mods', chevron: true },
 ];
 
+/** `bail_and_block` rejects a note longer than this (`blocks_note_only_for_other`). */
+const NOTE_MAX_LENGTH = 280;
+
 interface BailBlockModalProps {
+  /** The chat to bail. When given, the modal runs the bail itself (the `bail_and_block` RPC with Supabase,
+   *  a local removal with the mock) and reports back through `onDone`. */
+  chatId?: string;
+  /** Who gets blocked, for the copy. */
+  partnerName?: string;
+  /** Only the seller has a listing to un-freeze. Omitted, the copy stays the mock's seller wording. */
+  role?: ChatRole;
+  /** The bail went through. */
+  onDone?: () => void;
+  /** Standalone use, with no chat (the /test-bail screen): receives the choice and does nothing else. */
   onSubmit?: (reason: BailReason, note?: string) => void;
   onCancel?: () => void;
 }
 
-/** Bottom-sheet "Bail & Block" safety confirmation — reason selection is local state, with onPress hooks left open for the caller. */
-export function BailBlockModal({ onSubmit, onCancel }: BailBlockModalProps) {
+/** Bottom-sheet "Bail & Block" safety confirmation. */
+export function BailBlockModal({ chatId, partnerName, role, onDone, onSubmit, onCancel }: BailBlockModalProps) {
   const insets = useSafeAreaInsets();
+  const bailChat = useTradeStore((s) => s.bailChat);
   const [selectedReason, setSelectedReason] = useState<BailReason>('unresponsive');
   const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const trimmed = selectedReason === 'other' ? note.trim() || undefined : undefined;
+    if (chatId === undefined) {
+      onSubmit?.(selectedReason, trimmed);
+      return;
+    }
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    const result = await bailChat(chatId, selectedReason, trimmed);
+    setSubmitting(false);
+    if (result.ok) onDone?.();
+    else setError(result.error.message);
+  };
 
   return (
     <View
@@ -50,8 +85,8 @@ export function BailBlockModal({ onSubmit, onCancel }: BailBlockModalProps) {
       >
         <Grabber />
         <DangerIcon />
-        <Heading />
-        <ImpactChips />
+        <Heading partnerName={partnerName} sellerCopy={role !== 'buyer'} />
+        <ImpactChips sellerCopy={role !== 'buyer'} />
         <ReasonList selectedReason={selectedReason} onSelectReason={setSelectedReason} />
 
         {selectedReason === 'other' && (
@@ -59,6 +94,7 @@ export function BailBlockModal({ onSubmit, onCancel }: BailBlockModalProps) {
             <TextInput
               value={note}
               onChangeText={setNote}
+              maxLength={NOTE_MAX_LENGTH}
               placeholder="Tell us what happened…"
               placeholderTextColor={C.textDim}
               multiline
@@ -77,27 +113,36 @@ export function BailBlockModal({ onSubmit, onCancel }: BailBlockModalProps) {
           </View>
         )}
 
+        {error ? (
+          <Text accessibilityRole="alert" className="mb-3 text-center" style={{ fontSize: 13, lineHeight: 19, color: C.danger }}>
+            {error}
+          </Text>
+        ) : null}
         <Pressable
-          onPress={() => onSubmit?.(selectedReason, selectedReason === 'other' ? note.trim() || undefined : undefined)}
+          onPress={() => void submit()}
+          disabled={submitting}
           accessibilityRole="button"
           accessibilityLabel="Submit and block"
-          className="flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] active:opacity-90"
+          accessibilityState={{ busy: submitting }}
+          className={`flex-row items-center justify-center gap-2.5 rounded-2xl py-[18px] ${submitting ? 'opacity-70' : 'active:opacity-90'}`}
           style={MODAL_SURFACE.ctaDanger}
         >
-          <Ban size={20} color="#fff" strokeWidth={2.5} />
+          {submitting ? <ActivityIndicator color="#fff" /> : <Ban size={20} color="#fff" strokeWidth={2.5} />}
           <Text className="font-display" style={{ fontSize: 16, color: '#fff', letterSpacing: -0.16 }}>
-            Submit &amp; Block
+            {submitting ? 'Blocking…' : 'Submit & Block'}
           </Text>
         </Pressable>
         <Pressable
           onPress={onCancel}
+          disabled={submitting}
           accessibilityRole="button"
           accessibilityLabel="Cancel"
-          className="items-center py-3 active:opacity-70"
+          className={`items-center py-3 ${submitting ? 'opacity-40' : 'active:opacity-70'}`}
         >
           <Text style={{ fontSize: 14, fontWeight: '600', color: C.textSecondary }}>Cancel</Text>
         </Pressable>
       </View>
+      <ToastHost />
     </View>
   );
 }
@@ -123,16 +168,20 @@ function DangerIcon() {
   );
 }
 
-function Heading() {
+function Heading({ partnerName, sellerCopy }: { partnerName?: string; sellerCopy: boolean }) {
   return (
     <View className="mb-5">
       <Text className="font-display mb-2 text-center" style={{ fontSize: 24, color: C.textPrimary, letterSpacing: -0.48 }}>
         Are you sure?
       </Text>
       <Text className="text-center" style={{ fontSize: 14, color: C.textSecondary, lineHeight: 21 }}>
-        This will instantly close the chat and{' '}
-        <Text style={{ color: C.textPrimary, fontWeight: '600' }}>un-freeze your listing</Text>. GhostTraderXX will be
-        blocked from contacting you again.
+        This will instantly close the chat
+        {sellerCopy ? (
+          <>
+            {' '}and <Text style={{ color: C.textPrimary, fontWeight: '600' }}>un-freeze your listing</Text>
+          </>
+        ) : null}
+        . {partnerName ?? 'GhostTraderXX'} will be blocked from contacting you again.
       </Text>
     </View>
   );
@@ -152,10 +201,12 @@ function ImpactChip({ icon, label }: { icon: ReactNode; label: string }) {
   );
 }
 
-function ImpactChips() {
+function ImpactChips({ sellerCopy }: { sellerCopy: boolean }) {
   return (
     <View className="mb-5 flex-row justify-center gap-2">
-      <ImpactChip icon={<Check size={12} color={C.success} strokeWidth={2.5} />} label="LISTING RELISTED" />
+      {sellerCopy ? (
+        <ImpactChip icon={<Check size={12} color={C.success} strokeWidth={2.5} />} label="LISTING RELISTED" />
+      ) : null}
       <ImpactChip icon={<Ban size={12} color={C.danger} strokeWidth={2.5} />} label="USER BLOCKED" />
     </View>
   );

@@ -1,5 +1,7 @@
+import { randomUUID } from 'expo-crypto';
+import { Image } from 'expo-image';
 import { useMemo, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft,
@@ -18,7 +20,16 @@ import {
 import { ListingCard } from '@/components/feed/ListingCard';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import type { BackgroundHint, CreatureRef, Listing, TradeType } from '@/data/types';
+import type { CreatureRef, Listing, TradeType } from '@/data/types';
+import {
+  listingErrorMessage,
+  publishListing,
+  type ListingTag,
+  type NewListingInput,
+  type ProofKind,
+} from '@/lib/api/listings';
+import { USE_SUPABASE } from '@/lib/data-source';
+import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
 
 import { MODAL_COLORS, MODAL_SURFACE, monogramGradient } from './tokens';
 
@@ -60,22 +71,26 @@ const WANTED_POOL: WantedCreature[] = [
   { label: 'Dn', from: '#93c5fd', to: '#1d4ed8', name: 'Dragonite', dex: '#149', pokemonId: 149, hue: 205 },
 ];
 
-interface ProofUpload {
-  id: string;
-  kind: 'Appraisal' | 'Movesets' | 'Event Badge';
-  filename: string;
-  meta: string;
-}
-
-/** No real camera/gallery picker is wired up in this mock app — "adding a proof" cycles through a
- *  small preset pool, same simulated-upload pattern as `WANTED_POOL` above. */
-const PROOF_POOL: ProofUpload[] = [
-  { id: 'proof-appraisal', kind: 'Appraisal', filename: 'IMG_2049.jpg', meta: '2.1 MB · scanned in 1.2s' },
-  { id: 'proof-movesets', kind: 'Movesets', filename: 'IMG_2051.jpg', meta: '1.8 MB · scanned in 0.9s' },
-  { id: 'proof-badges', kind: 'Event Badge', filename: 'IMG_2058.jpg', meta: '956 KB · scanned in 0.6s' },
+/** The three proof slots, one image each — the same kinds as the `proof_kind` enum, so a listing can
+ *  structurally hold at most three (`listing_proofs_one_per_kind`). */
+const PROOF_KINDS: { proofKind: ProofKind; label: 'Appraisal' | 'Movesets' | 'Event Badge' }[] = [
+  { proofKind: 'appraisal', label: 'Appraisal' },
+  { proofKind: 'movesets', label: 'Movesets' },
+  { proofKind: 'event_badge', label: 'Event Badge' },
 ];
 
-const TAG_OPTIONS = ['Legacy Move', 'Community Day', 'PvP Ready', 'Raid Exclusive', 'Hundo IV'];
+interface ProofUpload {
+  proofKind: ProofKind;
+  kind: (typeof PROOF_KINDS)[number]['label'];
+  /** A real image from the photo library. Nothing is uploaded until the listing is posted. */
+  image: PickedProof;
+}
+
+const nextProofSlot = (uploads: ProofUpload[]) =>
+  PROOF_KINDS.find((slot) => !uploads.some((u) => u.proofKind === slot.proofKind));
+
+/** Typed against the `listing_tag` enum, so a tag the database would reject cannot be added here. */
+const TAG_OPTIONS: ListingTag[] = ['Legacy Move', 'Community Day', 'PvP Ready', 'Raid Exclusive', 'Hundo IV'];
 
 const NOTES_MAX_LENGTH = 280;
 
@@ -84,8 +99,8 @@ type Step = 'form' | 'preview';
 interface CreateListingModalProps {
   onClose?: () => void;
   onSave?: () => void;
-  /** Fired when the trainer confirms the preview — the caller is expected to append the listing
-   *  to the global store. */
+  /** Fired once the listing is posted. With Supabase the row (and its proofs) already exists, so the
+   *  caller just refreshes the feed; with the mock data source the caller appends it to the store. */
   onPublish?: (listing: Listing) => void;
 }
 
@@ -103,40 +118,58 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [purified, setPurified] = useState(false);
   const [specialBackground, setSpecialBackground] = useState(true);
   const [wanted, setWanted] = useState<WantedCreature[]>(WANTED_POOL.slice(0, 2));
-  const [uploads, setUploads] = useState<ProofUpload[]>(PROOF_POOL.slice(0, 1));
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [uploads, setUploads] = useState<ProofUpload[]>([]);
+  const [picking, setPicking] = useState(false);
+  const [proofError, setProofError] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<ListingTag[]>([]);
   const [notes, setNotes] = useState('');
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  // Generated once per modal, so retrying a publish that half-succeeded reuses the same listing row.
+  const [draftId] = useState(() => randomUUID());
 
-  const previewListing = useMemo<Listing | null>(() => {
+  /** Exactly what gets inserted: only the fields a trainer supplies (see `NewListingInput`). */
+  const draft = useMemo<NewListingInput | null>(() => {
     if (!selectedCreature) return null;
-    const bg: BackgroundHint = shiny ? 'shiny' : specialBackground ? 'legacy' : 'meta';
+    const bg: NewListingInput['bg'] = shiny ? 'shiny' : specialBackground ? 'legacy' : 'meta';
     const tradeType: TradeType = shiny ? 'Unregistered (Shiny/Legendary)' : 'Unregistered (Standard)';
     const looking: CreatureRef[] = wanted.map((w) => ({ name: w.name, pokemonId: w.pokemonId, hue: w.hue }));
 
     return {
-      id: `draft-${selectedCreature.pokemonId}-${Date.now()}`,
+      id: draftId,
       name: selectedCreature.name,
       pokemonId: selectedCreature.pokemonId,
       hue: selectedCreature.hue,
       form: purified ? 'Purified' : 'Standard',
+      // Placeholder until OCR reads the real catch date from the proof (SUPABASE_PLAN.md §5.2 Q9).
       year: new Date().getFullYear(),
-      lucky: true,
       shiny,
       accent: '#fbbf24',
       bg,
-      seller: 'You',
-      dist: 0,
       loc: filterLocation,
-      pvp: 'NEW',
-      demand: 'NEW',
       tradeType,
       iv: 'Unrated',
       looking,
-      screenshots: uploads.map((u) => u.filename),
       tags: selectedTags,
       notes: notes.trim() || undefined,
     };
-  }, [selectedCreature, shiny, purified, specialBackground, wanted, filterLocation, uploads, selectedTags, notes]);
+  }, [draftId, selectedCreature, shiny, purified, specialBackground, wanted, filterLocation, selectedTags, notes]);
+
+  /** The draft as the feed card renders it. Seller, ranks, distance and lucky are server-owned, so they are display-only here. */
+  const previewListing = useMemo<Listing | null>(
+    () =>
+      draft && {
+        ...draft,
+        // A new listing is never Lucky: only the OCR worker sets that, after an appraisal proof backs it.
+        lucky: false,
+        seller: 'You',
+        dist: USE_SUPABASE ? undefined : 0,
+        pvp: 'NEW',
+        demand: 'NEW',
+        screenshots: uploads.map((u) => u.image.filename),
+      },
+    [draft, uploads]
+  );
 
   const addWanted = () => {
     if (wanted.length >= 3) return;
@@ -148,17 +181,26 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     setWanted((prev) => prev.filter((w) => w.name !== name));
   };
 
-  const addProof = () => {
-    if (uploads.length >= 3) return;
-    const next = PROOF_POOL.find((p) => !uploads.some((existing) => existing.kind === p.kind));
-    if (next) setUploads((prev) => [...prev, next]);
+  const addProof = async () => {
+    const slot = nextProofSlot(uploads);
+    if (!slot || picking) return;
+    setProofError(null);
+    setPicking(true);
+    try {
+      const image = await pickProofImage();
+      if (image) setUploads((prev) => [...prev, { proofKind: slot.proofKind, kind: slot.label, image }]);
+    } catch (error) {
+      setProofError(error instanceof Error ? error.message : 'Could not open your photos.');
+    } finally {
+      setPicking(false);
+    }
   };
 
-  const removeProof = (id: string) => {
-    setUploads((prev) => prev.filter((u) => u.id !== id));
+  const removeProof = (proofKind: ProofKind) => {
+    setUploads((prev) => prev.filter((u) => u.proofKind !== proofKind));
   };
 
-  const toggleTag = (tag: string) => {
+  const toggleTag = (tag: ListingTag) => {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
   };
 
@@ -167,15 +209,37 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     setStep('preview');
   };
 
-  const publish = () => {
-    if (!previewListing) return;
-    onPublish?.(previewListing);
+  const publish = async () => {
+    if (!draft || !previewListing || publishing) return;
+    if (!USE_SUPABASE) {
+      onPublish?.(previewListing);
+      return;
+    }
+
+    setPublishing(true);
+    setPublishError(null);
+    try {
+      // The listing row goes first: the storage policy only accepts proofs for a listing that already
+      // exists and is the caller's. Every step is idempotent for `draftId`, so a retry is safe.
+      const proofs = await Promise.all(
+        uploads.map(async (u) => ({
+          kind: u.proofKind,
+          contentType: u.image.contentType,
+          data: await readProofBytes(u.image),
+        }))
+      );
+      onPublish?.(await publishListing(draft, proofs));
+    } catch (error) {
+      setPublishError(listingErrorMessage(error));
+    } finally {
+      setPublishing(false);
+    }
   };
 
   if (step === 'preview' && previewListing) {
     return (
       <View className="flex-1" style={{ backgroundColor: C.bgSurface, paddingTop: insets.top }}>
-        <Header onClose={onClose} onSave={onSave} />
+        <Header onClose={onClose} onSave={onSave} busy={publishing} />
         <ProgressBar filled={3} />
         <ScrollView
           contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24, gap: 16 }}
@@ -210,7 +274,13 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
             </Text>
           )}
         </ScrollView>
-        <PreviewFooter onBack={() => setStep('form')} onPublish={publish} bottomInset={insets.bottom} />
+        <PreviewFooter
+          onBack={() => setStep('form')}
+          onPublish={() => void publish()}
+          publishing={publishing}
+          error={publishError}
+          bottomInset={insets.bottom}
+        />
       </View>
     );
   }
@@ -239,7 +309,13 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         />
         <ListingTags selectedTags={selectedTags} onToggleTag={toggleTag} />
         <SellerNotes notes={notes} onChangeNotes={setNotes} />
-        <ProofUploadsSection uploads={uploads} onAddProof={addProof} onRemoveProof={removeProof} />
+        <ProofUploadsSection
+          uploads={uploads}
+          picking={picking}
+          error={proofError}
+          onAddProof={() => void addProof()}
+          onRemoveProof={removeProof}
+        />
         <WantedInReturn wanted={wanted} onAddWanted={addWanted} onRemoveWanted={removeWanted} />
       </ScrollView>
       <Footer onContinue={goToPreview} disabled={!selectedCreature} bottomInset={insets.bottom} />
@@ -247,7 +323,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   );
 }
 
-function Header({ onClose, onSave }: { onClose?: () => void; onSave?: () => void }) {
+function Header({ onClose, onSave, busy }: { onClose?: () => void; onSave?: () => void; busy?: boolean }) {
   return (
     <View
       className="flex-row items-center justify-between border-b px-5 py-4"
@@ -255,9 +331,10 @@ function Header({ onClose, onSave }: { onClose?: () => void; onSave?: () => void
     >
       <Pressable
         onPress={onClose}
+        disabled={busy}
         accessibilityRole="button"
         accessibilityLabel="Close"
-        className="h-10 w-10 items-center justify-center rounded-xl border active:opacity-70"
+        className={`h-10 w-10 items-center justify-center rounded-xl border ${busy ? 'opacity-40' : 'active:opacity-70'}`}
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
         <X size={18} color={C.textPrimary} strokeWidth={2.5} />
@@ -544,8 +621,8 @@ function ListingTags({
   selectedTags,
   onToggleTag,
 }: {
-  selectedTags: string[];
-  onToggleTag: (tag: string) => void;
+  selectedTags: ListingTag[];
+  onToggleTag: (tag: ListingTag) => void;
 }) {
   return (
     <View>
@@ -608,6 +685,7 @@ function SellerNotes({ notes, onChangeNotes }: { notes: string; onChangeNotes: (
 }
 
 function ProofRow({ upload, onRemove }: { upload: ProofUpload; onRemove: () => void }) {
+  const { image } = upload;
   return (
     <View
       className="flex-row items-center gap-4 rounded-[14px] border px-4 py-3.5"
@@ -617,17 +695,22 @@ function ProofRow({ upload, onRemove }: { upload: ProofUpload; onRemove: () => v
         className="h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-xl"
         style={MODAL_SURFACE.stripedTile}
       >
-        <ImageIcon size={18} color={C.textDim} />
+        <Image
+          source={{ uri: image.uri }}
+          style={{ width: 52, height: 52 }}
+          contentFit="cover"
+          accessibilityLabel={`${upload.kind} screenshot`}
+        />
       </View>
       <View className="flex-1">
         <Text className="font-mono-semi" style={{ fontSize: 9, color: C.gold, letterSpacing: 0.8 }}>
           {upload.kind.toUpperCase()}
         </Text>
         <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary, marginTop: 2 }}>
-          {upload.filename}
+          {image.filename}
         </Text>
         <Text className="font-mono" style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>
-          {upload.meta}
+          {image.sizeBytes === null ? 'Ready to upload' : `${formatBytes(image.sizeBytes)} · ready to upload`}
         </Text>
       </View>
       <Pressable
@@ -645,14 +728,18 @@ function ProofRow({ upload, onRemove }: { upload: ProofUpload; onRemove: () => v
 
 function ProofUploadsSection({
   uploads,
+  picking,
+  error,
   onAddProof,
   onRemoveProof,
 }: {
   uploads: ProofUpload[];
+  picking: boolean;
+  error: string | null;
   onAddProof: () => void;
-  onRemoveProof: (id: string) => void;
+  onRemoveProof: (proofKind: ProofKind) => void;
 }) {
-  const nextKind = PROOF_POOL.find((p) => !uploads.some((u) => u.kind === p.kind))?.kind;
+  const nextKind = nextProofSlot(uploads)?.label;
 
   return (
     <View>
@@ -664,7 +751,7 @@ function ProofUploadsSection({
           <View className="flex-row items-center gap-1.5">
             <View className="h-2 w-2 rounded-full" style={{ backgroundColor: C.success, boxShadow: '0 0 8px #22c55e' }} />
             <Text className="font-mono-bold" style={{ fontSize: 12, color: C.success, letterSpacing: 1.2 }}>
-              {uploads.length} / 3 VERIFIED
+              {uploads.length} / 3 ATTACHED
             </Text>
           </View>
         ) : (
@@ -676,26 +763,36 @@ function ProofUploadsSection({
 
       <View className="gap-2.5">
         {uploads.map((upload) => (
-          <ProofRow key={upload.id} upload={upload} onRemove={() => onRemoveProof(upload.id)} />
+          <ProofRow key={upload.proofKind} upload={upload} onRemove={() => onRemoveProof(upload.proofKind)} />
         ))}
 
         {uploads.length < 3 && (
           <Pressable
             onPress={onAddProof}
+            disabled={picking}
             accessibilityRole="button"
             accessibilityLabel={`Add ${nextKind ?? 'proof'} upload`}
-            className="flex-row items-center justify-center gap-2 rounded-[14px] border border-dashed py-3.5 active:opacity-70"
+            className={`flex-row items-center justify-center gap-2 rounded-[14px] border border-dashed py-3.5 ${picking ? 'opacity-60' : 'active:opacity-70'}`}
             style={{ borderColor: C.borderDefault }}
           >
-            <Plus size={16} color={C.textDim} strokeWidth={2} />
+            {picking ? (
+              <ActivityIndicator size="small" color={C.textDim} />
+            ) : (
+              <Plus size={16} color={C.textDim} strokeWidth={2} />
+            )}
             <Text className="font-mono" style={{ fontSize: 11, color: C.textDim, letterSpacing: 0.6 }}>
-              ADD PROOF{nextKind ? ` · ${nextKind.toUpperCase()}` : ''}
+              {picking ? 'OPENING PHOTOS…' : `ADD PROOF${nextKind ? ` · ${nextKind.toUpperCase()}` : ''}`}
             </Text>
           </Pressable>
         )}
+        {error ? (
+          <Text accessibilityRole="alert" style={{ fontSize: 12, color: C.danger }}>
+            {error}
+          </Text>
+        ) : null}
       </View>
 
-      {uploads.length > 0 && (
+      {uploads.length > 0 && !USE_SUPABASE && (
         <View
           className="relative mt-3 overflow-hidden rounded-[14px] border p-[18px]"
           style={[MODAL_SURFACE.extractedCard, { borderColor: 'rgba(251,191,36,0.3)' }]}
@@ -738,6 +835,12 @@ function ProofUploadsSection({
             </View>
           </View>
         </View>
+      )}
+      {uploads.length > 0 && USE_SUPABASE && (
+        <Text className="mt-3" style={{ fontSize: 12, lineHeight: 18, color: C.textMuted }}>
+          Proofs are stored privately and uploaded when you post. Automatic verification is not live yet, so
+          nothing is read from these photos.
+        </Text>
       )}
     </View>
   );
@@ -871,10 +974,14 @@ function Footer({
 function PreviewFooter({
   onBack,
   onPublish,
+  publishing,
+  error,
   bottomInset = 0,
 }: {
   onBack?: () => void;
   onPublish?: () => void;
+  publishing?: boolean;
+  error?: string | null;
   bottomInset?: number;
 }) {
   return (
@@ -886,23 +993,35 @@ function PreviewFooter({
         paddingBottom: Math.max(bottomInset, 24),
       }}
     >
+      {error ? (
+        <Text accessibilityRole="alert" style={{ fontSize: 13, lineHeight: 19, color: C.danger }}>
+          {error}
+        </Text>
+      ) : null}
       <Pressable
-        onPress={onPublish}
+        onPress={publishing ? undefined : onPublish}
+        disabled={publishing}
         accessibilityRole="button"
         accessibilityLabel="Post listing"
-        className="flex-row items-center justify-center gap-2 rounded-2xl py-4 active:opacity-90"
+        accessibilityState={{ busy: publishing }}
+        className={`flex-row items-center justify-center gap-2 rounded-2xl py-4 ${publishing ? 'opacity-70' : 'active:opacity-90'}`}
         style={MODAL_SURFACE.ctaGreen}
       >
-        <Check size={18} color={C.successText} strokeWidth={2.5} />
+        {publishing ? (
+          <ActivityIndicator size="small" color={C.successText} />
+        ) : (
+          <Check size={18} color={C.successText} strokeWidth={2.5} />
+        )}
         <Text className="font-display" style={{ fontSize: 15, color: C.successText, letterSpacing: -0.15 }}>
-          Post Listing
+          {publishing ? 'Posting…' : error ? 'Try Again' : 'Post Listing'}
         </Text>
       </Pressable>
       <Pressable
         onPress={onBack}
+        disabled={publishing}
         accessibilityRole="button"
         accessibilityLabel="Back to edit"
-        className="flex-row items-center justify-center gap-2 py-2 active:opacity-70"
+        className={`flex-row items-center justify-center gap-2 py-2 ${publishing ? 'opacity-40' : 'active:opacity-70'}`}
       >
         <ArrowLeft size={16} color={C.textMuted} strokeWidth={2.5} />
         <Text style={{ fontSize: 13, fontWeight: '600', color: C.textMuted }}>Back to Edit</Text>
