@@ -3,6 +3,7 @@ import { ChevronLeft, LogOut, UserRound } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
+import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
 import { ArsenalGrid } from '@/components/profile/ArsenalGrid';
 import { LiveIdentityCard } from '@/components/profile/LiveIdentityCard';
 import { ProfileHero } from '@/components/profile/ProfileHero';
@@ -11,20 +12,36 @@ import { RepStats } from '@/components/profile/RepStats';
 import { TradeHistoryGrid } from '@/components/profile/TradeHistoryGrid';
 import { WishlistGrid } from '@/components/profile/WishlistGrid';
 import { IconButton } from '@/components/ui/IconButton';
+import { findPokemon } from '@/constants/pokedex';
 import { trainer } from '@/data/trainer';
 import type { CreatureRef } from '@/data/types';
-import { fetchMyArsenal, fetchMyProfile, isProfileReady, type MyProfile } from '@/lib/api/profile';
+import {
+  addToArsenal,
+  addToWishlist,
+  fetchMyArsenal,
+  fetchMyProfile,
+  fetchMyWishlist,
+  isProfileReady,
+  type MyProfile,
+} from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { useSession } from '@/lib/session';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
+/** Which grid the "+" button on the live profile opened the picker for. */
+type CreatureListKind = 'arsenal' | 'wishlist';
+
 interface MyProfileData {
   status: 'loading' | 'ready' | 'error';
   profile: MyProfile | null;
   arsenal: CreatureRef[];
+  wishlist: CreatureRef[];
   error: string | null;
   retry: () => void;
+  /** Re-fetches Arsenal + Wishlist in place after an add, leaving `status`/`profile` untouched so the
+   *  screen the trainer is already looking at doesn't flash back to the loading spinner. */
+  refresh: () => Promise<void>;
 }
 
 /**
@@ -36,8 +53,11 @@ interface MyProfileData {
 function useMyProfileData(permanentUserId: string | null): MyProfileData {
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [arsenal, setArsenal] = useState<CreatureRef[]>([]);
+  const [wishlist, setWishlist] = useState<CreatureRef[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  // Shared by `load` and `refresh` below: whichever fetch resolves last for the *current* permanent
+  // user wins, the same guard `lib/use-feed.ts` uses for the feed.
   const latestRequest = useRef(0);
 
   const load = useCallback(async () => {
@@ -46,15 +66,37 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
     setStatus('loading');
     setError(null);
     try {
-      const [nextProfile, nextArsenal] = await Promise.all([fetchMyProfile(), fetchMyArsenal()]);
+      const [nextProfile, nextArsenal, nextWishlist] = await Promise.all([
+        fetchMyProfile(),
+        fetchMyArsenal(),
+        fetchMyWishlist(),
+      ]);
       if (request !== latestRequest.current) return; // a newer load started while this one was in flight
       setProfile(nextProfile);
       setArsenal(nextArsenal);
+      setWishlist(nextWishlist);
       setStatus('ready');
     } catch (reason) {
       if (request !== latestRequest.current) return;
       setError(reason instanceof Error ? reason.message : 'Could not load your profile.');
       setStatus('error');
+    }
+  }, [permanentUserId]);
+
+  // Called after adding a Pokémon: only Arsenal/Wishlist can have changed (the profile identity
+  // fields haven't), so only those two are re-read — and `status`/`profile` are never touched, so the
+  // screen stays exactly as it was instead of dropping back to the loading spinner mid-scroll.
+  const refresh = useCallback(async () => {
+    if (!permanentUserId) return;
+    const request = ++latestRequest.current;
+    try {
+      const [nextArsenal, nextWishlist] = await Promise.all([fetchMyArsenal(), fetchMyWishlist()]);
+      if (request !== latestRequest.current) return;
+      setArsenal(nextArsenal);
+      setWishlist(nextWishlist);
+    } catch (reason) {
+      if (request !== latestRequest.current) return;
+      toast(reason instanceof Error ? reason.message : 'Could not refresh your profile.');
     }
   }, [permanentUserId]);
 
@@ -67,18 +109,24 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
       latestRequest.current++; // invalidate any load already in flight for the old user
       setProfile(null);
       setArsenal([]);
+      setWishlist([]);
       setStatus('loading');
       setError(null);
     }
   }, [permanentUserId, load]);
 
-  return { status, profile, arsenal, error, retry: load };
+  return { status, profile, arsenal, wishlist, error, retry: load, refresh };
 }
 
 export default function ProfileScreen() {
   const { user, isAnonymous, error: sessionError, retry: retrySession, signOut } = useSession();
   const resetTradeStore = useTradeStore((s) => s.reset);
   const [signingOut, setSigningOut] = useState(false);
+  // Which grid's "+" button opened the picker, if any — also doubles as the picker's `visible` flag.
+  const [pickerFor, setPickerFor] = useState<CreatureListKind | null>(null);
+  // Blocks a second selection from firing a second insert while the first is still in flight; the
+  // picker itself is already closed by then (see `addPokemon`), so this only guards a fast re-open.
+  const [addingCreature, setAddingCreature] = useState(false);
 
   // Same uid through the anonymous -> permanent upgrade, a new uid for a returning-user sign-in —
   // either way this is the one value the live fetch below needs to key off.
@@ -109,20 +157,44 @@ export default function ProfileScreen() {
     }
   };
 
-  const editComingSoon = () => toast('Coming soon', 'info');
   const goToOnboarding = () => router.push('/onboarding');
 
   const showSignOut = USE_SUPABASE && !isAnonymous && !!user;
 
+  /** Shared by both grids' pickers: add the chosen Pokémon, refresh in place, then toast. Errors
+   *  (an unknown id, a full list, a lost race on the last free slot) surface the same way. */
+  const addPokemon = async (list: CreatureListKind, pokemonId: number) => {
+    if (addingCreature) return;
+    const entry = findPokemon(pokemonId);
+    const listLabel = list === 'arsenal' ? 'Arsenal' : 'Wishlist';
+    setAddingCreature(true);
+    try {
+      await (list === 'arsenal' ? addToArsenal(pokemonId) : addToWishlist(pokemonId));
+      await live.refresh();
+      toast(`${entry?.name ?? 'That Pokémon'} added to your ${listLabel}`, 'success');
+    } catch (reason) {
+      toast(reason instanceof Error ? reason.message : `Could not add that Pokémon to your ${listLabel}.`, 'error');
+    } finally {
+      setAddingCreature(false);
+    }
+  };
+
+  const handleSelectPokemon = (pokemonId: number) => {
+    const list = pickerFor;
+    setPickerFor(null); // close before the toast — see lib/toast.ts on modals and their own ToastHost
+    if (list) void addPokemon(list, pokemonId);
+  };
+
   let body: ReactNode;
   if (!USE_SUPABASE) {
-    // Mock data source: unchanged from before this screen knew about sessions at all.
+    // Mock data source: there is no write path (no Supabase table to insert into), so no `onEdit` is
+    // passed — the grids hide their "+" button entirely rather than opening a picker that can't work.
     body = (
       <>
         <ProfileHero trainer={trainer} />
         <RepStats trainer={trainer} />
-        <ArsenalGrid arsenal={trainer.arsenal} onEdit={editComingSoon} />
-        <WishlistGrid wishlist={trainer.wishlist} onEdit={editComingSoon} />
+        <ArsenalGrid arsenal={trainer.arsenal} />
+        <WishlistGrid wishlist={trainer.wishlist} />
         <TradeHistoryGrid history={trainer.tradeHistory} />
       </>
     );
@@ -145,8 +217,8 @@ export default function ProfileScreen() {
       <ProfileNotice
         icon={<UserRound size={26} color="#04121f" strokeWidth={2.2} />}
         title="Unregistered"
-        body="You're browsing as a guest. Verify your email to set up a trainer profile — your Arsenal, Wishlist and trade history will live here."
-        actionLabel="Verify account"
+        body="You're browsing as a guest. Sign in to set up a trainer profile — your Arsenal, Wishlist and trade history will live here."
+        actionLabel="Sign in"
         onAction={goToOnboarding}
       />
     );
@@ -173,14 +245,14 @@ export default function ProfileScreen() {
       />
     );
   } else {
-    // Ready: real handle/team and real arsenal. Rep, streak, bio and trade history have no live
-    // source yet (only `fetchMyProfile`/`fetchMyArsenal` exist), so those sections are left out
-    // rather than filled with invented numbers — see LiveIdentityCard's own comment.
+    // Ready: real handle/team, real arsenal, real wishlist. Rep, streak, bio and trade history have
+    // no live source yet, so those sections are left out rather than filled with invented numbers —
+    // see LiveIdentityCard's own comment.
     body = (
       <>
         <LiveIdentityCard profile={live.profile} />
-        <ArsenalGrid arsenal={live.arsenal} onEdit={editComingSoon} />
-        <WishlistGrid wishlist={[]} onEdit={editComingSoon} />
+        <ArsenalGrid arsenal={live.arsenal} onEdit={() => setPickerFor('arsenal')} />
+        <WishlistGrid wishlist={live.wishlist} onEdit={() => setPickerFor('wishlist')} />
       </>
     );
   }
@@ -215,6 +287,16 @@ export default function ProfileScreen() {
       >
         {body}
       </ScrollView>
+
+      {/* Mounted unconditionally: `pickerFor` can only ever be set from the live "ready" branch above,
+       *  so this is inert (closed) in every other state. */}
+      <PokemonPickerModal
+        visible={pickerFor !== null}
+        title={pickerFor === 'wishlist' ? 'Add to Wishlist' : 'Add to Arsenal'}
+        onClose={() => setPickerFor(null)}
+        onSelect={handleSelectPokemon}
+        excludeIds={(pickerFor === 'wishlist' ? live.wishlist : live.arsenal).map((c) => c.pokemonId)}
+      />
     </View>
   );
 }

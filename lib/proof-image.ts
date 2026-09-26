@@ -63,6 +63,9 @@ export async function pickProofImage(): Promise<PickedProof | null> {
     mediaTypes: ['images'],
     allowsMultipleSelection: false,
     quality: 0.85,
+    // Explicit (this is already the default): a forced crop would cut off the top or bottom of a tall, full-height
+    // trainer-code or appraisal screenshot, taking the handle, friend code, or catch date with it.
+    allowsEditing: false,
     preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
   });
   if (result.canceled) return null;

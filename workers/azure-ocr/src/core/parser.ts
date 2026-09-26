@@ -147,31 +147,111 @@ const HANDLE_STOP_WORDS = new Set([
   'NIANTIC',
 ]);
 
+/** How far the handle search reaches from each landmark: back from the friend-code line, or forward from the
+ * "TRAINER CODE" / "FRIEND CODE" header. The game prints the name a fixed couple of lines from one or the
+ * other — never further, and OCR noise (QR-block artefacts, the "scan to add" caption) fills the rest of the
+ * screen, so a wide-open scan would eventually walk into some other handle-shaped word. */
+const HANDLE_LOOKBACK_LINES = 3;
+const HANDLE_LOOKAHEAD_LINES = 4;
+
+/** Either heading the trainer-code screen prints above the name and code. Matches "TRAINER CODE QR CODE" too —
+ * that whole line is multi-token anyway, so `handleCandidate` would reject it as a handle on its own regardless
+ * (`HANDLE_STOP_WORDS` already has both "TRAINER" and "CODE" individually, and "QR", for the same reason: belt
+ * and suspenders, not load-bearing, since a multi-token line never reaches the stop-word check). */
+const TRAINER_CODE_HEADER = /trainer code|friend code/i;
+
 /**
- * The first line, in reading order, that is the trainer's handle: after trimming whitespace and surrounding
+ * Whether `rawLine`, on its own, is shaped like the trainer's handle: after trimming whitespace and surrounding
  * punctuation, exactly one token remains, it matches the handle shape, it is not all digits (a stray line of
  * the friend code itself), it is not the reserved placeholder pattern, and it is not one of `HANDLE_STOP_WORDS`.
- * Pure text search — no fuzzing, no scoring — because the handle is printed once, plainly, on its own line, and
- * guessing among near-misses risks writing the wrong trainer's name into `profiles.handle`.
+ * Pure text check — no fuzzing, no scoring — because the handle is printed once, plainly, on its own line, and
+ * guessing among near-misses risks writing the wrong trainer's name into `profiles.handle`. Shared by both of
+ * `extractHandle`'s anchors so each applies exactly the same test.
+ */
+function handleCandidate(rawLine: string): string | null {
+  const token = rawLine.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+  if (token === '' || /\s/.test(token)) return null; // not exactly one token
+  if (!HANDLE_PATTERN.test(token)) return null;
+  if (/^[0-9]+$/.test(token)) return null;
+  if (PLACEHOLDER_HANDLE.test(token)) return null;
+  if (HANDLE_STOP_WORDS.has(token.toUpperCase())) return null;
+  return token;
+}
+
+/**
+ * The trainer's handle, anchored on one of the two landmarks the "My Trainer Code" screen actually prints it
+ * next to — never the first handle-shaped line anywhere in the OCR text:
+ *
+ * 1. If the text contains a friend-code-shaped line (`FRIEND_CODE_PATTERN`'s first match, wherever that lands —
+ *    whether or not that reading survives into an actual `friendCode`), the handle is the nearest candidate
+ *    line ABOVE it, within `HANDLE_LOOKBACK_LINES` lines. The game always prints the name directly above its
+ *    own code, so this is the strongest anchor available.
+ * 2. Otherwise, if a "TRAINER CODE" / "FRIEND CODE" header line is present — this is also how a handle is still
+ *    found when the friend code came only from the QR scan and never showed up in the OCR text at all — the
+ *    handle is the first candidate within `HANDLE_LOOKAHEAD_LINES` lines AFTER the header.
+ * 3. Otherwise there is no handle. Nothing on the screen anchors the search, so nothing is guessed at: this is
+ *    what keeps a Pokémon's name on an appraisal screenshot (which has neither landmark) from ever being read
+ *    as a trainer's handle, which an unanchored first-match scan could do.
+ *
+ * A line still has to pass every rule `handleCandidate` always used; anchoring changes WHERE lines are looked
+ * at, never what counts as a handle once one is found there.
  */
 function extractHandle(text: string): string | null {
-  for (const rawLine of text.split(/\r?\n/)) {
-    const token = rawLine.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
-    if (token === '' || /\s/.test(token)) continue; // not exactly one token
-    if (!HANDLE_PATTERN.test(token)) continue;
-    if (/^[0-9]+$/.test(token)) continue;
-    if (PLACEHOLDER_HANDLE.test(token)) continue;
-    if (HANDLE_STOP_WORDS.has(token.toUpperCase())) continue;
-    return token;
+  const lines = text.split(/\r?\n/);
+
+  // The first PLAUSIBLE code-shaped match, the same test `friendCodesFromText` applies — a run of QR-block noise
+  // ('|', 'l', 'I') that merely fits the shape must not become the anchor and pull the handle search off course.
+  let codeMatch: RegExpMatchArray | undefined;
+  for (const match of text.matchAll(FRIEND_CODE_PATTERN)) {
+    if (plausibleCodeDigits(match[0]) !== null) {
+      codeMatch = match;
+      break;
+    }
+  }
+  if (codeMatch?.index !== undefined) {
+    const codeLine = text.slice(0, codeMatch.index).split(/\r?\n/).length - 1;
+    for (let i = codeLine - 1; i >= 0 && i >= codeLine - HANDLE_LOOKBACK_LINES; i--) {
+      const candidate = handleCandidate(lines[i] ?? '');
+      if (candidate) return candidate;
+    }
+    return null; // a friend-code line anchors the search; it not finding a handle does not fall through to (2)
+  }
+
+  const headerLine = lines.findIndex((line) => TRAINER_CODE_HEADER.test(line));
+  if (headerLine !== -1) {
+    const lastLine = Math.min(lines.length - 1, headerLine + HANDLE_LOOKAHEAD_LINES);
+    for (let i = headerLine + 1; i <= lastLine; i++) {
+      const candidate = handleCandidate(lines[i] ?? '');
+      if (candidate) return candidate;
+    }
   }
   return null;
 }
 
-/** One group of a friend code as Pokémon GO prints it: four digits, or a letter tesseract commonly confuses with one. */
-const FRIEND_GROUP = '[0-9OoIl|SB]{4}';
-/** The separators seen between groups: a space, the game's own '·', or '.' / '-' from OCR misreading '·'. */
-const FRIEND_SEP = '[ ·.-]';
-const FRIEND_CODE_PATTERN = new RegExp(`${FRIEND_GROUP}${FRIEND_SEP}${FRIEND_GROUP}${FRIEND_SEP}${FRIEND_GROUP}`, 'g');
+/** The character class tesseract can produce for a single digit of a friend code: a real digit, or a letter it
+ * commonly confuses with one (`DIGIT_CONFUSION`, below). Shared between the group shape and the boundary check
+ * below so a match can never be mistaken for a slice out of a longer run of the same kind of character. */
+const DIGIT_LIKE = '[0-9OoIl|SB]';
+/** One group of a friend code as Pokémon GO prints it: four digits, or a digit-confusable letter. */
+const FRIEND_GROUP = `${DIGIT_LIKE}{4}`;
+/** A single separator character between groups: a space, the game's own '·', or '.' / '-' from OCR misreading '·'. */
+const FRIEND_SEP_CHAR = '[ ·.-]';
+/** Zero to two separator characters between groups. The game always prints exactly one, but tesseract sometimes
+ * drops it entirely — two groups run together with no gap, which a fixed "exactly one separator" rejected
+ * outright — and occasionally seems to double it up. Bounded at 2, never unbounded, so unrelated digits
+ * elsewhere in the noise can never be stitched together across an arbitrarily long gap. */
+const FRIEND_SEP = `${FRIEND_SEP_CHAR}{0,2}`;
+/**
+ * A friend code in OCR text: three groups with 0-2 separator characters between them, fenced on both ends by a
+ * negative lookaround so the match can never be a 12-character slice out of a longer run of digit-like
+ * characters. A 13-digit number has no valid 12-character window: whichever one is tried, at least one edge
+ * touches another digit-like character and fails the boundary check, so a longer number never yields a false
+ * code the way an unfenced pattern would.
+ */
+const FRIEND_CODE_PATTERN = new RegExp(
+  `(?<!${DIGIT_LIKE})${FRIEND_GROUP}${FRIEND_SEP}${FRIEND_GROUP}${FRIEND_SEP}${FRIEND_GROUP}(?!${DIGIT_LIKE})`,
+  'g',
+);
 
 /** Letters tesseract confuses with a digit, mapped back — but only inside a candidate group already shaped like
  * one, so a stray 'S' elsewhere in the screenshot is never mistaken for part of the code. */
@@ -181,10 +261,80 @@ function normalizeDigits(group: string): string {
   return Array.from(group, (ch) => DIGIT_CONFUSION[ch] ?? ch).join('');
 }
 
-/** A QR payload's friend code, if the code is all that is in it: strip everything but digits and require exactly 12. */
+/**
+ * How many of a reading's 12 characters must already be real digits before `DIGIT_CONFUSION` is allowed to fix
+ * up the rest. `DIGIT_LIKE` admits 'O o I l | S B', and with separators optional (`FRIEND_SEP` is `{0,2}`) a run
+ * of twelve of those with no digit in it at all fits the code's shape — and the QR block reliably OCRs into
+ * exactly that kind of noise ('|', 'l', 'I'), which would map to `111111111111`. Unchecked, that either invents
+ * a friend code outright or, as a second candidate beside the real one, turns a readable screenshot into an
+ * "ambiguous" `no_friend_code`. Four substitutions (a third of the code) is already generous for tesseract on the
+ * game's large, clean digits, while pure noise has none at all.
+ */
+const MIN_REAL_DIGITS = 8;
+
+/** A code-shaped match's 12 digits, or null when too few of its characters were real digits to trust it. */
+function plausibleCodeDigits(match: string): string | null {
+  const raw = match.replace(new RegExp(FRIEND_SEP_CHAR, 'g'), '');
+  if ((raw.match(/[0-9]/g)?.length ?? 0) < MIN_REAL_DIGITS) return null;
+  const digits = normalizeDigits(raw);
+  return /^[0-9]{12}$/.test(digits) ? digits : null;
+}
+
+/**
+ * Decodes a QR payload the way `friendCodeFromQr` needs, repeatedly: the current game's QR encodes
+ * `dl_action=AddFriend,DlId=<code>` inside a `deep_link_value` query parameter, which is itself inside the
+ * onelink.me URL's query string — escaped twice over, so a single `decodeURIComponent` leaves `%3D` / `%2C`
+ * still literal right next to the friend-code digits. Stops as soon as a pass changes nothing (so a plain,
+ * already-decoded, or bare-digit payload costs exactly one no-op attempt) and gives up after 3 passes regardless
+ * — double encoding only ever needs 2, so a 3rd is slack, not a promise that every encoding depth unwinds.
+ * `decodeURIComponent` throws on a malformed escape (a stray `%` not followed by two hex digits); since a QR
+ * payload is arbitrary bytes this worker does not control, that is routine, not a bug, so decoding just stops
+ * and the string is used raw from that point on rather than the whole read failing.
+ */
+function decodeQrPayloadRepeatedly(payload: string): string {
+  let current = payload;
+  for (let pass = 0; pass < 3; pass++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      break;
+    }
+    if (next === current) break;
+    current = next;
+  }
+  return current;
+}
+
+/** A standalone run of exactly 12 digits: not preceded or followed by another digit, so a longer number embedded
+ * in the payload — or a 12-digit run immediately butted up against a 13th digit — is never mistaken for the code. */
+const STANDALONE_TWELVE_DIGITS = /(?<!\d)\d{12}(?!\d)/g;
+
+/**
+ * A QR payload's friend code, tried in this order once the payload is decoded:
+ *
+ * 1. The current game's deep link names the field outright: `DlId=<12 digits>` (case-insensitive), inside
+ *    `deep_link_value`, inside `dl_action=AddFriend,DlId=...`. Checked first since it needs no guessing once
+ *    decoded.
+ * 2. Absent that field name, a single standalone 12-digit run — covers a payload shaped like the deep link in
+ *    substance but not by this exact parameter (a future onelink change, a differently-templated link), while
+ *    still refusing to guess when more than one such run is present.
+ * 3. Absent that too, the old bare-digit rule, for a QR code with nothing in it but the friend code: the
+ *    payload's digits, and only its digits, total exactly 12 (split apart by dashes or dots and all).
+ *
+ * Null when none of the three match anything.
+ */
 function friendCodeFromQr(qrPayload: string | null | undefined): string | null {
   if (!qrPayload) return null;
-  const digits = qrPayload.replace(/\D/g, '');
+  const decoded = decodeQrPayloadRepeatedly(qrPayload);
+
+  const dlId = decoded.match(/DlId=(\d{12})/i);
+  if (dlId?.[1]) return dlId[1];
+
+  const standalone = [...decoded.matchAll(STANDALONE_TWELVE_DIGITS)];
+  if (standalone.length === 1) return standalone[0]?.[0] ?? null;
+
+  const digits = decoded.replace(/\D/g, '');
   return digits.length === 12 ? digits : null;
 }
 
@@ -197,8 +347,8 @@ function friendCodeFromQr(qrPayload: string | null | undefined): string | null {
 function friendCodesFromText(text: string): Set<string> {
   const found = new Set<string>();
   for (const match of text.matchAll(FRIEND_CODE_PATTERN)) {
-    const candidate = normalizeDigits(match[0].replace(new RegExp(FRIEND_SEP, 'g'), ''));
-    if (/^[0-9]{12}$/.test(candidate)) found.add(candidate);
+    const candidate = plausibleCodeDigits(match[0]);
+    if (candidate !== null) found.add(candidate);
   }
   return found;
 }
@@ -217,12 +367,13 @@ export type ProfileVerdict =
  * Decides what a "My Trainer Code" screenshot's OCR text (and, if the screen shows one, its decoded QR payload)
  * amounts to: a handle and a friend code, or a reason neither could be trusted.
  *
- * - **Friend code.** A QR payload wins outright when it decodes to exactly 12 digits (`friendCodeFromQr`) — a QR
- *   code is either read correctly or not decoded at all, so there is no OCR-style noise to second-guess, and a
- *   correctly-decoded payload is checked first without even looking at the OCR text. Otherwise the OCR text is
- *   scanned for the `dddd·dddd·dddd` shape; two different 12-digit readings on the same screen is `no_friend_code`
- *   (never a guess), and so is none at all.
- * - **Handle.** The first line that is unambiguously just a trainer name (`extractHandle`).
+ * - **Friend code.** A QR payload wins outright when `friendCodeFromQr` can read one out of it — a QR code is
+ *   either read correctly or not decoded at all, so there is no OCR-style noise to second-guess, and a
+ *   successfully-decoded payload is checked first without even looking at the OCR text. Otherwise the OCR text is
+ *   scanned for the `dddd<sep>dddd<sep>dddd` shape; two different 12-digit readings on the same screen is
+ *   `no_friend_code` (never a guess), and so is none at all.
+ * - **Handle.** The trainer name anchored on the friend-code line or the header (`extractHandle`), never just
+ *   the first handle-shaped line anywhere on the screen.
  * - Missing the handle takes priority over missing the friend code when both are absent, but either partial
  *   result that WAS read is still returned, so a caller can prefill everything it already knows.
  *

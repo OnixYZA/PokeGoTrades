@@ -1,12 +1,14 @@
 import { randomUUID } from 'expo-crypto';
 
+import { findPokemon } from '@/constants/pokedex';
 import type { CreatureRef } from '@/data/types';
-import type { Database } from '@/lib/database.types';
+import type { Database, Json } from '@/lib/database.types';
 import type { PickedProof } from '@/lib/proof-image';
 import { readProofBytes } from '@/lib/proof-image';
 import { supabase } from '@/lib/supabase';
 
 export type Team = Database['public']['Enums']['team_name'];
+export type CreatureList = Database['public']['Enums']['creature_list'];
 
 export const TEAMS: readonly Team[] = ['Mystic', 'Valor', 'Instinct'];
 
@@ -86,14 +88,16 @@ export async function getPostingReadiness(): Promise<'anonymous' | 'incomplete' 
   return isProfileReady(await fetchMyProfile()) ? 'ready' : 'incomplete';
 }
 
-/** The signed-in trainer's Arsenal (what they can offer), in slot order. Readable by anyone; owned by them. */
-export async function fetchMyArsenal(): Promise<CreatureRef[]> {
+/** Shared by `fetchMyArsenal` and `fetchMyWishlist`: the signed-in trainer's own creatures in one
+ *  list, in slot order. Readable by anyone; owned by them. Parsed defensively, the way
+ *  `fetchLatestProfileProof` reads `ocr_extracted`: this client never validates jsonb against a schema. */
+async function fetchMyCreatures(list: CreatureList): Promise<CreatureRef[]> {
   const id = await currentUserId();
   const { data, error } = await supabase
     .from('trainer_creatures')
     .select('creature')
     .eq('owner_id', id)
-    .eq('list', 'arsenal')
+    .eq('list', list)
     .order('sort_order', { ascending: true });
   if (error) throw new ProfileError('form', error.message);
   const creatures: CreatureRef[] = [];
@@ -104,6 +108,81 @@ export async function fetchMyArsenal(): Promise<CreatureRef[]> {
     creatures.push({ name, pokemonId, hue, ...(shiny === true ? { shiny } : {}), ...(lucky === true ? { lucky } : {}) });
   }
   return creatures;
+}
+
+/** The signed-in trainer's Arsenal (what they can offer), in slot order. */
+export async function fetchMyArsenal(): Promise<CreatureRef[]> {
+  return fetchMyCreatures('arsenal');
+}
+
+/** The signed-in trainer's Wishlist (what they're hunting), in slot order. */
+export async function fetchMyWishlist(): Promise<CreatureRef[]> {
+  return fetchMyCreatures('wishlist');
+}
+
+/** `trainer_creatures_slot_key` caps each list at 50 rows (`sort_order` 0..49). */
+const MAX_TRAINER_CREATURE_SLOTS = 50;
+const CREATURE_LIST_LABEL: Record<CreatureList, string> = { arsenal: 'Arsenal', wishlist: 'Wishlist' };
+
+/** The lowest sort_order in 0..49 not already occupied in this list, or null when all 50 are taken.
+ *  A read-then-insert has an inherent race (see `addCreature`'s retry), but it's the only way to pick
+ *  a slot at all: `sort_order` has no server-side "next free value" the client could ask for instead. */
+async function firstFreeSlot(ownerId: string, list: CreatureList): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('trainer_creatures')
+    .select('sort_order')
+    .eq('owner_id', ownerId)
+    .eq('list', list);
+  if (error) throw new ProfileError('form', error.message);
+  const used = new Set(data.map((row) => row.sort_order));
+  for (let slot = 0; slot < MAX_TRAINER_CREATURE_SLOTS; slot++) {
+    if (!used.has(slot)) return slot;
+  }
+  return null;
+}
+
+/** How many times to re-pick a slot after losing a race to a concurrent insert (see the `23505`
+ *  branch below) before giving up and surfacing the error — covers "two taps in a row" without
+ *  retrying forever against a genuinely full list. */
+const ADD_CREATURE_ATTEMPTS = 3;
+
+/**
+ * Shared by `addToArsenal` / `addToWishlist`. The stored `name` and `hue` are always read back out of
+ * the pokedex by `pokemonId` — never taken from the caller — so a trainer's Arsenal/Wishlist entry can
+ * never drift from the one source of truth for what a Pokémon is called or how it's colored (AGENTS.md:
+ * never hallucinate game data).
+ */
+async function addCreature(list: CreatureList, pokemonId: number): Promise<void> {
+  const entry = findPokemon(pokemonId);
+  if (!entry) throw new ProfileError('form', "That Pokémon isn't in the dex.");
+  // A fresh object literal, not a `CreatureRef`-typed value: `creature_ref_is_valid` (the DB check
+  // constraint) would reject a `CreatureRef` variable's `shiny`/`lucky` if either were `undefined`
+  // rather than omitted, and `Json` has no room for that key even so — see `creatureRefToJson` in
+  // lib/api/listings.ts for the same shape used to insert `looking`.
+  const creature: Json = { name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue };
+  const ownerId = await currentUserId();
+
+  for (let attempt = 1; attempt <= ADD_CREATURE_ATTEMPTS; attempt++) {
+    const slot = await firstFreeSlot(ownerId, list);
+    if (slot === null) throw new ProfileError('form', `Your ${CREATURE_LIST_LABEL[list]} is full (50).`);
+
+    const { error } = await supabase.from('trainer_creatures').insert({ list, creature, sort_order: slot });
+    if (!error) return;
+    // Another insert (a second tap, another tab) took this exact slot between the read above and this
+    // write — re-read the now-current free slots and try again, rather than surfacing a confusing
+    // uniqueness error for what is, from the trainer's point of view, just "add this Pokémon".
+    if (error.code !== '23505' || attempt === ADD_CREATURE_ATTEMPTS) throw new ProfileError('form', error.message);
+  }
+}
+
+/** Adds a Pokémon (by national dex id) to the signed-in trainer's Arsenal, in the lowest free slot. */
+export async function addToArsenal(pokemonId: number): Promise<void> {
+  return addCreature('arsenal', pokemonId);
+}
+
+/** Adds a Pokémon (by national dex id) to the signed-in trainer's Wishlist, in the lowest free slot. */
+export async function addToWishlist(pokemonId: number): Promise<void> {
+  return addCreature('wishlist', pokemonId);
 }
 
 export interface ProfileInput {

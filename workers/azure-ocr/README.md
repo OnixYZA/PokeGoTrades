@@ -198,16 +198,38 @@ tolerance, how an ambiguous reading is settled by elimination or by `OCR_DATE_OR
 
 **Reading the screen** (`interpretProfile`, `src/core/parser.ts`):
 
-- **Handle.** The first line, in reading order, that — after trimming whitespace and surrounding punctuation —
-  is exactly one token matching the same shape the database requires (`^[A-Za-z0-9]{3,15}$`), is not all digits,
-  is not the reserved `Trainer\d{8}` placeholder shape, and is not one of a stop-list of UI words (FRIEND, CODE,
-  SCAN, SETTINGS, and so on — see `HANDLE_STOP_WORDS`). No fuzzing or scoring: the handle is printed once,
-  plainly, on its own line.
-- **Friend code.** A decoded QR payload wins outright if stripping non-digit characters from it leaves exactly
-  12 digits. Otherwise, the OCR text is scanned for `dddd<sep>dddd<sep>dddd` (separator: space, `·`, `.`, or `-`),
-  correcting the letters tesseract commonly confuses with a digit (O/o→0, I/l/|→1, S→5, B→8) inside each
-  candidate group only. Two different 12-digit readings on the same screen is treated as ambiguous
-  (`no_friend_code`), never resolved by picking one.
+- **Handle.** Anchored on one of the two landmarks the screen actually prints the name next to — never just the
+  first handle-shaped line anywhere in the OCR text, which could as easily be a menu label or, on the wrong
+  screen entirely (an appraisal, say), a Pokémon's name:
+  1. If the OCR text has a friend-code-shaped line, the handle is the nearest candidate line **above** it
+     (`HANDLE_LOOKBACK_LINES`, currently 3) — the game always prints the name directly above its own code.
+  2. Otherwise, if a "TRAINER CODE" / "FRIEND CODE" header line is present, the handle is the first candidate
+     within `HANDLE_LOOKAHEAD_LINES` (4) lines **after** it. This is also how a handle is found when the friend
+     code came only from the QR scan and never showed up in the OCR text at all.
+  3. Otherwise there is no handle — nothing on the screen anchors the search, so nothing is guessed at.
+
+  A "candidate" line is, after trimming whitespace and surrounding punctuation, exactly one token matching the
+  shape the database requires (`^[A-Za-z0-9]{3,15}$`), not all digits, not the reserved `Trainer\d{8}` placeholder
+  shape, and not one of a stop-list of UI words (FRIEND, CODE, SCAN, SETTINGS, and so on — see
+  `HANDLE_STOP_WORDS`). No fuzzing or scoring beyond that: the handle is printed once, plainly, on its own line.
+- **Friend code.** A decoded QR payload wins outright when `friendCodeFromQr` can read one out of it (below).
+  Otherwise, the OCR text is scanned for `dddd<sep>dddd<sep>dddd`, where `<sep>` is 0 to 2 separator characters
+  (space, `·`, `.`, or `-`) — the game always prints exactly one, but tesseract sometimes drops it entirely (two
+  groups run together with no gap) or doubles it up — correcting the letters tesseract commonly confuses with a
+  digit (O/o→0, I/l/|→1, S→5, B→8) inside each candidate group only. The match is fenced on both ends so it can
+  never be a 12-character slice out of a longer run of digit-like characters: a 13-digit number never yields a
+  false code. At least 8 of the 12 characters must already be real digits (`MIN_REAL_DIGITS`) before the
+  confusion fixes apply: the QR block OCRs into runs of `|`, `l` and `I`, which would otherwise read as
+  `111111111111` and either invent a code or make the real one look ambiguous. Two different 12-digit readings
+  on the same screen is treated as ambiguous (`no_friend_code`), never resolved by picking one.
+- **The QR payload.** The current game's QR encodes a deep link, not bare digits:
+  `https://pokemon-go.onelink.me/<id>?af_dp=pokemongo://&deep_link_value=dl_action%3DAddFriend%2CDlId%3D<12
+  digits>` — escaped twice over (the query string, then `deep_link_value` inside it), so `friendCodeFromQr`
+  first runs the payload through `decodeURIComponent` repeatedly (stopping once a pass changes nothing, capped
+  at 3 passes; an undecodable string is used raw rather than thrown away), then tries, in order: a
+  `DlId=(\d{12})` match (case-insensitive); failing that, exactly one standalone 12-digit run in the decoded
+  string; failing that, the old bare-digit rule (the payload's digits, and only its digits, total exactly 12) for
+  a QR code with nothing but the code in it.
 - **The QR scan** (`src/core/qr.ts`) runs after the same `MAX_PIXELS` guard the listing queue uses, downscaled to
   at most 1600 px on the long side, and never throws: a screen with no QR block (or one that fails to decode) is
   routine, not an error, and just falls back to the OCR-read code.
@@ -302,11 +324,16 @@ friend code are never logged — only that a row was verified or failed, and why
 
 ## Known limits
 
-- **The profile parser hasn't been tuned on real screenshots yet.** `interpretProfile`'s handle stop-word list
-  and friend-code separator/confusion rules are built from the game's documented "My Trainer Code" layout, not
-  from a corpus of real trainer-code screenshots read through tesseract. Use `npm run try -- shot.png profile`
-  on real ones before relying on the recall, and extend `HANDLE_STOP_WORDS` in `src/core/parser.ts` as false
+- **The profile parser has been checked against a small number of real screenshots**, which is how the deep-link
+  QR format, the 0-2 separator rule, and the anchored handle search in this document came about — not a large
+  corpus. `interpretProfile`'s handle stop-word list is still built from the game's documented "My Trainer Code"
+  layout more than from real screenshots read through tesseract. Use `npm run try -- shot.png profile` on real
+  ones before relying on the recall further, and extend `HANDLE_STOP_WORDS` in `src/core/parser.ts` as false
   positives turn up.
+- **The QR deep-link format is Niantic's current one, not a guaranteed-stable contract.** `friendCodeFromQr`'s
+  fallback rules (a standalone 12-digit run, then the old bare-digit rule) exist so a future onelink parameter
+  rename doesn't immediately regress recall to zero, but a genuinely different QR payload shape would still need
+  a new rule added.
 - **Tuned on synthetic images only**, same caveat as the listing queue always had for appraisal / movesets /
   event_badge.
 - **`verified` is not "the screenshot is genuine".** It means a believable value was read, not fraud detection.
