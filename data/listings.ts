@@ -25,7 +25,6 @@ export const listings: Listing[] = [
     dist: 0.4,
     loc: 'Adyar',
     pvp: 'S+',
-    demand: '#1',
     tradeType: 'Unregistered (Shiny/Legendary)',
     iv: '15/15/14',
     looking: [
@@ -33,6 +32,13 @@ export const listings: Listing[] = [
       { name: 'Purified Apex Lugia', pokemonId: 249, hue: 25 },
       { name: 'Legacy Mewtwo', pokemonId: 150, hue: 220, lucky: true },
     ],
+    tags: ['Raid Exclusive'],
+    purified: false,
+    costume: false,
+    pokeball: 'master',
+    sizeClass: null,
+    willTravel: true,
+    tradeTimeline: 'asap',
   },
   {
     id: 'l2',
@@ -49,7 +55,6 @@ export const listings: Listing[] = [
     dist: 0.9,
     loc: 'Adyar',
     pvp: 'A',
-    demand: '#4',
     tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '14/15/15',
     looking: [
@@ -57,6 +62,13 @@ export const listings: Listing[] = [
       { name: 'Purified Ho-Oh', pokemonId: 250, hue: 25 },
       { name: 'Shiny Deoxys A.', pokemonId: 10001, hue: 220, shiny: true, lucky: true }, // deoxys-attack
     ],
+    tags: ['Legacy Move', 'Community Day'],
+    purified: false,
+    costume: true,
+    pokeball: 'ultra',
+    sizeClass: null,
+    willTravel: false,
+    tradeTimeline: 'this_week',
   },
   {
     id: 'l3',
@@ -73,7 +85,6 @@ export const listings: Listing[] = [
     dist: 1.4,
     loc: 'Adyar',
     pvp: 'S',
-    demand: '#2',
     tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '15/15/15',
     looking: [
@@ -81,6 +92,13 @@ export const listings: Listing[] = [
       { name: 'Shiny Groudon', pokemonId: 383, hue: 25, shiny: true },
       { name: 'Origin Palkia', pokemonId: 10246, hue: 220, lucky: true }, // palkia-origin
     ],
+    tags: ['PvP Ready', 'Hundo IV'],
+    purified: false,
+    costume: false,
+    pokeball: 'premier',
+    sizeClass: 'XXL',
+    willTravel: false,
+    tradeTimeline: 'flexible',
   },
   {
     id: 'l4',
@@ -97,7 +115,6 @@ export const listings: Listing[] = [
     dist: 2.1,
     loc: 'East Tambaram',
     pvp: 'A+',
-    demand: '#7',
     tradeType: 'Unregistered (Shiny/Legendary)',
     iv: '14/14/15',
     looking: [
@@ -105,6 +122,13 @@ export const listings: Listing[] = [
       { name: 'Mega Rayquaza IV', pokemonId: 10079, hue: 25 }, // rayquaza-mega
       { name: 'Shiny Entei', pokemonId: 244, hue: 220, shiny: true, lucky: true },
     ],
+    tags: ['Raid Exclusive'],
+    purified: true,
+    costume: false,
+    pokeball: 'great',
+    sizeClass: null,
+    willTravel: false,
+    tradeTimeline: 'this_month',
   },
   {
     id: 'l5',
@@ -121,7 +145,6 @@ export const listings: Listing[] = [
     dist: 3.8,
     loc: 'East Tambaram',
     pvp: 'S',
-    demand: '#3',
     tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '15/13/15',
     looking: [
@@ -129,6 +152,13 @@ export const listings: Listing[] = [
       { name: 'Shiny Larvitar', pokemonId: 246, hue: 25, shiny: true },
       { name: 'Shiny Bagon', pokemonId: 371, hue: 220, shiny: true, lucky: true },
     ],
+    tags: ['Level 1'],
+    purified: false,
+    costume: false,
+    pokeball: 'poke',
+    sizeClass: 'XXS',
+    willTravel: false,
+    tradeTimeline: 'flexible',
   },
   {
     id: 'l6',
@@ -145,7 +175,6 @@ export const listings: Listing[] = [
     dist: 5.2,
     loc: 'Velachery',
     pvp: 'A',
-    demand: '#5',
     tradeType: 'Unregistered (Shiny/Legendary)',
     iv: '15/15/15',
     looking: [
@@ -153,6 +182,13 @@ export const listings: Listing[] = [
       { name: 'Primal Groudon', pokemonId: 10078, hue: 25 }, // groudon-primal
       { name: 'Shiny Mew', pokemonId: 151, hue: 220, shiny: true, lucky: true },
     ],
+    tags: [],
+    purified: true,
+    costume: false,
+    pokeball: 'beast',
+    sizeClass: null,
+    willTravel: false,
+    tradeTimeline: 'flexible',
   },
 ];
 

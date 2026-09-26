@@ -24,6 +24,7 @@ import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
+import { demandTier, marketLabel } from '@/constants/market';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { toast } from '@/lib/toast';
@@ -198,7 +199,7 @@ export default function ListingDetailScreen() {
         <ScrollView contentContainerStyle={{ padding: 22 }} showsVerticalScrollIndicator={false}>
           <View className="mb-[18px] flex-row gap-2">
             <StatTile label="PvP Rank" value={listing.pvp} color="#4fb3ff" icon={<Bolt size={12} color="#4fb3ff" />} radius={12} valueSize={18} />
-            <StatTile label="Top Traded" value={listing.demand} color="#f5c518" icon={<Trophy size={12} color="#f5c518" />} radius={12} valueSize={18} />
+            <StatTile label="Top Traded" value={marketLabel(demandTier(listing.market))} color="#f5c518" icon={<Trophy size={12} color="#f5c518" />} radius={12} valueSize={18} />
             <StatTile label="IV Spread" value={listing.iv} color="#e8ecf5" icon={<Dumbbell size={12} color="#e8ecf5" />} radius={12} mono valueSize={12} />
           </View>
 

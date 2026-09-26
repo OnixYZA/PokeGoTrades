@@ -140,7 +140,9 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       name: selectedCreature.name,
       pokemonId: selectedCreature.pokemonId,
       hue: selectedCreature.hue,
-      form: purified ? 'Purified' : 'Standard',
+      // `purified` is now its own column (migration …000100_listing_attributes) — `form` no longer
+      // encodes it, so every draft writes the plain form name here.
+      form: 'Standard',
       // Placeholder until OCR reads the real catch date from the proof (SUPABASE_PLAN.md §5.2 Q9).
       year: new Date().getFullYear(),
       shiny,
@@ -152,6 +154,15 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       looking,
       tags: selectedTags,
       notes: notes.trim() || undefined,
+      purified,
+      // No control in this flow yet: "Special Background" drives `bg` only, and costume gets its own
+      // toggle (Phase 2A). Inferring it from the background would stamp a guarded, post-offer-frozen
+      // column wrong on every special-background listing.
+      costume: false,
+      // Neither has a control in this flow yet (Phase 2A): honest defaults rather than a guess.
+      pokeball: null,
+      willTravel: false,
+      tradeTimeline: 'flexible',
     };
   }, [draftId, selectedCreature, shiny, purified, specialBackground, wanted, filterLocation, selectedTags, notes]);
 
@@ -165,7 +176,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         seller: 'You',
         dist: USE_SUPABASE ? undefined : 0,
         pvp: 'NEW',
-        demand: 'NEW',
+        // Service-role only (migration …000100) — a freshly drafted listing has no size yet.
+        sizeClass: null,
         screenshots: uploads.map((u) => u.image.filename),
       },
     [draft, uploads]

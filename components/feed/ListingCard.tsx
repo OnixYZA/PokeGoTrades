@@ -8,6 +8,7 @@ import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { Sprite } from '@/components/ui/Sprite';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { hueBleed, SURFACE } from '@/constants/theme';
+import { demandTier, marketLabel } from '@/constants/market';
 import type { Listing } from '@/data/types';
 
 export function ListingCard({ listing }: { listing: Listing }) {
@@ -97,7 +98,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
           <View className="flex-row items-center gap-1 rounded-lg border border-border-strong bg-bg-panel px-2 py-1" style={{ pointerEvents: 'none' }}>
             <Text style={{ color: '#f5c518', fontSize: 11 }}>★</Text>
             <Text className="font-display text-text-primary" style={{ fontSize: 12 }}>
-              {listing.demand}
+              {marketLabel(demandTier(listing.market))}
             </Text>
           </View>
         </View>

@@ -1,5 +1,14 @@
 import type { QueryData } from '@supabase/supabase-js';
 
+import {
+  LISTING_TAGS,
+  POKEBALLS,
+  POKEMON_SIZES,
+  TRADE_TIMELINES,
+  type FilterEnumField,
+  type FilterFlagField,
+} from '@/constants/listing-attributes';
+import type { FilterSpec } from '@/store/listing-filters';
 import type { BackgroundHint, CreatureRef, Listing, TradeType } from '@/data/types';
 import type { Database, Json } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
@@ -10,6 +19,37 @@ type ListingInsert = Database['public']['Tables']['listings']['Insert'];
 
 export type ListingTag = Database['public']['Enums']['listing_tag'];
 export type ProofKind = Database['public']['Enums']['proof_kind'];
+
+// Compile-time guarantee the constants/listing-attributes.ts registries stay in lockstep with the
+// generated DB enums: if a migration adds, removes or renames a value on one side without a matching
+// edit on the other, this fails to typecheck instead of silently drifting (`npx tsc --noEmit` catches
+// it immediately, long before a filter chip or a create-listing field could go quietly out of sync).
+// Boxing each side in a tuple (`[A]`) stops the conditional from distributing over the union, so this
+// checks the two unions are the same set, not that every member of one merely extends the other.
+type AssertSameMembers<A extends string, B extends string> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+// `never` would satisfy `extends true` trivially, so the assertion must resolve to the literal
+// `false` on a mismatch (above) for this gate to actually fail a build.
+type Expect<T extends true> = T;
+type _ListingTagsMatchDb = Expect<AssertSameMembers<(typeof LISTING_TAGS)[number], Database['public']['Enums']['listing_tag']>>;
+type _PokeballsMatchDb = Expect<AssertSameMembers<(typeof POKEBALLS)[number], Database['public']['Enums']['pokeball']>>;
+type _PokemonSizesMatchDb = Expect<AssertSameMembers<(typeof POKEMON_SIZES)[number], Database['public']['Enums']['pokemon_size']>>;
+type _TradeTimelinesMatchDb = Expect<AssertSameMembers<(typeof TRADE_TIMELINES)[number], Database['public']['Enums']['trade_timeline']>>;
+
+/** `FilterFlagField` (Listing camelCase) -> the actual `listings` column. Only `willTravel` differs. */
+const FLAG_DB_COLUMNS: Record<FilterFlagField, 'shiny' | 'lucky' | 'purified' | 'costume' | 'will_travel'> = {
+  shiny: 'shiny',
+  lucky: 'lucky',
+  purified: 'purified',
+  costume: 'costume',
+  willTravel: 'will_travel',
+};
+
+/** `FilterEnumField` (Listing camelCase) -> the actual `listings` column. */
+const ENUM_DB_COLUMNS: Record<FilterEnumField, 'size_class' | 'pokeball' | 'trade_timeline'> = {
+  sizeClass: 'size_class',
+  pokeball: 'pokeball',
+  tradeTimeline: 'trade_timeline',
+};
 
 const PROOF_BUCKET = 'listing-proofs';
 
@@ -70,9 +110,13 @@ export function listingErrorMessage(error: unknown): string {
 
 // ——— reads ———
 
-/** Everything the feed card and the detail sheet render, plus the seller's handle. */
+/**
+ * Everything the feed card and the detail sheet render, plus the seller's handle. `demand_rank`
+ * deliberately is not here: clients must stop reading it (it is never written by clients and always
+ * reads 'NEW' live) in favor of the `pokemon_market_demand` view, fetched separately in `lib/use-feed.ts`.
+ */
 const LISTING_COLUMNS =
-  'id, seller_id, status, name, pokemon_id, form, catch_year, lucky, shiny, hue, accent, bg, loc, pvp_rank, demand_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, created_at, seller:profiles!listings_seller_id_fkey(handle)';
+  'id, seller_id, status, name, pokemon_id, form, catch_year, lucky, shiny, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
 
 function selectListings() {
   return supabase.from('listings').select(LISTING_COLUMNS);
@@ -133,22 +177,77 @@ export function toListing(row: ListingRow): Listing {
     bg: row.bg,
     loc: row.loc,
     pvp: row.pvp_rank,
-    demand: row.demand_rank,
     tradeType: row.trade_type,
     iv: formatIv(row),
     looking: toCreatureRefs(row.looking),
     untradable: row.untradable,
     tags: row.tags,
     notes: row.notes ?? undefined,
+    purified: row.purified,
+    costume: row.costume,
+    pokeball: row.pokeball,
+    sizeClass: row.size_class,
+    willTravel: row.will_travel,
+    tradeTimeline: row.trade_timeline,
   };
 }
 
-/** Open and locked listings in one area, newest first. */
-export async function fetchFeedListings(loc: string): Promise<Listing[]> {
-  const { data, error } = await selectListings()
-    .in('status', FEED_STATUSES)
-    .eq('loc', loc)
-    .order('created_at', { ascending: false });
+type ListingsQuery = ReturnType<typeof selectListings>;
+
+/**
+ * The handful of PostgREST filter builder methods this needs to call with a column name chosen at
+ * runtime (from `FilterSpec`), rather than a literal written at the call site. The real builder
+ * types `.eq()` / `.in()` per literal `ColumnName` (so `.eq('shiny', true)` is checked against
+ * `shiny`'s exact column type) — exactly the thing a spec-driven loop cannot give it, since the
+ * column varies per iteration and the flag/enum columns do not all share one value type. This is the
+ * one deliberate loosening in this file; every other column name here is still a compile-time literal.
+ */
+interface DynamicColumnFilter {
+  eq(column: string, value: unknown): unknown;
+  in(column: string, values: readonly unknown[]): unknown;
+}
+
+/**
+ * The PostgREST twin of `matchesFilter` (store/listing-filters.ts) — same semantics, different
+ * engine. Keep the two in sync: a change to one without the other means the live feed and the mock
+ * feed disagree about what a filter chip means.
+ *
+ * Every postgrest-js filter method mutates the query's own `URLSearchParams` and returns `this`
+ * (see node_modules/@supabase/postgrest-js's `PostgrestFilterBuilder`), so `query` itself already
+ * reflects every call below — this returns the same reference it was given, not a new one.
+ */
+export function applyFilterSpec(query: ListingsQuery, spec: FilterSpec): ListingsQuery {
+  const dynamic = query as unknown as DynamicColumnFilter;
+
+  for (const field of Object.keys(spec.flags) as FilterFlagField[]) {
+    dynamic.eq(FLAG_DB_COLUMNS[field], spec.flags[field]!);
+  }
+
+  if (spec.tagsAll.length > 0) {
+    query.contains('tags', spec.tagsAll);
+  }
+  if (spec.tagsNone.length > 0) {
+    // Quoted array literal: tag values contain spaces ("PvP Ready", "Level 1", ...).
+    const literal = `{${spec.tagsNone.map((tag) => `"${tag}"`).join(',')}}`;
+    query.not('tags', 'ov', literal);
+  }
+
+  for (const field of Object.keys(spec.enumIn) as FilterEnumField[]) {
+    dynamic.in(ENUM_DB_COLUMNS[field], spec.enumIn[field]!);
+  }
+  for (const field of Object.keys(spec.enumNotIn) as FilterEnumField[]) {
+    // NULL must still pass an exclude (matchesFilter's rule), so this is an OR, not a plain `.not.in`.
+    const column = ENUM_DB_COLUMNS[field];
+    query.or(`${column}.is.null,${column}.not.in.(${spec.enumNotIn[field]!.join(',')})`);
+  }
+
+  return query;
+}
+
+/** Open and locked listings in one area, newest first, narrowed by the compiled filter spec. */
+export async function fetchFeedListings(loc: string, spec: FilterSpec): Promise<Listing[]> {
+  const filtered = applyFilterSpec(selectListings().in('status', FEED_STATUSES).eq('loc', loc), spec);
+  const { data, error } = await filtered.order('created_at', { ascending: false });
   if (error) throw apiError(error);
   return data.map(toListing);
 }
@@ -168,17 +267,38 @@ export async function fetchListingsByIds(ids: string[]): Promise<Listing[]> {
 
 /**
  * The listing fields a trainer supplies, and only those. The generated `Insert` type marks every
- * column writable, but the `authenticated` role is granted just these (SUPABASE_PLAN.md §2.1):
- * `seller_id` defaults to `auth.uid()`, and `status`, `pvp_rank`, `demand_rank`, `untradable` and
- * the timestamps are server-owned. Shadow backgrounds are rejected by a CHECK constraint.
+ * column writable, but the `authenticated` role is granted just these (SUPABASE_PLAN.md §2.1, plus
+ * `purified`/`costume`/`pokeball`/`will_travel`/`trade_timeline` from migration …000100): `seller_id`
+ * defaults to `auth.uid()`, and `status`, `pvp_rank`, `demand_rank`, `untradable` and the timestamps
+ * are server-owned. Shadow backgrounds are rejected by a CHECK constraint.
  *
  * `lucky` is server-owned too: only the OCR worker may set it, once an appraisal proof backs the claim
  * (migration …000200_lock_lucky_to_service_role). PostgREST turns every key in the body into a column,
  * so sending it here — even as `false` — would now fail the insert with 42501. It is absent on purpose.
+ *
+ * `sizeClass` is likewise absent on purpose: it is service-role only (migration …000100's comment on
+ * `listings.size_class`), so a trainer never supplies it — it is always `null` until a future OCR pass
+ * fills it in server-side.
  */
 export type NewListingInput = Pick<
   Listing,
-  'id' | 'name' | 'pokemonId' | 'hue' | 'form' | 'year' | 'shiny' | 'accent' | 'loc' | 'tradeType' | 'iv' | 'looking'
+  | 'id'
+  | 'name'
+  | 'pokemonId'
+  | 'hue'
+  | 'form'
+  | 'year'
+  | 'shiny'
+  | 'accent'
+  | 'loc'
+  | 'tradeType'
+  | 'iv'
+  | 'looking'
+  | 'purified'
+  | 'costume'
+  | 'pokeball'
+  | 'willTravel'
+  | 'tradeTimeline'
 > & {
   bg: Exclude<BackgroundHint, 'shadow'>;
   tags: ListingTag[];
@@ -202,6 +322,11 @@ function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
     looking: input.looking.map(creatureRefToJson),
     tags: input.tags,
     notes: input.notes?.trim() || null,
+    purified: input.purified,
+    costume: input.costume,
+    pokeball: input.pokeball,
+    will_travel: input.willTravel,
+    trade_timeline: input.tradeTimeline,
   };
 }
 

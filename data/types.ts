@@ -1,3 +1,6 @@
+import type { ListingTag, Pokeball, PokemonSize, TradeTimeline } from '@/constants/listing-attributes';
+import type { MarketSignal } from '@/constants/market';
+
 export type BackgroundHint = 'meta' | 'legacy' | 'shiny' | 'shadow';
 
 export type TradeType =
@@ -48,7 +51,6 @@ export interface Listing extends CreatureRef {
   dist?: number;
   loc: string;
   pvp: string;
-  demand: string;
   tradeType: TradeType;
   iv: string;
   looking: CreatureRef[];
@@ -56,12 +58,30 @@ export interface Listing extends CreatureRef {
   /** Proof photos (appraisal, movesets, event badges, ...) — multiple, replacing the old
    *  single-screenshot assumption. Optional since existing seed listings predate this field. */
   screenshots?: string[];
-  /** Freeform listing tags the seller picks at creation time (e.g. "Legacy Move", "PvP Ready"). */
-  tags?: string[];
+  /** Listing tags the seller picks at creation time (e.g. "Legacy Move", "PvP Ready"). Every listing
+   *  carries this array — possibly empty — see constants/listing-attributes.ts for the registry. */
+  tags: ListingTag[];
   /** Seller's own terms / context, shown to buyers on the card. */
   notes?: string;
   /** Only Supabase-backed listings carry a status; the mock data predates it. */
   status?: ListingStatus;
+
+  // ——— attributes (constants/listing-attributes.ts is the single source of truth for the enums) ———
+  /** Cleansed from Shadow form. Never confused with a Shadow listing itself — Shadow Pokémon stay
+   *  untradable and are never represented here (AGENTS.md). */
+  purified: boolean;
+  /** Event / costume variant. */
+  costume: boolean;
+  pokeball: Pokeball | null;
+  /** Service-role only (migration …000100_listing_attributes) — the seller never sets this. Null
+   *  until a future OCR pass reads it off an appraisal screenshot. */
+  sizeClass: PokemonSize | null;
+  willTravel: boolean;
+  tradeTimeline: TradeTimeline;
+  /** Live want/have signal for this (pokemonId, shiny) pair (`pokemon_market_demand`). Undefined
+   *  until `useFeed` fetches it, or if that fetch failed — never treat absence as "no demand",
+   *  just "not loaded yet"; render it through `demandTier`/`marketLabel` (constants/market.ts). */
+  market?: MarketSignal;
 }
 
 export interface FormalOffer {
