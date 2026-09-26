@@ -39,7 +39,7 @@ yarn-error.*
 
 # local env files
 .env*.local
-
+.mcp*
 # typescript
 *.tsbuildinfo
 

@@ -1,24 +1,36 @@
 # OCR worker
 
-Reads the proof screenshots sellers upload with a listing, records the result on each `listing_proofs` row, and
-gives a listing the **Guaranteed Lucky** badge when its appraisal proves the Pokémon was caught early. It runs on AWS
-Lambda and is deliberately separate from the Expo app: its own
-`package.json`, lockfile and `tsconfig.json`, and nothing in `app/`, `components/`, `store/` or `lib/` imports it.
-Images stay in Supabase Storage (`listing-proofs` bucket). The worker only ever reads screenshots that trainers
-uploaded; it never calls Niantic or any Pokémon GO site.
+Reads proof screenshots and records the result on the matching row, for two queues:
+
+- **`listing_proofs`** — the proof screenshots sellers upload with a listing, giving a listing the **Guaranteed
+  Lucky** badge when its appraisal proves the Pokémon was caught early.
+- **`profile_proofs`** — a trainer's "My Trainer Code" screenshot (their name and a 12-digit friend code, usually
+  beside a QR block), writing their handle and friend code into `profiles` / `profile_private` so they never have
+  to type either by hand.
+
+It runs as an **Azure Function App** (Node.js, TypeScript, the `@azure/functions` v4 programming model) and is
+deliberately separate from the Expo app: its own `package.json`, lockfile and `tsconfig.json`, and nothing in
+`app/`, `components/`, `store/` or `lib/` imports it. Images stay in Supabase Storage (`listing-proofs` /
+`profile-proofs` buckets). The worker only ever reads screenshots trainers uploaded themselves; it never calls
+Niantic or any Pokémon GO site.
 
 ```
-listing_proofs.ocr_status = 'pending'
-   │  claim (pending → processing)
-   ▼
-download from Storage  ──►  tesseract.js  ──►  decide by the proof's kind
-                                                    │
- appraisal ── must show "Caught <date>" ────────────┼──► verified {"caughtAt":"2018-11-23"}
-     │                                              │        └─ caught before 2019-07-01? ─► listings.lucky = true
-     └─ no date ──────────────────────────────────► failed   {"reason":"unreadable"}
- movesets / event_badge ── readable text ───────────┼──► verified {}
-     └─ blank, or not an image ───────────────────► failed   {"reason":"unreadable"}
+listing_proofs.ocr_status = 'pending'                    profile_proofs.ocr_status = 'pending'
+   │  claim (pending → processing)                           │  claim (pending → processing)
+   ▼                                                          ▼
+download from Storage ─► tesseract.js ─► decide by kind    download ─► tesseract.js + QR scan ─► interpretProfile
+                                             │                                                       │
+ appraisal ── "Caught <date>" ───────────────┼─► verified {"caughtAt":"2018-11-23"}      handle + code found ──┼─► apply_profile_proof(...)
+     │                                       │      └─ before 2019-07-01? ─► listings.lucky = true             │      (writes profiles.handle,
+     └─ no date ──────────────────────────► failed {"reason":"unreadable"}                                     │       profile_private.friend_code,
+ movesets / event_badge ── readable text ────┼─► verified {}                                                    │       and settles the proof —
+     └─ blank, or not an image ────────────► failed {"reason":"unreadable"}              missing either ─────► failed  all inside one RPC)
+                                                                                          {"reason": "no_handle" | "no_friend_code", ...}
 ```
+
+Both queues share one claim/settle engine (`src/core/process.ts`'s `QueueSpec` / `processQueue` / `processOne`);
+`src/functions/ocrSweep.ts` (a timer) sweeps both, and `src/functions/profileOcr.ts` (an HTTP endpoint) handles
+the profile queue on a database-triggered nudge, for reasons explained below.
 
 ## Isolation from the app
 
@@ -26,78 +38,113 @@ download from Storage  ──►  tesseract.js  ──►  decide by the proof's
 | --- | --- |
 | TypeScript | `workers` is in the `exclude` list of the root `tsconfig.json`. This folder has its own standalone `tsconfig.json`. |
 | Metro / the bundle | `workers/` is in `resolver.blockList` in `metro.config.js`, so it is not crawled, watched or bundled. |
-| Secrets | `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS and lives only in this worker's environment. Never put it in the app's `.env*` files: anything prefixed `EXPO_PUBLIC_` is bundled into the app. |
-| EAS | Not set up in this repo yet (no `eas.json`). When it is, keep `workers/` out of the build upload. |
+| Secrets | `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS and lives only in this Function App's application settings. Never put it in the app's `.env*` files: anything prefixed `EXPO_PUBLIC_` is bundled into the app. |
 
 ## Layout
 
 ```
-src/handler.ts     Lambda entry point (dist/handler.handler)
-src/local.ts       local runner: one pass (npm run once) or a polling loop (npm run dev)
-src/process.ts     claim → download → OCR → save; the Lucky update; stale-claim recovery
-src/parser.ts      what a proof's OCR text amounts to, by kind, and the Lucky cutoff (pure, unit-tested)
-src/date.ts        the catch-date regex and validation (pure, unit-tested)
-src/ocr.ts         a shared tesseract.js worker, with a per-image timeout
-src/env.ts         environment variables and locating the language model
-src/try.ts         OCR one local image, no database (npm run try)
-test/              unit tests and synthetic screenshot fixtures
-scripts/smoke.ts   end-to-end check against the local Supabase stack
-scripts/package.sh builds the Lambda zip
+src/core/env.ts          environment variables and locating the tesseract language model
+src/core/log.ts          one JSON object per log line; never OCR text, a handle, or a friend code
+src/core/ocr.ts          a shared tesseract.js worker, with a per-image timeout
+src/core/date.ts         the catch-date regex and validation (pure, unit-tested)
+src/core/parser.ts       what a proof's OCR text amounts to — interpretProof (listing) and interpretProfile (profile)
+src/core/qr.ts           decodes a QR code out of a profile screenshot, if there is one (pure-ish: only reads pixels)
+src/core/process.ts      the shared claim → download → OCR → decide → settle engine (QueueSpec), plus both queues' specs
+src/functions/ocrSweep.ts    timer trigger: sweeps both queues once a minute
+src/functions/profileOcr.ts  HTTP trigger: the profile queue's insert-triggered nudge, and its own catch-up sweep
+src/try.ts                OCR one local image, no database (npm run try)
+test/                     unit tests and synthetic screenshot fixtures
+scripts/smoke.ts          end-to-end check against the local Supabase stack
 ```
 
 ## Setup
 
 ```bash
-cd workers/ocr
-npm install
-cp .env.example .env
+cd workers/azure-ocr
+npm ci
+cp local.settings.json.example local.settings.json
 ```
 
-Fill in `.env`. For the local stack, from the repo root:
+Fill in `local.settings.json` (git-ignored — `func start` loads its `Values` into the process environment, the
+same role Application Settings play once this is deployed):
 
 ```bash
-npx supabase start -x logflare,vector     # if it is not already running
-npx supabase status -o env                # API_URL and SERVICE_ROLE_KEY
+npx supabase status -o env      # from the repo root, if the local stack is running: prints API_URL and SERVICE_ROLE_KEY
 ```
 
-`EXPO_PUBLIC_SUPABASE_URL` is `http://127.0.0.1:54321` locally. `.env` is git-ignored.
+Azurite (the local Azure Storage emulator, needed for the `AzureWebJobsStorage` the Functions runtime itself
+uses to track the timer trigger's schedule — nothing this worker's own code reads) is expected to already be
+running in Docker on ports 10000-10002. `AzureWebJobsStorage: UseDevelopmentStorage=true` in
+`local.settings.json.example` points at it.
+
+## Run it locally
+
+```bash
+npm start        # npm run build, then func start
+```
+
+`OCR_SWEEP_ON_STARTUP=true` (the example settings) makes `ocrSweep` run immediately instead of waiting for its
+first minute mark, so `npm start` alone drains whatever is `pending` right away. **This processes the HOSTED
+queues** — Supabase is a hosted, linked project (`sqhvurpokqemdaxckcrt`), not a local stack this worker starts
+of its own — including any real pending `listing_proofs` rows, exactly as the Lambda worker did.
+
+**Why the hosted database can't just call `localhost` for you.** `private.notify_profile_ocr` (migration
+`20260926000100_profile_proofs.sql`) fires an HTTP call to whatever URL is in the `azure_ocr_url` Vault secret
+right after a `profile_proofs` row is inserted — but that call comes from Supabase's own servers via `pg_net`,
+which cannot reach a `localhost` port on your machine. Two consequences:
+
+- **Leave `azure_ocr_url` unset while developing locally**, or point it only at a deployed Function App.
+  `notify_profile_ocr` simply returns without doing anything when it is unset (see the migration's header
+  comment) — it is not an error state.
+- **Local testing of the profile queue therefore depends entirely on the timer sweep** (`ocrSweep`, or manually
+  invoking `profileOcr`) rather than the insert-triggered nudge. Upload a profile proof, then either wait for the
+  next minute mark or:
+
+  ```bash
+  curl -X POST http://localhost:7071/api/profile-ocr -d '{}'
+  ```
+
+  The empty body is fine — `proofId` is only ever a hint (see `src/functions/profileOcr.ts`); with none, it just
+  sweeps the whole queue.
+
+**With real uploads from the app.** Run the app with `EXPO_PUBLIC_DATA_SOURCE=supabase`, publish a listing with
+proof screenshots or upload a profile proof, then either wait for `ocrSweep`'s next tick or `curl` the endpoint
+above. Look at the result in the Supabase dashboard's table editor, or:
+
+```bash
+docker exec supabase_db_PokeGoTrades psql -U postgres -c \
+  "select kind, ocr_status, ocr_extracted from listing_proofs order by created_at desc"
+```
+
+(That specific `docker exec` target is for a *local* Supabase stack; against the hosted project, use the
+dashboard's SQL editor instead.)
 
 ## Test it locally
 
 | Command | What it checks | Needs |
 | --- | --- | --- |
-| `npm test` | The date rules (formats, day/month order, OCR noise, impossible dates), the per-kind rules and the Lucky cutoff. | nothing |
-| `npm run try -- path/to/image.png [kind]` | Runs the real OCR on one image and prints the raw text and what the worker would decide for that `kind` (default `appraisal`), including whether it would grant the badge. | nothing |
-| `npm run smoke` | Everything end to end: real Storage objects and rows, the Lambda handler, every proof kind, PNG / JPEG / WebP, the Lucky update on the listing (granted, already set, blocked by an offer, refused on an ambiguous date), unreadable and missing files, two workers racing for the same rows, stale-claim recovery, the time budget. | local Supabase + `.env` |
+| `npm test` | The date rules, the per-kind listing rules and the Lucky cutoff, and the profile parser (handle extraction, friend-code OCR-noise correction, QR precedence, ambiguity). | nothing |
+| `npm run try -- path/to/image.png [kind]` | Runs the real OCR on one image and prints the raw text and what the worker would decide for that `kind` (`appraisal` default, `movesets`, `event_badge`, or `profile`). For `profile`, also runs the QR scan and prints the handle it found — safe here because this command's output is local-only, unlike `src/core/log.ts`, which must never carry one. | nothing |
+| `npm run smoke` | Everything end to end: real Storage objects and rows, `processQueue`, every listing-proof kind, PNG / JPEG / WebP, the Lucky update (granted, already set, blocked by an offer, refused on an ambiguous date), unreadable and missing files, two workers racing for the same rows, stale-claim recovery, the time budget — plus the profile queue, on throwaway trainer accounts it creates and deletes itself: a clean read, a handle collision (`handle_taken`, leaving the losing trainer's own profile untouched), and the same unreadable/missing-file failures as the listing queue. | local Supabase + `.env` (see `.env.example` — this script runs under `tsx`, not `func start`, so it does not see `local.settings.json`) |
 | `npm run typecheck` | Types for `src`, `test` and `scripts`. | nothing |
 
-`npm run smoke` writes only to your **local** stack (it refuses any other host), removes what it created, and, like
-any worker, also processes whatever else is `pending` in that database.
+`npm run smoke` writes only to your **local** stack (it refuses any other host), removes what it created, and,
+like any worker, also processes whatever else is `pending` in that database.
 
-**With real uploads from the app.** Run the app with `EXPO_PUBLIC_DATA_SOURCE=supabase`, publish a listing with
-proof screenshots, then run the worker:
-
-```bash
-npm run once     # one pass over the queue, then exit
-npm run dev      # keeps polling every 5 s (--interval <seconds> to change); Ctrl-C to stop
-```
-
-Look at the result in Studio (http://127.0.0.1:54323, table `listing_proofs`) or:
-
-```bash
-docker exec supabase_db_PokeGoTrades psql -U postgres -c "select kind, ocr_status, ocr_extracted from listing_proofs order by created_at desc"
-```
-
-The fixtures in `test/fixtures/` are synthetic screens rendered from text, **not real Pokémon GO screenshots**. To
-tune against the real thing, drop screenshots in and use `npm run try -- shot.png appraisal`: it prints what tesseract
-read, so a missed date can be told apart from a missed "Caught".
+The fixtures in `test/fixtures/` are synthetic screens rendered from text, **not real Pokémon GO screenshots**
+(the profile queue's smoke-test images are rendered the same way, inline in `scripts/smoke.ts`). To tune against
+the real thing, drop screenshots in and use `npm run try -- shot.png appraisal` (or `profile`): it prints what
+tesseract read, so a missed date, handle, or friend code can be told apart from a missed anchor word.
 
 ## How it decides
 
-**Status flow.** `pending → processing → verified | failed`. Each step is `update … where ocr_status = <expected>`, so
-two runs overlapping (Lambda invocations, or a local worker next to the deployed one) never read the same proof
-twice, and a result never overwrites a status someone else set meanwhile (such as a moderator's `rejected`, which
-this worker never sets).
+**Status flow**, for both queues. `pending → processing → verified | failed`. Each step is
+`update ... where ocr_status = <expected>`, so two overlapping runs (the timer trigger firing again before the
+last invocation finished, an HTTP-triggered sweep alongside it, a retry) never read the same row twice, and a
+result never overwrites a status someone else set meanwhile (such as a moderator's `rejected`, which this worker
+never sets).
+
+### Listing proofs (`listing_proofs.kind`)
 
 | `ocr_status` | `ocr_extracted` | Meaning |
 | --- | --- | --- |
@@ -106,135 +153,168 @@ this worker never sets).
 | `verified` | `{"caughtAt": "YYYY-MM-DD", "ambiguous": true}` | Same, but day and month could be either way round, so `OCR_DATE_ORDER` decided (below). |
 | `verified` | `{}` | A **movesets** or **event_badge** proof: OCR read text off it. Nothing is extracted. |
 | `failed` | `{"reason": "unreadable"}` | Appraisal: no catch date. Movesets / event_badge: no readable text. Any kind: not a decodable image, the image took too long, or the file is missing from Storage. |
+| `failed` | `{"reason": "image_too_large"}` | More pixels than `MAX_PIXELS` (`src/core/process.ts`) — rejected from its header alone, before decoding. |
 
-A problem that is not the image's fault (Storage or database hiccup, the OCR engine failing to start) does not fail
-the proof: it goes back to `pending`, is logged at `error` level, and the next run tries again.
+A problem that is not the image's fault (Storage or database hiccup, the OCR engine failing to start) does not
+fail the proof: it goes back to `pending`, is logged at `error` level, and the next run tries again.
 
-**By proof kind** (`listing_proofs.kind`).
-
-- **`appraisal`** must show a catch date. Found, it is `verified` with `{ caughtAt }`; not found, it `failed` as `unreadable`. It is the only kind that can earn the Lucky badge.
-- **`movesets`** and **`event_badge`** need no date. For the MVP they are `verified` once OCR reads text off the image: at least three words of three or more letters or digits, which a blank image does not give (and a photo usually will not). A date on one of these is ignored. The check is deliberately generic: matching the game's own wording ("Fast Attack" and so on) would need real screenshots to check against. `MIN_TEXT_TOKENS` in `src/parser.ts` is the one place to tighten it.
-- Any other kind (the database enum gained a value this worker predates) throws, so the proof stays `pending` and is retried once the worker is updated. It is never guessed at.
+- **`appraisal`** must show a catch date. Found, it is `verified` with `{ caughtAt }`; not found, it `failed` as
+  `unreadable`. It is the only kind that can earn the Lucky badge.
+- **`movesets`** and **`event_badge`** need no date. For the MVP they are `verified` once OCR reads text off the
+  image: at least three words of three or more letters or digits, which a blank image does not give (and a photo
+  usually will not). A date on one of these is ignored. `MIN_TEXT_TOKENS` in `src/core/parser.ts` is the one
+  place to tighten it.
+- Any other kind (the database enum gained a value this worker predates) throws, so the proof stays `pending`
+  and is retried once the worker is updated. It is never guessed at.
 
 **Guaranteed Lucky.** When an `appraisal` is verified with a catch date **before 2019-07-01** (`LUCKY_CUTOFF` in
-`src/parser.ts`; 2019-06-30 qualifies, 2019-07-01 does not), the worker runs `update listings set lucky = true where
-id = <the proof's listing> and lucky = false`, and the feed card shows the badge from then on.
+`src/core/parser.ts`; 2019-06-30 qualifies, 2019-07-01 does not), the worker runs
+`update listings set lucky = true where id = <the proof's listing> and lucky = false`, and the feed card shows
+the badge from then on.
 
-- **Never on a guess.** An ambiguous date only counts if *every* reading is before the cutoff. `07/04/2018` is 7 July or 4 April 2018: both early, so it earns the badge. `03/09/2019` is 9 March or 3 September 2019: either side of the cutoff, so the proof is `verified` (with `"ambiguous": true`) but the listing is not touched. The price: in 2019, a genuine catch on the 7th to 12th of January to June is withheld too, because its swapped reading falls in July to December. Years before 2019 are unaffected (both readings are early), and so are dates with a day above 12. To trust `OCR_DATE_ORDER` for these instead, change `checkLuckyCutoff` in `src/parser.ts`.
+- **Never on a guess.** An ambiguous date only counts if *every* reading is before the cutoff.
 - **It only ever sets `lucky = true`.** It never clears it, and it leaves an already-Lucky listing alone.
-- **Applied before the proof is saved as verified.** If a run dies in between, the proof is still `processing`, so it is released and redone, and the (idempotent) update repeats. The other order could leave a verified proof whose listing never got its badge, which nothing would retry.
-- **An offer blocks it.** The database's `guard_listing_update` trigger refuses to change a listing's trade details, `lucky` included, once anyone has made an offer on it, and it has no exception for the service role. The worker treats that as a final answer, not a fault: the proof still verifies, the listing is left as it is, `luckyBlocked` is counted in the run summary, and the log line says `"lucky":"blocked"`. It does not retry.
+- **Applied before the proof is saved as verified**, inside the listing queue's `handle` step
+  (`src/core/process.ts`'s `listingProofsQueue`) — if the run dies in between, the proof is still `processing`,
+  so it is released and redone, and the (idempotent) update repeats.
+- **An offer blocks it.** `guard_listing_update` refuses to change a listing's trade details once anyone has made
+  an offer on it, service role included. The worker treats that as a final answer: the proof still verifies, the
+  listing is left as it is, `luckyBlocked` is counted in the run summary.
 
-**The date.** Pokémon GO prints `Caught MM/DD/YYYY` or `DD/MM/YYYY`, depending on the game's language.
+**The date.** Pokémon GO prints `Caught MM/DD/YYYY` or `DD/MM/YYYY`, depending on the game's language. See
+`src/core/date.ts`'s doc comment for the exact rules (the 40-character window after "Caught", OCR noise
+tolerance, how an ambiguous reading is settled by elimination or by `OCR_DATE_ORDER`).
 
-- Only a date within about 40 characters **after the word "Caught"** counts. A date elsewhere on the screenshot is ignored.
-- Spaces around the separators are fine (`03 / 14 / 2021`), as are `-`, `.`, and `|` or `\` misread for `/`; the letter O is read as 0.
-- Each way of reading the two numbers (month first, day first) only counts if it is a real calendar date, not before July 2016 (the game's launch) and not in the future (one day of slack for time zones). That settles most dates: `25/12/2019` can only be day first, `06/07/2016` only July 6, `09/12/2026` (read in September 2026) only September 12.
-- When both readings survive (`07/04/2018`), `OCR_DATE_ORDER` decides (default `MDY`) and the result carries `"ambiguous": true`. The other reading is kept only for the Lucky check above; it is not saved.
-- If no reading survives it counts as no date: a missing badge beats a wrong one.
-- Four-digit years only.
+### Profile proofs
+
+| `ocr_status` | `ocr_extracted` | Meaning |
+| --- | --- | --- |
+| `processing` | `{"claimedAt": "<ISO time>"}` | Same meaning as the listing queue. |
+| `verified` | `{"handle": "AshKetchum123"}` | The handle and friend code were both read and applied. The friend code is not repeated here — it already lives in `profile_private`, which is owner-only readable; this row is too, but this worker's own rule (never write a handle or a friend code where a shared log could pick it up) is followed here as well, out of caution. |
+| `failed` | `{"reason": "no_handle", "friendCode"?: "..."}` | No line of the OCR text was unambiguously just a trainer name. If a friend code WAS read, it is included so the app's manual fallback form can prefill it. |
+| `failed` | `{"reason": "no_friend_code", "handle"?: "..."}` | No 12-digit code was found (or two different ones were, which is treated as neither: never a guess). |
+| `failed` | `{"reason": "handle_taken" \| "friend_code_taken" \| "invalid_handle", "handle": "...", "friendCode": "..."}` | Both were read, but writing them lost to another trainer's row, or failed the database's own format rules. See `apply_profile_proof` in the migration. |
+| `failed` | `{"reason": "unreadable" \| "image_too_large"}` | Same meaning as the listing queue. |
+
+**Reading the screen** (`interpretProfile`, `src/core/parser.ts`):
+
+- **Handle.** The first line, in reading order, that — after trimming whitespace and surrounding punctuation —
+  is exactly one token matching the same shape the database requires (`^[A-Za-z0-9]{3,15}$`), is not all digits,
+  is not the reserved `Trainer\d{8}` placeholder shape, and is not one of a stop-list of UI words (FRIEND, CODE,
+  SCAN, SETTINGS, and so on — see `HANDLE_STOP_WORDS`). No fuzzing or scoring: the handle is printed once,
+  plainly, on its own line.
+- **Friend code.** A decoded QR payload wins outright if stripping non-digit characters from it leaves exactly
+  12 digits. Otherwise, the OCR text is scanned for `dddd<sep>dddd<sep>dddd` (separator: space, `·`, `.`, or `-`),
+  correcting the letters tesseract commonly confuses with a digit (O/o→0, I/l/|→1, S→5, B→8) inside each
+  candidate group only. Two different 12-digit readings on the same screen is treated as ambiguous
+  (`no_friend_code`), never resolved by picking one.
+- **The QR scan** (`src/core/qr.ts`) runs after the same `MAX_PIXELS` guard the listing queue uses, downscaled to
+  at most 1600 px on the long side, and never throws: a screen with no QR block (or one that fails to decode) is
+  routine, not an error, and just falls back to the OCR-read code.
+
+**Applying a read** (`public.apply_profile_proof`, the migration): the worker never writes `profiles` or
+`profile_private` directly. It calls this service-role-only RPC, which claims the row, writes both columns, and
+settles the proof to its terminal status, all inside one transaction — see the migration's header comment for
+why (a trainer's own handle changing mid-flight, or colliding with someone else's, needs the two tables' own
+constraints as referee, atomically).
 
 ## Configuration
 
-Set in `.env` locally, as function environment variables on Lambda.
+Set in `local.settings.json` locally (see `local.settings.json.example`), as Application Settings once deployed.
 
 | Variable | Default | |
 | --- | --- | --- |
-| `EXPO_PUBLIC_SUPABASE_URL` | required | API URL, e.g. `https://<project-ref>.supabase.co` |
+| `SUPABASE_URL` | required | API URL, e.g. `https://<project-ref>.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | required | The service role (or secret) key. Bypasses RLS. |
-| `OCR_BATCH_SIZE` | `10` | Proofs handled per run |
-| `OCR_DATE_ORDER` | `MDY` | `MDY` or `DMY`, for dates that are ambiguous |
+| `OCR_BATCH_SIZE` | `10` | Rows handled per run, per queue |
+| `OCR_DATE_ORDER` | `MDY` | `MDY` or `DMY`, for listing-proof dates that are ambiguous |
 | `OCR_CLAIM_LEASE_SECONDS` | `600` | How long `processing` may last before it is released |
 | `OCR_IMAGE_TIMEOUT_SECONDS` | `60` | Give up on one image after this long |
-| `OCR_LANG_PATH` | unset | Folder with `eng.traineddata.gz`. Default: `lang/` in the package, else the dev dependency. |
+| `OCR_LANG_PATH` | unset | Folder with `eng.traineddata.gz`. Default: resolved from the `@tesseract.js-data/eng` dependency. |
+| `OCR_RUN_BUDGET_SECONDS` | `540` | `ocrSweep`'s own time budget, shared across both queues (profile first, then listing) |
+| `OCR_SWEEP_ON_STARTUP` | `false` | `true` runs `ocrSweep` immediately when the Function App starts, instead of waiting for the next minute mark |
 
-## Deploy to AWS Lambda
+## Deploy to Azure
 
-The steps below are the standard route with the AWS CLI. Replace the `<…>` values.
-
-### 1. Build the package
-
-```bash
-npm ci
-npm run package        # needs `zip`; writes build/ocr-worker.zip (about 23 MB, 62 MB unpacked)
-```
-
-`package` compiles `src/` to `dist/`, installs production dependencies from the lockfile, and adds the English
-model as `lang/eng.traineddata.gz` (only that one file; the dev dependency it comes from is not shipped). The
-model ships in the zip because a Lambda cold start should not depend on a CDN, and tesseract.js would otherwise
-download it. tesseract.js is WebAssembly, so the same zip runs on `arm64` and `x86_64`. It contains no `.env`.
-
-### 2. Create the function
+Flex Consumption, Node 22 (the standard route with the Azure CLI and Core Tools; replace the `<…>` values):
 
 ```bash
-aws iam create-role --role-name pokegotrades-ocr-worker \
-  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-aws iam attach-role-policy --role-name pokegotrades-ocr-worker \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-aws lambda create-function \
-  --function-name pokegotrades-ocr-worker \
-  --runtime nodejs22.x --architectures arm64 \
-  --handler dist/handler.handler \
-  --role arn:aws:iam::<account-id>:role/pokegotrades-ocr-worker \
-  --memory-size 2048 --timeout 300 \
-  --zip-file fileb://build/ocr-worker.zip
+az group create --name pokegotrades-ocr --location <region>
+az storage account create --name <storageaccount> --location <region> \
+  --resource-group pokegotrades-ocr --sku Standard_LRS
+az functionapp create --resource-group pokegotrades-ocr --name <app-name> \
+  --storage-account <storageaccount> --flexconsumption-location <region> \
+  --runtime node --runtime-version 22
 ```
 
-Set the environment in a file, so the key stays out of your shell history:
+Set the application settings (do this in the portal, or from a file that stays out of your shell history and is
+never committed — do not put `SUPABASE_SERVICE_ROLE_KEY` in a command line):
 
 ```bash
-# env.json (do not commit): {"Variables":{"EXPO_PUBLIC_SUPABASE_URL":"https://<ref>.supabase.co","SUPABASE_SERVICE_ROLE_KEY":"<key>"}}
-aws lambda update-function-configuration --function-name pokegotrades-ocr-worker --environment file://env.json
+az functionapp config appsettings set --name <app-name> --resource-group pokegotrades-ocr --settings \
+  SUPABASE_URL="https://<project-ref>.supabase.co" \
+  SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
 ```
 
-The role only needs CloudWatch Logs; the worker talks to Supabase over HTTPS with the key, not to any AWS service.
-Lambda encrypts environment variables at rest, but anyone who can read the function's configuration can read the
-key. For production, keep it in Secrets Manager or SSM Parameter Store and fetch it at startup, and rotate it if
-it ever leaks.
-
-**Sizing.** OCR is CPU-bound and Lambda's CPU scales with memory, so 2048 MB is a starting point to tune, not a
-measurement. With the defaults a run handles up to 10 proofs; it stops starting new ones when less than the image
-timeout plus 5 s remains, so a run never dies mid-image.
-
-### 3. Run it on a schedule
+Publish (a **remote build**, so `sharp` gets Linux x64 binaries rather than whatever platform you built on
+— the same reason `scripts/package.sh` used to hand-pick `sharp`'s platform for the Lambda zip; here Azure's own
+build server does that for free, which is also why `@tesseract.js-data/eng` had to move to `dependencies`):
 
 ```bash
-aws events put-rule --name pokegotrades-ocr-worker-tick --schedule-expression 'rate(1 minute)'
-aws lambda add-permission --function-name pokegotrades-ocr-worker --statement-id tick \
-  --action lambda:InvokeFunction --principal events.amazonaws.com \
-  --source-arn arn:aws:events:<region>:<account-id>:rule/pokegotrades-ocr-worker-tick
-aws events put-targets --rule pokegotrades-ocr-worker-tick \
-  --targets 'Id=1,Arn=arn:aws:lambda:<region>:<account-id>:function:pokegotrades-ocr-worker'
+func azure functionapp publish <app-name>
 ```
 
-Overlapping invocations are safe (claims are compare-and-swap). Optionally cap it with
-`aws lambda put-function-concurrency --function-name pokegotrades-ocr-worker --reserved-concurrent-executions 1`
-to avoid two runs contending for the same rows.
-
-### 4. Try it, watch it, update it
+Because `tesseract.js` OCR is CPU-bound and a single tesseract worker per process is reused across invocations
+(`src/core/ocr.ts`), set the HTTP trigger's per-instance concurrency to 1 — otherwise two overlapping requests on
+the same instance queue behind one CPU-bound `recognize()` call instead of scaling out:
 
 ```bash
-aws lambda invoke --function-name pokegotrades-ocr-worker --payload '{}' --cli-binary-format raw-in-base64-out out.json && cat out.json
-aws logs tail /aws/lambda/pokegotrades-ocr-worker --follow
-
-# after a change
-npm run package
-aws lambda update-function-code --function-name pokegotrades-ocr-worker --zip-file fileb://build/ocr-worker.zip
+az functionapp config appsettings set --name <app-name> --resource-group pokegotrades-ocr --settings \
+  FUNCTIONS_WORKER_PROCESS_COUNT=1
 ```
 
-The handler returns what it did: `{"claimed":3,"verified":2,"failed":1,"released":0,"lostClaim":0,"recovered":0,"luckyGranted":1,"luckyBlocked":0,"outOfTime":false}`.
+(Flex Consumption's per-instance concurrency for HTTP triggers is otherwise set via the `http` section of the
+plan's scale settings in the portal — set it to 1 for the same CPU-bound reason.)
 
-Logs are one JSON object per line. Useful CloudWatch Logs Insights queries: `filter level = "error"` (alarm on
-this), `filter msg = "verified"`, `filter msg = "failed" | stats count() by cause` (`no_date`, `decode_error`,
-`file_missing`, and `no_text` for a movesets or event_badge proof). A `verified` line for an appraisal also carries `catchVsCutoff` (`early`, `late`, `unclear`) and `lucky` (`granted`, `unchanged`, `blocked`); `filter luckyBlocked > 0` on `run finished` finds listings that missed out because of an offer. OCR text is never logged: a screenshot can show a trainer name or a friend code. A line
-`Error in pixReadStream: Unknown format` in the logs just means someone uploaded a file that is not an image.
+Get the function key `notify_profile_ocr` needs to call `profileOcr` (`authLevel: 'function'`):
+
+```bash
+az functionapp function keys list --name <app-name> --resource-group pokegotrades-ocr --function-name profileOcr
+```
+
+Then, in the Supabase SQL editor, point the trigger at the deployed endpoint:
+
+```sql
+select vault.create_secret('https://<app-name>.azurewebsites.net/api/profile-ocr', 'azure_ocr_url');
+select vault.create_secret('<function key>', 'azure_ocr_key');
+```
+
+Watch it:
+
+```bash
+func azure functionapp logstream <app-name>
+```
+
+Logs are one JSON object per line (`src/core/log.ts`). Useful filters: `level = "error"` (alarm on this),
+`msg = "verified"`, `msg = "failed"` grouped by `cause` (`no_date`, `decode_error`, `file_missing`, `no_text`,
+`no_handle`, `no_friend_code`, `handle_taken`, `friend_code_taken`, `invalid_handle`). OCR text, a handle, and a
+friend code are never logged — only that a row was verified or failed, and why.
 
 ## Known limits
 
-- **Tuned on synthetic images only.** Real Pokémon GO screenshots (font, scaling, dark or light backgrounds) have not been run through it. Use `npm run try` on real ones before relying on the recall.
-- **`verified` is not "the screenshot is genuine".** For an appraisal it means a believable catch date was read; for movesets and event_badge only that there was readable text. It is not fraud detection.
-- **A listing that already has an offer cannot be given the badge** (see above), so an appraisal that is verified late, for instance after the worker was down, may leave a deserving listing without it. Letting the worker through would need an exception for the service role in `guard_listing_update`, a change to the database's bait-and-switch rule that is not made here.
-- **The badge is not tamper-proof yet.** The worker sets `listings.lucky`, but the database's column grants also let a seller set it themselves through the API on their own open listing (the app's own form sends `false`).
-- English digits and four-digit years only. An ambiguous date is flagged, not resolved.
-- The worker only picks up `pending` rows. Replacing an image at the same storage path does not reset an existing row: to have it read again, set that row back to `pending`.
+- **The profile parser hasn't been tuned on real screenshots yet.** `interpretProfile`'s handle stop-word list
+  and friend-code separator/confusion rules are built from the game's documented "My Trainer Code" layout, not
+  from a corpus of real trainer-code screenshots read through tesseract. Use `npm run try -- shot.png profile`
+  on real ones before relying on the recall, and extend `HANDLE_STOP_WORDS` in `src/core/parser.ts` as false
+  positives turn up.
+- **Tuned on synthetic images only**, same caveat as the listing queue always had for appraisal / movesets /
+  event_badge.
+- **`verified` is not "the screenshot is genuine".** It means a believable value was read, not fraud detection.
+- **A listing that already has an offer cannot be given the Lucky badge** (see above), so an appraisal verified
+  late may leave a deserving listing without it.
+- **The badge is not tamper-proof.** The worker sets `listings.lucky`, but the column's own grants also let a
+  seller set it themselves through the API on their own open listing (the app's own form sends `false`).
+- English digits and four-digit years only, for the listing queue's dates. An ambiguous date is flagged, not
+  resolved.
+- Neither queue picks up a settled row again. Replacing an image at the same storage path does not reset an
+  existing row; to have it read again, set that row back to `pending`.

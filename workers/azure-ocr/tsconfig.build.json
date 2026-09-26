@@ -2,7 +2,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "rootDir": "src",
+    // No `rootDir: "src"` here, on purpose: leaving it at the project root ('.') makes tsc mirror `src/`'s own
+    // path under `dist/`, i.e. `src/functions/profileOcr.ts` -> `dist/src/functions/profileOcr.js`. Azure's
+    // Node.js v4 programming model finds functions by globbing `main` in package.json, which is
+    // "dist/src/functions/*.js" — that glob and this layout have to agree, or `func start` (and a deployed
+    // Function App) indexes zero functions.
+    "rootDir": ".",
     "outDir": "dist",
     "sourceMap": true
   },

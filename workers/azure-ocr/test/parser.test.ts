@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { checkLuckyCutoff, hasReadableText, interpretProof, LUCKY_CUTOFF } from '../src/parser';
+import { checkLuckyCutoff, hasReadableText, interpretProof, LUCKY_CUTOFF } from '../src/core/parser';
 
 const NOW = new Date('2026-09-20T12:00:00Z');
 const interpret = (kind: string, text: string) => interpretProof(kind, text, { now: NOW });

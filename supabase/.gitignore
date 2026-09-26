@@ -6,3 +6,6 @@
 .env.keys
 .env.local
 .env.*.local
+
+# OAuth provider secrets for a local stack (see .env.example)
+.env

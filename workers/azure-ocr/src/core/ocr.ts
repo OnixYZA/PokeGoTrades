@@ -5,14 +5,17 @@ export class UnreadableImageError extends Error {}
 
 /**
  * One tesseract.js worker for the life of the process. Creating it loads the WASM core and the model
- * (a second or two), so on Lambda a warm container reuses it across invocations.
+ * (a second or two), so a warm Azure Functions worker process (the timer trigger firing again a minute later,
+ * or a second HTTP request while the instance is still up) reuses it across invocations rather than paying
+ * that cost every time.
  */
 let shared: Promise<Worker> | undefined;
 
 function getWorker(langPath: string): Promise<Worker> {
   shared ??= createWorker('eng', OEM.LSTM_ONLY, {
     langPath,
-    // The model is a local file, so there is nothing to cache (and a Lambda's working directory is read-only).
+    // The model is a local file, so there is nothing to cache (and the deployed package's own directory is
+    // read-only under Azure's remote-build / Flex Consumption deployment model).
     cacheMethod: 'none',
     // Required, not cosmetic. When a job fails, tesseract.js rejects that job's promise and then, if there is no
     // errorHandler, also throws from inside its message handler: an uncaught exception that kills the whole

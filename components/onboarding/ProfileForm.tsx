@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 
+import { TeamPicker } from '@/components/onboarding/TeamPicker';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SURFACE } from '@/constants/theme';
 import {
@@ -9,31 +10,38 @@ import {
   friendCodeDigits,
   ProfileError,
   saveProfile,
-  TEAMS,
   type MyProfile,
   type Team,
 } from '@/lib/api/profile';
-
-const TEAM_COLORS: Record<Team, string> = {
-  Mystic: '#4fb3ff',
-  Valor: '#ff5c8a',
-  Instinct: '#f5c518',
-};
 
 const INPUT_CLASS = 'rounded-[14px] border border-border bg-bg-card px-4 py-[14px]';
 
 interface ProfileFormProps {
   /** Whatever the profile already holds, so a half-finished setup resumes where it stopped. */
   initial: MyProfile | null;
+  /**
+   * Whatever the OCR pass on a `ProfileProofStep` screenshot managed to read before it gave up, so
+   * the manual fallback doesn't make a trainer retype what the screenshot already got right. Wins
+   * over `initial`'s placeholder handle / null friend code, but never over a real saved value.
+   */
+  prefill?: { handle?: string; friendCode?: string };
   /** Called after both updates succeeded, i.e. once `private.profile_ready()` is true. */
   onSaved: () => void;
 }
 
 /** Handle, team and friend code: the three things `profile_ready()` needs before RLS lets a trainer post. */
-export function ProfileForm({ initial, onSaved }: ProfileFormProps) {
-  const [handle, setHandle] = useState(initial && !initial.handleIsPlaceholder ? initial.handle : '');
+export function ProfileForm({ initial, prefill, onSaved }: ProfileFormProps) {
+  const [handle, setHandle] = useState(
+    initial && !initial.handleIsPlaceholder ? initial.handle : prefill?.handle ?? ''
+  );
   const [team, setTeam] = useState<Team | null>(initial?.team ?? null);
-  const [friendCode, setFriendCode] = useState(initial?.friendCode ? formatFriendCode(initial.friendCode) : '');
+  const [friendCode, setFriendCode] = useState(
+    initial?.friendCode
+      ? formatFriendCode(initial.friendCode)
+      : prefill?.friendCode
+        ? formatFriendCode(prefill.friendCode)
+        : ''
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ProfileError | null>(null);
 
@@ -79,32 +87,7 @@ export function ProfileForm({ initial, onSaved }: ProfileFormProps) {
 
       <View className="gap-2">
         <Label>Team</Label>
-        <View className="flex-row gap-2">
-          {TEAMS.map((name) => {
-            const selected = team === name;
-            const color = TEAM_COLORS[name];
-            return (
-              <Pressable
-                key={name}
-                onPress={() => setTeam(name)}
-                disabled={busy}
-                accessibilityRole="radio"
-                accessibilityLabel={`Team ${name}`}
-                accessibilityState={{ selected }}
-                className="flex-1 items-center rounded-[14px] border py-3 active:opacity-80"
-                style={
-                  selected
-                    ? { borderColor: color, backgroundColor: `${color}1f` }
-                    : { borderColor: '#1a2032', backgroundColor: '#0f1524' }
-                }
-              >
-                <Text className="font-display-semi" style={{ fontSize: 13, color: selected ? color : '#8b93a7' }}>
-                  {name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <TeamPicker value={team} onChange={setTeam} disabled={busy} />
         {errorFor('team') ? <Hint message={errorFor('team')} /> : null}
       </View>
 

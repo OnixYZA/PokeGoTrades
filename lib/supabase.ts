@@ -70,6 +70,12 @@ export const supabase = createClient<Database>(url, key, {
     storage: isStaticRender ? undefined : localStorage,
     autoRefreshToken: !isStaticRender,
     persistSession: !isStaticRender,
+    // PKCE so `exchangeCodeForSession` in lib/auth.ts can redeem the OAuth `code` with a verifier
+    // this device generated, instead of trusting whatever party redirects back with a token.
+    flowType: 'pkce',
+    // supabase-js would otherwise scrape `location.href` for a code/token on every mount, which
+    // races the `Linking.parse` in lib/auth.ts and double-handles the same redirect. `lib/auth.ts`
+    // owns the code exchange on every platform (native deep link and web full-page redirect alike).
     detectSessionInUrl: false,
   },
 });

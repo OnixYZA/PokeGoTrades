@@ -54,9 +54,9 @@ const clientOptions = { auth: { persistSession: false, autoRefreshToken: false, 
 export const adminClient = (): SupabaseClient => createClient(SUPABASE_URL(), serviceKey(), clientOptions);
 
 /**
- * The app has no password screen (email OTP only), so a trainer "logs in" the way a returning session would
- * arrive: a password grant against GoTrue, stored where supabase-js keeps its session. The app then boots
- * straight into that session instead of signing in anonymously.
+ * The app has no password screen (Google/Microsoft OAuth only), so a trainer "logs in" the way a
+ * permanent session would arrive: a password grant against GoTrue, stored where supabase-js keeps its
+ * session. The app then boots straight into that session instead of signing in anonymously.
  */
 export async function signIn(trainer: Trainer): Promise<Session> {
   const { data, error } = await createClient(SUPABASE_URL(), anonKey(), clientOptions).auth.signInWithPassword({

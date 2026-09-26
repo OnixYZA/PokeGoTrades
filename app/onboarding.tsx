@@ -1,68 +1,37 @@
-import type { AuthError } from '@supabase/supabase-js';
-import { router } from 'expo-router';
-import { ChevronLeft, Mail, ShieldCheck, UserRound } from 'lucide-react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { ChevronLeft, LogIn, UserRound } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { PhoneFrame } from '@/components/layout/PhoneFrame';
-import { ProfileForm } from '@/components/onboarding/ProfileForm';
+import { ProfileProofStep } from '@/components/onboarding/ProfileProofStep';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SURFACE } from '@/constants/theme';
 import { fetchMyProfile, isProfileReady, type MyProfile } from '@/lib/api/profile';
+import { completeOAuthRedirect, signInWithProvider, type OAuthProvider } from '@/lib/auth';
 import { useSession } from '@/lib/session';
-import { supabase } from '@/lib/supabase';
 
-const OTP_LENGTH = 6;
-const RESEND_COOLDOWN_S = 30;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-type Mode = 'new' | 'returning';
-
-function describeAuthError(error: AuthError, mode: Mode): string {
-  switch (error.code) {
-    case 'email_exists':
-    case 'identity_already_exists':
-      return 'That email already belongs to a trainer account. Switch to "Returning user" to sign in.';
-    case 'signup_disabled':
-    case 'otp_disabled':
-    case 'user_not_found':
-      return mode === 'returning'
-        ? 'No trainer account uses that email. Switch to "New trainer" to create one.'
-        : error.message;
-    case 'email_address_invalid':
-    case 'validation_failed':
-      return 'That email address was not accepted. Check it and try again.';
-    case 'otp_expired':
-      return 'That code is wrong or has expired. Request a new one.';
-    case 'over_email_send_rate_limit':
-    case 'over_request_rate_limit':
-      return 'Too many attempts. Wait a minute and try again.';
-    case 'session_not_found':
-    case 'session_expired':
-      return 'Your session ended. Go back and reopen this screen.';
-    default:
-      return error.message;
-  }
-}
+const SECONDARY_BUTTON_STYLE = { ...SURFACE.card, borderWidth: 1, borderColor: '#1a2032' };
 
 /**
- * Two ways in (SUPABASE_PLAN.md §3.4), both ending in the same 6-digit code:
- *  - New trainer: the anonymous session is upgraded in place. `updateUser({ email })` mails the code and
- *    `verifyOtp({ type: 'email_change' })` confirms it. The uid never changes.
- *  - Returning user: `signInWithOtp({ shouldCreateUser: false })` + `verifyOtp({ type: 'email' })` signs
- *    the existing account in on this device, replacing the throwaway anonymous session.
- * Once the session is permanent, a profile without a handle, team and friend code is completed here
- * too, because RLS refuses listings, offers and chat until `private.profile_ready()` holds.
+ * Two steps, neither of them email OTP:
+ *  - Sign-in: `signInWithProvider` (lib/auth.ts) sends the trainer to Google or Microsoft (Entra ID,
+ *    Supabase provider `azure`) via `signInWithOAuth`, which REPLACES the anonymous session outright
+ *    (D9: an anonymous session owns no data, so there is nothing to migrate). The provider redirects
+ *    back here — as a web query string or, cold-start on Android, as this same route reopened from the
+ *    `pokegotrades://onboarding` deep link — and `completeOAuthRedirect` below finishes the exchange.
+ *  - Profile: `ProfileProofStep` handles "screenshot first, manual fallback" — a trainer uploads their
+ *    My Trainer Code screenshot for OCR, or drops into the plain `ProfileForm` if that doesn't pan out.
+ * Once the profile has a handle, team and friend code, `private.profile_ready()` holds and RLS starts
+ * allowing listings, offers and chat.
  */
 export default function OnboardingScreen() {
   const { user, isAnonymous, isLoading, retry } = useSession();
-  const [mode, setMode] = useState<Mode>('new');
-  const [step, setStep] = useState<'email' | 'code'>('email');
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
+  const params = useLocalSearchParams<{ code?: string; error?: string; error_description?: string }>();
+
+  const [completingOAuth, setCompletingOAuth] = useState(() => Boolean(params.code || params.error));
+  const [provider, setProvider] = useState<OAuthProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cooldown, setCooldown] = useState(0);
 
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [profileState, setProfileState] = useState<'idle' | 'loading' | 'incomplete' | 'error'>('idle');
@@ -72,13 +41,31 @@ export default function OnboardingScreen() {
 
   const permanentUserId = user && !isAnonymous ? user.id : null;
 
+  // The web return and the Android cold-start deep link both land here as `?code=…` (or `?error=…`).
+  // A warm native app already finished the exchange inside `signInWithProvider` itself; if a deep-link
+  // event fires anyway, `completeOAuthRedirect`'s code-dedupe map makes the second call a no-op.
   useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setTimeout(() => setCooldown((s) => s - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [cooldown]);
+    if (!params.code && !params.error) return;
+    let active = true;
+    setCompletingOAuth(true);
+    completeOAuthRedirect(params)
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : 'Sign-in failed. Try again.');
+      })
+      .finally(() => {
+        if (!active) return;
+        setCompletingOAuth(false);
+        // Clear the one-time redirect params so a refresh/back doesn't replay the exchange or leave
+        // them sitting in the URL; `undefined` drops a key rather than setting it to the string "undefined".
+        router.setParams({ code: undefined, error: undefined, error_description: undefined });
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.code, params.error, params.error_description]);
 
-  // A permanent session (just verified, or opened later by someone half-way through setup) either
+  // A permanent session (just signed in, or opened later by someone half-way through setup) either
   // has a ready profile and is done, or lands on the profile step.
   useEffect(() => {
     if (!permanentUserId) {
@@ -114,77 +101,24 @@ export default function OnboardingScreen() {
 
   const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
-  const switchMode = (next: Mode) => {
-    if (next === mode) return;
-    setMode(next);
+  const signIn = async (next: OAuthProvider) => {
+    setProvider(next);
     setError(null);
-  };
-
-  const requestCode = async (candidate: string) =>
-    mode === 'new'
-      ? supabase.auth.updateUser({ email: candidate })
-      : supabase.auth.signInWithOtp({ email: candidate, options: { shouldCreateUser: false } });
-
-  const sendCode = async () => {
-    const candidate = email.trim().toLowerCase();
-    if (!EMAIL_PATTERN.test(candidate)) {
-      setError('Enter a valid email address.');
-      return;
+    try {
+      await signInWithProvider(next);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Sign-in failed. Try again.');
+    } finally {
+      setProvider(null);
     }
-    setBusy(true);
-    setError(null);
-    const { error: sendError } = await requestCode(candidate);
-    setBusy(false);
-    if (sendError) {
-      setError(describeAuthError(sendError, mode));
-      return;
-    }
-    setEmail(candidate);
-    setCode('');
-    setCooldown(RESEND_COOLDOWN_S);
-    setStep('code');
-  };
-
-  const resendCode = async () => {
-    setBusy(true);
-    setError(null);
-    // `resend` only knows the email-change flow; a returning user just asks for a fresh sign-in code.
-    const { error: resendError } =
-      mode === 'new' ? await supabase.auth.resend({ type: 'email_change', email }) : await requestCode(email);
-    setBusy(false);
-    if (resendError) {
-      setError(describeAuthError(resendError, mode));
-      return;
-    }
-    setCooldown(RESEND_COOLDOWN_S);
-  };
-
-  const verifyCode = async () => {
-    setBusy(true);
-    setError(null);
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: mode === 'new' ? 'email_change' : 'email',
-    });
-    setBusy(false);
-    if (verifyError) setError(describeAuthError(verifyError, mode));
-    // On success the session listener hands us the permanent user and the profile effect above takes over.
   };
 
   const showProfileStep = permanentUserId !== null;
 
-  let icon = <Mail size={26} color="#04121f" strokeWidth={2.2} />;
-  let title = mode === 'new' ? 'Verify your email to trade' : 'Welcome back';
+  let icon = <LogIn size={26} color="#04121f" strokeWidth={2.2} />;
+  let title = 'Sign in to trade';
   let subtitle =
-    mode === 'new'
-      ? 'You can browse right away. Listing, offers and chat need a verified account so blocks and trade history stay with you.'
-      : 'Enter the email you signed up with. We will send a 6-digit code to sign you in on this device.';
-  if (step === 'code') {
-    icon = <ShieldCheck size={26} color="#04121f" strokeWidth={2.2} />;
-    title = 'Enter your code';
-    subtitle = `We sent a ${OTP_LENGTH}-digit code to ${email}.`;
-  }
+    'You can browse right away. Listing, offers and chat need a signed-in account so blocks and trade history stay with you.';
   if (showProfileStep) {
     icon = <UserRound size={26} color="#04121f" strokeWidth={2.2} />;
     title = 'Set up your trainer profile';
@@ -204,7 +138,7 @@ export default function OnboardingScreen() {
           <ChevronLeft size={20} color="#8b93a7" />
         </Pressable>
         <Text className="font-display text-text-primary" style={{ fontSize: 15 }}>
-          {showProfileStep ? 'Your profile' : 'Secure your account'}
+          {showProfileStep ? 'Your profile' : 'Sign in'}
         </Text>
       </View>
 
@@ -226,8 +160,8 @@ export default function OnboardingScreen() {
         </Text>
 
         {showProfileStep ? (
-          profileState === 'incomplete' ? (
-            <ProfileForm initial={profile} onSaved={() => setDone(true)} />
+          profileState === 'incomplete' && profile ? (
+            <ProfileProofStep profile={profile} onReady={() => setDone(true)} />
           ) : profileState === 'error' ? (
             <View className="mt-7 gap-3">
               <ErrorText message={profileError ?? 'Could not load your profile.'} />
@@ -246,125 +180,35 @@ export default function OnboardingScreen() {
             <ErrorText message="Could not start a session. Check your connection." />
             <PrimaryButton label="Retry" style={SURFACE.ctaBlue} textColor="#04121f" onPress={retry} />
           </View>
-        ) : step === 'email' ? (
-          <View className="mt-7 gap-3">
-            <ModeToggle mode={mode} onChange={switchMode} disabled={busy} />
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              placeholderTextColor="#6d7690"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="email"
-              textContentType="emailAddress"
-              returnKeyType="send"
-              editable={!busy}
-              onSubmitEditing={sendCode}
-              accessibilityLabel="Email address"
-              className="rounded-[14px] border border-border bg-bg-card px-4 py-[14px]"
-              style={{ fontSize: 15, color: '#e8ecf5' }}
-            />
-            {error ? <ErrorText message={error} /> : null}
-            <PrimaryButton
-              label={busy ? 'Sending…' : 'Send code'}
-              style={SURFACE.ctaBlue}
-              textColor="#04121f"
-              disabled={busy || email.trim().length === 0}
-              onPress={sendCode}
-            />
+        ) : completingOAuth ? (
+          <View className="mt-7 items-center gap-3">
+            <ActivityIndicator color="#4fb3ff" />
+            <Text className="font-display-med text-text-muted" style={{ fontSize: 13 }}>
+              Completing sign-in…
+            </Text>
           </View>
         ) : (
           <View className="mt-7 gap-3">
-            <TextInput
-              value={code}
-              onChangeText={(text) => setCode(text.replace(/\D/g, '').slice(0, OTP_LENGTH))}
-              placeholder="000000"
-              placeholderTextColor="#4a5169"
-              keyboardType="number-pad"
-              autoComplete="one-time-code"
-              textContentType="oneTimeCode"
-              maxLength={OTP_LENGTH}
-              editable={!busy}
-              onSubmitEditing={code.length === OTP_LENGTH ? verifyCode : undefined}
-              accessibilityLabel={`${OTP_LENGTH}-digit verification code`}
-              className="rounded-[14px] border border-border bg-bg-card px-4 py-[14px] text-center font-mono-bold"
-              style={{ fontSize: 26, letterSpacing: 10, color: '#e8ecf5' }}
-            />
             {error ? <ErrorText message={error} /> : null}
             <PrimaryButton
-              label={busy ? 'Verifying…' : 'Verify'}
+              label={provider === 'google' ? 'Opening Google…' : 'Continue with Google'}
               style={SURFACE.ctaBlue}
               textColor="#04121f"
-              disabled={busy || code.length !== OTP_LENGTH}
-              onPress={verifyCode}
+              disabled={provider !== null}
+              onPress={() => signIn('google')}
             />
-            {busy ? <ActivityIndicator color="#4fb3ff" /> : null}
-            <View className="mt-1 flex-row items-center justify-between">
-              <Pressable
-                onPress={() => {
-                  setStep('email');
-                  setError(null);
-                }}
-                accessibilityRole="button"
-                hitSlop={8}
-                className="active:opacity-70"
-              >
-                <Text className="font-display-med text-text-muted" style={{ fontSize: 13 }}>
-                  Use a different email
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={resendCode}
-                disabled={busy || cooldown > 0}
-                accessibilityRole="button"
-                hitSlop={8}
-                className={cooldown > 0 || busy ? 'opacity-50' : 'active:opacity-70'}
-              >
-                <Text className="font-display-semi text-accent-blue" style={{ fontSize: 13 }}>
-                  {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
-                </Text>
-              </Pressable>
-            </View>
+            <PrimaryButton
+              label={provider === 'azure' ? 'Opening Microsoft…' : 'Continue with Microsoft'}
+              style={SECONDARY_BUTTON_STYLE}
+              textColor="#e8ecf5"
+              disabled={provider !== null}
+              onPress={() => signIn('azure')}
+            />
+            {provider ? <ActivityIndicator color="#4fb3ff" /> : null}
           </View>
         )}
       </ScrollView>
     </PhoneFrame>
-  );
-}
-
-const MODES: { value: Mode; label: string }[] = [
-  { value: 'new', label: 'New trainer' },
-  { value: 'returning', label: 'Returning user' },
-];
-
-/** New trainer upgrades this device's anonymous session; a returning user signs in to an existing account. */
-function ModeToggle({ mode, onChange, disabled }: { mode: Mode; onChange: (mode: Mode) => void; disabled?: boolean }) {
-  return (
-    <View
-      accessibilityRole="radiogroup"
-      className="flex-row gap-1 rounded-[14px] border border-border bg-bg-card p-1"
-    >
-      {MODES.map(({ value, label }) => {
-        const selected = value === mode;
-        return (
-          <Pressable
-            key={value}
-            onPress={() => onChange(value)}
-            disabled={disabled}
-            accessibilityRole="radio"
-            accessibilityState={{ selected }}
-            className="flex-1 items-center rounded-[10px] py-2.5 active:opacity-80"
-            style={selected ? { backgroundColor: 'rgba(79,179,255,.14)' } : undefined}
-          >
-            <Text className="font-display-semi" style={{ fontSize: 13, color: selected ? '#4fb3ff' : '#8b93a7' }}>
-              {label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
   );
 }
 

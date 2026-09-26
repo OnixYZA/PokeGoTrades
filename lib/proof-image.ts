@@ -2,7 +2,8 @@ import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
 
-/** Mirrors the `listing-proofs` bucket (supabase/config.toml, migration …000600): 5 MiB, jpeg/png/webp. */
+/** Mirrors both proof buckets' limits (supabase/config.toml): `listing-proofs` (migration …000600) and
+ *  `profile-proofs` (migration …000100) are each capped at 5 MiB, jpeg/png/webp. */
 export const PROOF_MAX_BYTES = 5 * 1024 * 1024;
 
 const MIME_BY_EXTENSION = {

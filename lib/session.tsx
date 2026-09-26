@@ -11,7 +11,7 @@ interface SessionContextValue {
   user: User | null;
   /** True until the stored session was read and, when there was none, the anonymous sign-in settled. */
   isLoading: boolean;
-  /** Anonymous sessions can browse; writes need the email upgrade (D9). */
+  /** Anonymous sessions can browse; writes need the OAuth upgrade (D9). */
   isAnonymous: boolean;
   /** Set when the first-launch anonymous sign-in failed. The app still renders; call `retry`. */
   error: Error | null;
@@ -65,8 +65,10 @@ function bootstrapSession(): Promise<Session | null> {
 
 /**
  * Owns the Supabase auth session. On first launch there is none, so it signs in anonymously
- * (SUPABASE_PLAN.md §3.4): every read needs an `authenticated` JWT. The email OTP upgrade in
- * `app/onboarding.tsx` keeps the same uid, so nothing has to migrate.
+ * (SUPABASE_PLAN.md §3.4): every read needs an `authenticated` JWT. The Google/Microsoft OAuth
+ * sign-in in `app/onboarding.tsx` (`lib/auth.ts`) REPLACES that anonymous session outright rather
+ * than upgrading it in place — an anonymous user can write nothing (D9), so there is nothing on it
+ * worth migrating, and `onAuthStateChange` below just hands over the new permanent session.
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);

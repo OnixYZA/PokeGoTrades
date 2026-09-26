@@ -1,6 +1,6 @@
 {
   // Standalone on purpose: this workspace does not extend the Expo app's config, and the app's tsconfig
-  // excludes `workers/`. This one type-checks everything (src, tests, scripts); `tsconfig.build.json` emits.
+  // excludes `workers/`. This one type-checks everything (src, test, scripts); `tsconfig.build.json` emits.
   "compilerOptions": {
     "target": "ES2022",
     "module": "node16",

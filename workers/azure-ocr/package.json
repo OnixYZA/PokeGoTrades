@@ -2,9 +2,9 @@
   "name": "pokego-trades-ocr-worker",
   "version": "1.0.0",
   "private": true,
-  "description": "Reads the catch date from uploaded listing proof screenshots. Runs on AWS Lambda; deliberately separate from the Expo app.",
+  "description": "Reads proof screenshots (listing proofs, and now the 'My Trainer Code' profile screen) and records the result on the matching queue row. Runs as an Azure Function App; deliberately separate from the Expo app.",
   "type": "commonjs",
-  "main": "dist/handler.js",
+  "main": "dist/src/functions/*.js",
   "engines": {
     "node": ">=22"
   },
@@ -12,20 +12,21 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test test/*.test.ts",
-    "once": "tsx src/local.ts --once",
-    "dev": "tsx src/local.ts",
+    "prestart": "npm run build",
+    "start": "func start",
     "try": "tsx src/try.ts",
-    "smoke": "tsx scripts/smoke.ts",
-    "package": "bash scripts/package.sh"
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
+    "@azure/functions": "^4.7.2",
     "@supabase/supabase-js": "^2.116.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "dotenv": "^18.0.1",
+    "jsqr": "^1.4.0",
     "sharp": "^0.35.4",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
-    "@tesseract.js-data/eng": "^1.0.0",
     "@types/node": "^22.20.4",
     "tsx": "^4.23.13",
     "typescript": "~6.0.3"

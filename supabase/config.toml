@@ -128,6 +128,11 @@ public = false
 file_size_limit = "5MB"
 allowed_mime_types = ["image/jpeg", "image/png", "image/webp"]
 
+[storage.buckets.profile-proofs]
+public = false
+file_size_limit = "5MB"
+allowed_mime_types = ["image/jpeg", "image/png", "image/webp"]
+
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
 enabled = true
@@ -159,12 +164,15 @@ max_indexes = 5
 [auth]
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
-# in emails.
-site_url = "http://127.0.0.1:3000"
+# in emails. GoTrue falls back to this whenever `redirectTo` isn't allow-listed below (the
+# "localhost:3000 redirect crash"), so it has to be a page the OAuth flow can actually land on:
+# `npx expo start --web` serves the app on 8081, not the Supabase CLI's default of 3000.
+site_url = "http://localhost:8081"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
-# A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# A list of *exact* URLs (glob-matched) that auth providers are permitted to redirect to post
+# authentication: the native deep link scheme, Expo Go's `exp://` tunnel, and local web dev.
+additional_redirect_urls = ["pokegotrades://**", "exp://**", "http://localhost:8081/**"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -350,6 +358,23 @@ url = ""
 skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
 email_optional = false
+
+# Google and Microsoft (Entra ID) sign-in (app/onboarding.tsx via lib/auth.ts). Disabled locally
+# because the app runs against the hosted project (sqhvurpokqemdaxckcrt), whose providers are
+# configured in the Supabase Dashboard, not here — these blocks only matter if this project is ever
+# run against a local stack. Client id/secret come from `supabase/.env` (see `supabase/.env.example`;
+# the Supabase CLI reads that file, never `.env`/`.env.local`).
+[auth.external.google]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+
+[auth.external.azure]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_AZURE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_AZURE_SECRET)"
+# The common/multi-tenant Entra ID endpoint (personal + work/school accounts), not a single-tenant URL.
+url = "https://login.microsoftonline.com/common"
 
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
 # You can configure "web3" rate limit in the [auth.rate_limit] section and set up [auth.captcha] if self-hosting.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseCatchDate } from '../src/date';
+import { parseCatchDate } from '../src/core/date';
 
 const NOW = new Date('2026-09-20T12:00:00Z');
 const parse = (text: string, order?: 'MDY' | 'DMY') => parseCatchDate(text, { now: NOW, order });

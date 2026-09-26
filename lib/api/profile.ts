@@ -1,5 +1,9 @@
+import { randomUUID } from 'expo-crypto';
+
 import type { CreatureRef } from '@/data/types';
 import type { Database } from '@/lib/database.types';
+import type { PickedProof } from '@/lib/proof-image';
+import { readProofBytes } from '@/lib/proof-image';
 import { supabase } from '@/lib/supabase';
 
 export type Team = Database['public']['Enums']['team_name'];
@@ -145,4 +149,128 @@ export async function saveProfile(input: ProfileInput): Promise<void> {
     throw new ProfileError('form', priv.error.message);
   }
   if (priv.data.length === 0) throw new ProfileError('form', 'Could not update your profile. Try again.');
+}
+
+/** A direct column update, same shape as the two updates inside `saveProfile`: owner-only RLS, so a
+ *  stale id or a signed-out session just matches zero rows rather than throwing a permission error. */
+export async function saveTeam(team: Team): Promise<void> {
+  const id = await currentUserId();
+  const { data, error } = await supabase.from('profiles').update({ team }).eq('id', id).select('id');
+  if (error) throw new ProfileError('team', error.message);
+  if (data.length === 0) throw new ProfileError('team', 'Could not update your profile. Try again.');
+}
+
+// ——— profile-proof screenshots (migration …000100_profile_proofs) ———
+
+/** Mirrors the `listing-proofs` bucket's limits (5 MiB, jpeg/png/webp) but holds trainer-code screenshots. */
+export const PROFILE_PROOF_BUCKET = 'profile-proofs';
+
+const PROFILE_PROOF_FAILURE_REASONS = [
+  'unreadable',
+  'image_too_large',
+  'no_handle',
+  'no_friend_code',
+  'handle_taken',
+  'friend_code_taken',
+  'invalid_handle',
+] as const;
+
+/** `ocr_extracted.reason` when `ocr_status = 'failed'`, set by the Azure Function that reads the screenshot. */
+export type ProfileProofFailure = (typeof PROFILE_PROOF_FAILURE_REASONS)[number];
+
+function isProofFailureReason(value: unknown): value is ProfileProofFailure {
+  return typeof value === 'string' && (PROFILE_PROOF_FAILURE_REASONS as readonly string[]).includes(value);
+}
+
+export type ProfileProofStatus = 'pending' | 'processing' | 'verified' | 'failed' | 'rejected';
+
+export interface ProfileProof {
+  id: string;
+  status: ProfileProofStatus;
+  /** Only set once `status` is `'failed'`. */
+  reason: ProfileProofFailure | null;
+  /** Whatever the OCR pass read before it gave up, so the manual fallback isn't a blank form. */
+  handle: string | null;
+  friendCode: string | null;
+  createdAt: string;
+}
+
+/**
+ * Uploads one trainer-code screenshot and records it, mirroring `uploadListingProof`'s upload-then-insert
+ * shape (lib/api/listings.ts): the storage insert policy only accepts an object at `<uid>/<id>` for the
+ * caller's own id, so the id is minted here and the object has to exist before the row can reference it.
+ * A trainer may only have one proof in flight at a time (a partial unique index on `user_id`), so a retry
+ * while one is still `pending`/`processing` fails with `23505`.
+ */
+export async function uploadProfileProof(proof: PickedProof): Promise<void> {
+  const bytes = await readProofBytes(proof);
+  const id = randomUUID();
+  const path = `${await currentUserId()}/${id}`;
+  const bucket = supabase.storage.from(PROFILE_PROOF_BUCKET);
+
+  const { error: uploadError } = await bucket.upload(path, bytes, { contentType: proof.contentType, upsert: false });
+  if (uploadError) throw new ProfileError('form', uploadError.message);
+
+  const { error: insertError } = await supabase.from('profile_proofs').insert({ id, storage_path: path });
+  if (insertError) {
+    // Best-effort: clients have no delete policy on this bucket (see the migration's doc comment), so
+    // this may simply be refused. The row insert never happened either way, so nothing else can ever
+    // reference the object — an orphan left behind here is harmless.
+    await bucket.remove([path]);
+    if (insertError.code === '23505') throw new ProfileError('form', 'Your last screenshot is still being read.');
+    throw new ProfileError('form', insertError.message);
+  }
+}
+
+/**
+ * The newest of the signed-in trainer's own proof uploads, or null when they have never tried one.
+ * Reads `ocr_extracted` defensively, the way `fetchMyArsenal` reads `looking`: it is a service-role
+ * write this client never validates against a schema.
+ */
+export async function fetchLatestProfileProof(): Promise<ProfileProof | null> {
+  const id = await currentUserId();
+  const { data, error } = await supabase
+    .from('profile_proofs')
+    .select('id, ocr_status, ocr_extracted, created_at')
+    .eq('user_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new ProfileError('form', error.message);
+  if (!data) return null;
+
+  const extracted = data.ocr_extracted;
+  const fields: Record<string, unknown> =
+    typeof extracted === 'object' && extracted !== null && !Array.isArray(extracted) ? extracted : {};
+
+  return {
+    id: data.id,
+    status: data.ocr_status as ProfileProofStatus,
+    reason: isProofFailureReason(fields.reason) ? fields.reason : null,
+    handle: typeof fields.handle === 'string' ? fields.handle : null,
+    friendCode: typeof fields.friendCode === 'string' ? fields.friendCode : null,
+    createdAt: data.created_at,
+  };
+}
+
+/** A friendly sentence per failure reason (see the `profile_proofs` migration's doc comment on `ocr_extracted`). */
+export function describeProofFailure(reason: ProfileProofFailure): string {
+  switch (reason) {
+    case 'unreadable':
+      return "We couldn't read that screenshot. Try a brighter, uncropped shot of the My Trainer Code screen.";
+    case 'image_too_large':
+      return 'That image was too large to process. Try a smaller screenshot.';
+    case 'no_handle':
+      return "We couldn't find a trainer name on that screenshot.";
+    case 'no_friend_code':
+      return "We couldn't find a friend code on that screenshot.";
+    case 'handle_taken':
+      return "That trainer name is already registered here. If it's yours, enter your details manually and contact support.";
+    case 'friend_code_taken':
+      return "That friend code is already registered here. If it's yours, enter your details manually and contact support.";
+    case 'invalid_handle':
+      return "That trainer name isn't in a format we accept. Enter it manually instead.";
+    default:
+      return 'Something went wrong reading that screenshot.';
+  }
 }
