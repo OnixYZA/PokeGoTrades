@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import sharp from 'sharp';
 
+import type { SizeClass } from './catch';
 import { LISTING_PROOF_BUCKET, PROFILE_PROOF_BUCKET, type Config } from './env';
 import { log } from './log';
 import { recognizeText, UnreadableImageError } from './ocr';
@@ -296,6 +297,42 @@ async function grantLucky(supabase: SupabaseClient, listingId: string): Promise<
   return (data?.length ?? 0) > 0 ? 'granted' : 'unchanged';
 }
 
+type SizeOutcome = 'tagged' | 'unchanged' | 'blocked';
+
+/**
+ * Sets `listings.size_class` from a verified appraisal's OCR read — mirrors `grantLucky` in shape and in intent
+ * (a one-way, one-shot write), for the same reason: a later, possibly worse, OCR read on a re-verified proof
+ * must never flip or clear a size someone already trusted.
+ * - `tagged`: the listing had no `size_class` yet and now does.
+ * - `unchanged`: it already had one (or the listing is gone) — NEVER overwritten or downgraded, so this is not
+ *   an error, just nothing left to do.
+ * - `blocked`: `size_class` is deliberately absent from `guard_listing_update`'s frozen-fields tuple (migration
+ *   ...000100_listing_attributes.sql — a value the seller never set cannot be their bait-and-switch), so this
+ *   should not happen today. It is still mapped, exactly like `grantLucky`'s `blocked`, so this worker keeps
+ *   working (proof still verifies, listing left alone) rather than throwing if that guard's tuple ever changes.
+ * Any other error is thrown, and the proof is retried.
+ */
+async function applySizeClass(supabase: SupabaseClient, listingId: string, sizeClass: SizeClass): Promise<SizeOutcome> {
+  const { data, error } = await supabase.from('listings').update({ size_class: sizeClass }).eq('id', listingId).is('size_class', null).select('id');
+  if (error) {
+    if (error.message === 'listing_has_offers') return 'blocked';
+    throw new Error(`Could not set size_class on listing ${listingId}: ${error.message}`);
+  }
+  return (data?.length ?? 0) > 0 ? 'tagged' : 'unchanged';
+}
+
+/**
+ * Upserts the private catch location a verified appraisal's OCR text carried, into `public.listing_proof_private`
+ * — never into `listing_proofs.ocr_extracted`, which anyone who can see the listing can read (see `catch.ts`'s
+ * and migration ...000200_listing_proof_private.sql's header comments). `on conflict (proof_id) do update`
+ * because a stale `processing` claim being redone (the run died mid-write, the lease expired) must overwrite its
+ * own earlier attempt rather than fail on the primary key it already wrote.
+ */
+async function saveCatchLocation(supabase: SupabaseClient, proofId: string, catchLocation: string): Promise<void> {
+  const { error } = await supabase.from('listing_proof_private').upsert({ proof_id: proofId, catch_location: catchLocation }, { onConflict: 'proof_id' });
+  if (error) throw new Error(`Could not save the catch location for proof ${proofId}: ${error.message}`);
+}
+
 /** The image bytes, or `null` when the object does not exist (a permanent failure). Any other error throws. */
 async function download(supabase: SupabaseClient, bucket: string, path: string): Promise<Buffer | null> {
   const { data, error } = await supabase.storage.from(bucket).download(path);
@@ -360,10 +397,11 @@ async function release<Row extends QueueRow>(supabase: SupabaseClient, spec: Que
 
 /**
  * `listing_proofs`: unchanged from the Lambda worker's `processPending`, now expressed as a `QueueSpec`. The
- * Guaranteed Lucky update happens inside `handle`, BEFORE the row is reported `verified` to `runRow` — on
- * purpose: if the run dies in between, the row is still `processing`, so it is released and redone and the
- * (idempotent) badge update simply repeats. The other order could leave a verified proof whose listing never
- * got its badge, and nothing would retry it.
+ * Guaranteed Lucky update, the size-class tag, and the private catch-location upsert all happen inside `handle`,
+ * BEFORE the row is reported `verified` to `runRow` — on purpose: if the run dies in between, the row is still
+ * `processing`, so it is released and redone and the (all idempotent) writes simply repeat. The other order
+ * could leave a verified proof whose listing never got its badge/tag, or whose location was never saved, and
+ * nothing would retry it.
  */
 export const listingProofsQueue: QueueSpec<ListingProofRow> = {
   table: 'listing_proofs',
@@ -378,7 +416,30 @@ export const listingProofsQueue: QueueSpec<ListingProofRow> = {
     if (lucky === 'granted') summary.luckyGranted++;
     if (lucky === 'blocked') summary.luckyBlocked++;
 
-    return { status: 'verified', extracted: verdict.extracted, log: { ...verdict.extracted, catchVsCutoff: verdict.lucky, lucky } };
+    // Size and location only ever come back set for a verified appraisal (see `interpretProof`); a movesets or
+    // event_badge verdict's `extracted`/`privateFacts` are always empty here, so both of these are no-ops for them.
+    const { sizeClass } = verdict.extracted;
+    const sizeOutcome = sizeClass ? await applySizeClass(supabase, row.listing_id, sizeClass) : undefined;
+
+    const catchLocation = verdict.privateFacts?.catchLocation;
+    if (catchLocation) await saveCatchLocation(supabase, row.id, catchLocation);
+
+    // Log only counts/booleans for the two new extractions (`sizeTagged`, `locationFound`) — never the size or
+    // the location itself. `caughtAt`/`ambiguous` are pulled out explicitly rather than spreading all of
+    // `verdict.extracted`, so a future public field added there does not silently start getting logged too.
+    const { caughtAt, ambiguous } = verdict.extracted;
+    return {
+      status: 'verified',
+      extracted: verdict.extracted,
+      log: {
+        caughtAt,
+        ambiguous,
+        catchVsCutoff: verdict.lucky,
+        lucky,
+        sizeTagged: sizeOutcome === 'tagged',
+        locationFound: catchLocation !== undefined,
+      },
+    };
   },
 };
 

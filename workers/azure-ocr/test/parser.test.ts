@@ -75,6 +75,51 @@ describe('interpretProof: appraisal', () => {
   });
 });
 
+describe('interpretProof: appraisal size class and catch location', () => {
+  it('adds a public sizeClass to extracted, and a separate, non-merged privateFacts.catchLocation', () => {
+    // The size label sits next to the weight/height line; the catch line (with its own location) is separate,
+    // just as the two would be on a real appraisal screenshot's own separate lines.
+    const verdict = interpret('appraisal', `${SCREEN} XL\nCaught on 03/14/2021 at Adyar`);
+    assert.deepEqual(verdict, {
+      status: 'verified',
+      extracted: { caughtAt: '2021-03-14', sizeClass: 'XL' },
+      lucky: 'late',
+      privateFacts: { catchLocation: 'Adyar' },
+    });
+    // The location must never end up in the same place the size class does: a buyer can see `extracted`.
+    assert.equal('catchLocation' in verdict.extracted, false);
+  });
+
+  it('omits sizeClass from extracted, and privateFacts entirely, when neither was read', () => {
+    const verdict = interpret('appraisal', 'Caught 11/23/2018');
+    assert.deepEqual(verdict, { status: 'verified', extracted: { caughtAt: '2018-11-23' }, lucky: 'early' });
+    assert.equal('sizeClass' in verdict.extracted, false);
+    assert.equal('privateFacts' in verdict, false);
+  });
+
+  it('extracts a location with no size label present', () => {
+    const verdict = interpret('appraisal', 'Caught 11/23/2018 · Adyar');
+    assert.deepEqual(verdict, {
+      status: 'verified',
+      extracted: { caughtAt: '2018-11-23' },
+      lucky: 'early',
+      privateFacts: { catchLocation: 'Adyar' },
+    });
+    assert.equal('sizeClass' in verdict.extracted, false);
+  });
+
+  it('extracts a size label with no catch location present', () => {
+    const verdict = interpret('appraisal', `${SCREEN} Caught 11/23/2018 XL`);
+    assert.deepEqual(verdict, { status: 'verified', extracted: { caughtAt: '2018-11-23', sizeClass: 'XL' }, lucky: 'early' });
+    assert.equal('privateFacts' in verdict, false);
+  });
+
+  it('never guesses a size when two different labels are both near a weight/height token', () => {
+    const verdict = interpret('appraisal', 'Weight 12.20 kg XL Height 2.02 m XS Caught 11/23/2018');
+    assert.equal(verdict.status === 'verified' && verdict.extracted.sizeClass, undefined);
+  });
+});
+
 describe('interpretProof: movesets and event_badge', () => {
   for (const kind of ['movesets', 'event_badge']) {
     describe(kind, () => {

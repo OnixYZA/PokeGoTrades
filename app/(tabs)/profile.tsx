@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
-import { ChevronLeft, LogOut, UserRound } from 'lucide-react-native';
+import { ChevronLeft, LogOut, Share2, UserRound } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
+import { ShareTradeListModal } from '@/components/modals/ShareTradeListModal';
 import { ArsenalGrid } from '@/components/profile/ArsenalGrid';
 import { LiveIdentityCard } from '@/components/profile/LiveIdentityCard';
 import { ProfileHero } from '@/components/profile/ProfileHero';
@@ -127,6 +128,9 @@ export default function ProfileScreen() {
   // Blocks a second selection from firing a second insert while the first is still in flight; the
   // picker itself is already closed by then (see `addPokemon`), so this only guards a fast re-open.
   const [addingCreature, setAddingCreature] = useState(false);
+  // "Share trade list" (Task 2B) — gates the modal below; there's nothing else to track here since
+  // Arsenal/Wishlist stay out of the store (AGENTS.md) and the modal reads them straight off `shareData`.
+  const [shareVisible, setShareVisible] = useState(false);
 
   // Same uid through the anonymous -> permanent upgrade, a new uid for a returning-user sign-in —
   // either way this is the one value the live fetch below needs to key off.
@@ -185,6 +189,16 @@ export default function ProfileScreen() {
     if (list) void addPokemon(list, pokemonId);
   };
 
+  // What "Share trade list" needs — only ever available in the two branches below that actually have
+  // both lists loaded (the mock trainer, and a live profile that's finished onboarding). `null`
+  // everywhere else, which is also everywhere the button itself is never rendered.
+  const shareData =
+    !USE_SUPABASE
+      ? { handle: trainer.handle, team: trainer.team, level: trainer.lvl, arsenal: trainer.arsenal, wishlist: trainer.wishlist }
+      : live.profile && isProfileReady(live.profile)
+        ? { handle: live.profile.handle, team: live.profile.team, level: undefined, arsenal: live.arsenal, wishlist: live.wishlist }
+        : null;
+
   let body: ReactNode;
   if (!USE_SUPABASE) {
     // Mock data source: there is no write path (no Supabase table to insert into), so no `onEdit` is
@@ -195,6 +209,7 @@ export default function ProfileScreen() {
         <RepStats trainer={trainer} />
         <ArsenalGrid arsenal={trainer.arsenal} />
         <WishlistGrid wishlist={trainer.wishlist} />
+        <ShareTradeListButton onPress={() => setShareVisible(true)} />
         <TradeHistoryGrid history={trainer.tradeHistory} />
       </>
     );
@@ -253,6 +268,7 @@ export default function ProfileScreen() {
         <LiveIdentityCard profile={live.profile} />
         <ArsenalGrid arsenal={live.arsenal} onEdit={() => setPickerFor('arsenal')} />
         <WishlistGrid wishlist={live.wishlist} onEdit={() => setPickerFor('wishlist')} />
+        <ShareTradeListButton onPress={() => setShareVisible(true)} />
       </>
     );
   }
@@ -297,6 +313,39 @@ export default function ProfileScreen() {
         onSelect={handleSelectPokemon}
         excludeIds={(pickerFor === 'wishlist' ? live.wishlist : live.arsenal).map((c) => c.pokemonId)}
       />
+
+      {/* Only ever mounted with real data: `shareData` is null in every branch that doesn't render the
+       *  button above, so `shareVisible` can never be true without it. */}
+      {shareData && (
+        <Modal visible={shareVisible} animationType="slide" onRequestClose={() => setShareVisible(false)}>
+          <ShareTradeListModal
+            handle={shareData.handle}
+            team={shareData.team}
+            level={shareData.level}
+            arsenal={shareData.arsenal}
+            wishlist={shareData.wishlist}
+            onClose={() => setShareVisible(false)}
+          />
+        </Modal>
+      )}
     </View>
+  );
+}
+
+/** "Share trade list" (Task 2B): exports the Arsenal + Wishlist grids above as a single PNG. Sits right
+ *  under both grids in both branches that render it — see the two call sites above. */
+function ShareTradeListButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Share trade list"
+      className="mb-[22px] flex-row items-center justify-center gap-2 rounded-2xl border border-border-strong bg-bg-card py-3 active:opacity-80"
+    >
+      <Share2 size={15} color="#4fb3ff" />
+      <Text className="font-display text-accent-blue" style={{ fontSize: 13 }}>
+        Share trade list
+      </Text>
+    </Pressable>
   );
 }

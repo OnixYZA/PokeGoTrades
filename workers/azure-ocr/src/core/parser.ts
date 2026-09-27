@@ -1,3 +1,4 @@
+import { extractCatchLocation, extractSizeClass, type SizeClass } from './catch';
 import { parseCatchDate, type CatchDate, type DateOrder } from './date';
 
 /** `listing_proofs.kind`: the `proof_kind` enum in the database. */
@@ -40,10 +41,18 @@ export function hasReadableText(text: string): boolean {
 export type Verdict =
   | {
       status: 'verified';
-      /** What is saved in `listing_proofs.ocr_extracted`. */
-      extracted: { caughtAt?: string; ambiguous?: true };
+      /** What is saved in `listing_proofs.ocr_extracted` — world-readable, like the rest of that column, so
+       * only PUBLIC facts belong here. `sizeClass` is one: `listings.size_class` sits right next to `lucky`. */
+      extracted: { caughtAt?: string; ambiguous?: true; sizeClass?: SizeClass };
       /** Appraisal proofs only: whether the catch date earns the listing Guaranteed Lucky. */
       lucky?: LuckyCheck;
+      /**
+       * Appraisal proofs only, and deliberately NEVER merged into `extracted`: facts read off the same
+       * screenshot that must stay private to the seller. `catchLocation` belongs only in
+       * `public.listing_proof_private` (see `catch.ts`'s header comment) — never in `ocr_extracted`, and never
+       * passed to `log()`. Undefined (the whole object, not just the field) when nothing private was read.
+       */
+      privateFacts?: { catchLocation?: string };
     }
   | {
       status: 'failed';
@@ -75,11 +84,20 @@ export function interpretProof(kind: string, text: string, options: InterpretOpt
     case 'appraisal': {
       const found = parseCatchDate(text, options);
       if (!found) return { status: 'failed', extracted: { reason: 'unreadable' }, cause: 'no_date' };
+
+      const sizeClass = extractSizeClass(text);
+      // Not saved in `ocr_extracted`, not logged — see `catch.ts` and `privateFacts` above.
+      const catchLocation = extractCatchLocation(text);
+
       return {
         status: 'verified',
-        // `ambiguous` is only written when true: the date order was assumed, so day and month may be swapped.
-        extracted: found.ambiguous ? { caughtAt: found.caughtAt, ambiguous: true } : { caughtAt: found.caughtAt },
+        extracted: {
+          // `ambiguous` is only written when true: the date order was assumed, so day and month may be swapped.
+          ...(found.ambiguous ? { caughtAt: found.caughtAt, ambiguous: true } : { caughtAt: found.caughtAt }),
+          ...(sizeClass ? { sizeClass } : {}),
+        },
         lucky: checkLuckyCutoff(found),
+        ...(catchLocation ? { privateFacts: { catchLocation } } : {}),
       };
     }
     case 'movesets':
