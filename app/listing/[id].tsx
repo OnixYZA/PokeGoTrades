@@ -169,7 +169,7 @@ export default function ListingDetailScreen() {
           </View>
 
           <View className="flex-row items-start gap-4">
-            <Sprite pokemonId={listing.pokemonId} hue={listing.hue} shiny={listing.shiny} size={92} />
+            <Sprite pokemonId={listing.pokemonId} hue={listing.hue} shiny={listing.shiny} purified={listing.purified} size={92} />
             <View className="min-w-0 flex-1">
               <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 10, letterSpacing: 1.2 }}>
                 {listing.form} · {listing.year} catch

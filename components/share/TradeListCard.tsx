@@ -1,8 +1,7 @@
 import { Image } from 'expo-image';
-import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { Text, View } from 'react-native';
 
-import { spriteUrl } from '@/constants/pokedex';
 import { COLORS } from '@/constants/theme';
 import {
   CARD_PADDING,
@@ -20,6 +19,7 @@ import {
   type TradeListSection,
 } from '@/constants/trade-list-layout';
 import type { CreatureRef } from '@/data/types';
+import { useSpriteSource } from '@/lib/use-sprite-source';
 
 /** How long a slow or dead sprite host gets before the export gives up waiting on it — see `onReady`. */
 const SETTLE_TIMEOUT_MS = 5000;
@@ -220,15 +220,22 @@ function hueSolidColor(hue: number): string {
 }
 
 function CreatureTile({ creature, onSettled }: { creature: CreatureRef; onSettled: () => void }) {
-  const [failed, setFailed] = useState(false);
+  const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource({
+    pokemonId: creature.pokemonId,
+    shiny: creature.shiny,
+  });
   const settledRef = useRef(false);
-  // expo-image only fires one of onLoad/onError per source, but this guards the (harmless) case of a
-  // re-render re-arming a tile whose sprite already settled — `onSettled` must count each tile once.
+  // A tile settles once — either its sprite (some candidate in the fallback chain) actually loads, or
+  // every candidate has failed — never on an intermediate `onError` that just advances to the next one.
   const settleOnce = useCallback(() => {
     if (settledRef.current) return;
     settledRef.current = true;
     onSettled();
   }, [onSettled]);
+
+  useEffect(() => {
+    if (loaded || exhausted) settleOnce();
+  }, [loaded, exhausted, settleOnce]);
 
   return (
     <View
@@ -240,7 +247,7 @@ function CreatureTile({ creature, onSettled }: { creature: CreatureRef; onSettle
         borderColor: COLORS.borderDefault,
       }}
     >
-      {failed ? (
+      {exhausted ? (
         <View
           className="h-full w-full items-center justify-center"
           style={{ backgroundColor: hueSolidColor(creature.hue) }}
@@ -251,14 +258,12 @@ function CreatureTile({ creature, onSettled }: { creature: CreatureRef; onSettle
         </View>
       ) : (
         <Image
-          source={{ uri: spriteUrl(creature.pokemonId, creature.shiny) }}
+          source={{ uri: uri ?? undefined }}
+          recyclingKey={uri}
           style={{ width: GRID_TILE_SIZE * 0.78, height: GRID_TILE_SIZE * 0.78 }}
           contentFit="contain"
-          onLoad={settleOnce}
-          onError={() => {
-            setFailed(true);
-            settleOnce();
-          }}
+          onLoad={onLoad}
+          onError={onError}
           accessibilityIgnoresInvertColors
           alt={`Pokemon ${creature.pokemonId} sprite`}
           accessibilityLabel={`Pokemon ${creature.pokemonId} sprite`}

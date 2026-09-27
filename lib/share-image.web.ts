@@ -68,12 +68,12 @@ export async function shareTradeListImage(
 ): Promise<ShareTradeListResult> {
   let dataUri: string;
   try {
-    // `useCORS: true` is baked into the web captureRef implementation; combined with
-    // raw.githubusercontent.com (constants/pokedex.ts's sprite host) serving a permissive
-    // `access-control-allow-origin: *`, the canvas this draws into is never tainted, so the
-    // `toDataURL` inside `captureRef` below doesn't throw. (metro.config.js's COEP/COOP response
-    // headers are for expo-sqlite's SharedArrayBuffer use and irrelevant here — canvas tainting is
-    // governed entirely by the *image's own* CORS headers, not the page's.)
+    // `useCORS: true` is baked into the web captureRef implementation; combined with Supabase
+    // Storage's public-object endpoint (`lib/sprite-url.ts`'s sprite host) serving a permissive
+    // `access-control-allow-origin: *` on every response, the canvas this draws into is never
+    // tainted, so the `toDataURL` inside `captureRef` below doesn't throw. (metro.config.js's
+    // COEP/COOP response headers are for expo-sqlite's SharedArrayBuffer use and irrelevant here —
+    // canvas tainting is governed entirely by the *image's own* CORS headers, not the page's.)
     dataUri = await captureRef(cardRef, {
       format: 'png',
       result: 'tmpfile',

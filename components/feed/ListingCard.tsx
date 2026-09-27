@@ -50,7 +50,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
       <View className="absolute h-[120px] w-[120px] rounded-full" style={[{ top: -30, right: -30, pointerEvents: 'none' }, hueBleed(listing.hue)]} />
 
       <View style={{ pointerEvents: 'none' }}>
-        <Sprite pokemonId={listing.pokemonId} hue={listing.hue} shiny={listing.shiny} size={72} />
+        <Sprite pokemonId={listing.pokemonId} hue={listing.hue} shiny={listing.shiny} purified={listing.purified} size={72} />
       </View>
 
       <View className="min-w-0 flex-1 gap-1.5" style={{ pointerEvents: 'box-none' }}>

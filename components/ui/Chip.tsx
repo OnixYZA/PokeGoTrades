@@ -1,8 +1,9 @@
 import { Image } from 'expo-image';
 import { Text, View } from 'react-native';
 
+import { findPokemon } from '@/constants/pokedex';
 import { hueChipBg, hueChipGlow } from '@/constants/theme';
-import { spriteUrl } from '@/constants/pokedex';
+import { useSpriteSource } from '@/lib/use-sprite-source';
 
 interface ChipProps {
   pokemonId: number;
@@ -14,20 +15,35 @@ interface ChipProps {
 
 /** Compact rounded-square sprite tile used in lists, grids, and message threads. */
 export function Chip({ pokemonId, hue, shiny = false, lucky = false, size = 48 }: ChipProps) {
+  const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource({ pokemonId, shiny });
+
   return (
     <View
       style={[{ width: size, height: size, borderRadius: 12, borderWidth: 1 }, hueChipBg(hue), hueChipGlow(hue, shiny)]}
       className="shrink-0 items-center justify-center"
     >
-      <Image
-        source={{ uri: spriteUrl(pokemonId, shiny) }}
-        style={{ width: size * 0.78, height: size * 0.78 }}
-        contentFit="contain"
-        transition={150}
-        accessibilityIgnoresInvertColors
-        alt={`Pokemon ${pokemonId} sprite`}
-        accessibilityLabel={`Pokemon ${pokemonId} sprite`}
-      />
+      <Text
+        className="font-display absolute text-white"
+        style={{ fontSize: size * 0.4, opacity: exhausted ? 1 : loaded ? 0 : 0.35 }}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+      >
+        {findPokemon(pokemonId)?.name.charAt(0) ?? '?'}
+      </Text>
+      {uri && (
+        <Image
+          source={{ uri }}
+          recyclingKey={uri}
+          style={{ width: size * 0.78, height: size * 0.78 }}
+          contentFit="contain"
+          transition={150}
+          onLoad={onLoad}
+          onError={onError}
+          accessibilityIgnoresInvertColors
+          alt={`Pokemon ${pokemonId} sprite`}
+          accessibilityLabel={`Pokemon ${pokemonId} sprite`}
+        />
+      )}
       {shiny && (
         <Text
           className="absolute"
