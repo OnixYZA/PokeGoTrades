@@ -8,7 +8,7 @@ const CONSTRAINT = ['Any IV', 'Hundo pref.', '96%+ IV'];
 export function LookingForRow({ creature, index }: { creature: CreatureRef; index: number }) {
   return (
     <View className="flex-row items-center gap-3 rounded-xl border border-border bg-bg-card p-2.5">
-      <Chip pokemonId={creature.pokemonId} hue={creature.hue} shiny={creature.shiny} lucky={creature.lucky} size={44} />
+      <Chip creature={creature} size={44} />
       <View className="min-w-0 flex-1">
         <Text className="font-display-semi text-text-primary" style={{ fontSize: 13 }}>
           {creature.name}

@@ -174,7 +174,7 @@ function CreatureOptionRow({
         borderColor: selected ? 'rgba(56,189,248,0.4)' : C.borderDefault,
       }}
     >
-      <Chip pokemonId={creature.pokemonId} hue={creature.hue} shiny={creature.shiny} lucky={creature.lucky} size={44} />
+      <Chip creature={creature} size={44} />
       <View className="flex-1">
         <Text style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>{creature.name}</Text>
         <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, marginTop: 2, letterSpacing: 0.5 }}>

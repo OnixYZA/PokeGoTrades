@@ -78,7 +78,7 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
               accessibilityLabel={`Offer ${creature.name}`}
               className="flex-row items-center gap-3 rounded-2xl border border-border bg-bg-card p-3 active:opacity-80"
             >
-              <Chip pokemonId={creature.pokemonId} hue={creature.hue} shiny={creature.shiny} lucky={creature.lucky} size={44} />
+              <Chip creature={creature} size={44} />
               <View className="min-w-0 flex-1">
                 <Text className="font-display-semi text-text-primary" style={{ fontSize: 14 }}>
                   {creature.name}

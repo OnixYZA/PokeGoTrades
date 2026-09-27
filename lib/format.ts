@@ -4,3 +4,10 @@ export function fmtDust(n: number): string {
   return String(n);
 }
 
+/** A trade-history date as `TradeHistoryGrid` renders it, e.g. `'Aug 22, 2026'` — the one place that
+ *  format is decided, so a live `completed_at` timestamp (`fetchMyTradeHistory`) and
+ *  `data/publicProfile.ts`'s synthetic "N months ago" date can never drift apart in shape. */
+export function formatTradeDate(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+

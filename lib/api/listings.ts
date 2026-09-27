@@ -9,8 +9,9 @@ import {
   type FilterFlagField,
 } from '@/constants/listing-attributes';
 import type { FilterSpec } from '@/store/listing-filters';
-import type { BackgroundHint, CreatureRef, Listing, TradeType } from '@/data/types';
-import type { Database, Json } from '@/lib/database.types';
+import type { BackgroundHint, Listing, TradeType } from '@/data/types';
+import { creatureRefToJson, parseCreatureRefs } from '@/lib/api/creature-ref';
+import type { Database } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
 
 // ——— DB-derived types ———
@@ -116,35 +117,13 @@ export function listingErrorMessage(error: unknown): string {
  * reads 'NEW' live) in favor of the `pokemon_market_demand` view, fetched separately in `lib/use-feed.ts`.
  */
 const LISTING_COLUMNS =
-  'id, seller_id, status, name, pokemon_id, form, catch_year, lucky, shiny, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
+  'id, seller_id, status, name, pokemon_id, form, form_code, costume_code, catch_year, lucky, shiny, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
 
 function selectListings() {
   return supabase.from('listings').select(LISTING_COLUMNS);
 }
 
 type ListingRow = QueryData<ReturnType<typeof selectListings>>[number];
-
-function toCreatureRefs(value: Json): CreatureRef[] {
-  if (!Array.isArray(value)) return [];
-  const refs: CreatureRef[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
-    const { name, pokemonId, hue, shiny, lucky } = entry;
-    if (typeof name !== 'string' || typeof pokemonId !== 'number' || typeof hue !== 'number') continue;
-    refs.push({ name, pokemonId, hue, ...(shiny === true ? { shiny } : {}), ...(lucky === true ? { lucky } : {}) });
-  }
-  return refs;
-}
-
-function creatureRefToJson(ref: CreatureRef): Json {
-  return {
-    name: ref.name,
-    pokemonId: ref.pokemonId,
-    hue: ref.hue,
-    ...(ref.shiny ? { shiny: true } : {}),
-    ...(ref.lucky ? { lucky: true } : {}),
-  };
-}
 
 /** `Listing.iv` is the display string '15/15/14', or 'Unrated' when the columns are null. */
 function formatIv(row: Pick<ListingRow, 'iv_atk' | 'iv_def' | 'iv_sta'>): string {
@@ -169,6 +148,8 @@ export function toListing(row: ListingRow): Listing {
     name: row.name,
     pokemonId: row.pokemon_id,
     form: row.form,
+    ...(row.form_code ? { formCode: row.form_code } : {}),
+    ...(row.costume_code ? { costumeCode: row.costume_code } : {}),
     year: row.catch_year,
     lucky: row.lucky,
     shiny: row.shiny,
@@ -179,7 +160,7 @@ export function toListing(row: ListingRow): Listing {
     pvp: row.pvp_rank,
     tradeType: row.trade_type,
     iv: formatIv(row),
-    looking: toCreatureRefs(row.looking),
+    looking: parseCreatureRefs(row.looking),
     untradable: row.untradable,
     tags: row.tags,
     notes: row.notes ?? undefined,

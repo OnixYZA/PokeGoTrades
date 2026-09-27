@@ -41,6 +41,7 @@ import {
 import { listingErrorMessage, publishListing, type NewListingInput, type ProofKind } from '@/lib/api/listings';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
+import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
 
@@ -207,16 +208,19 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     setPickerFor('wanted');
   };
 
-  const removeWanted = (pokemonId: number) => {
-    setWanted((prev) => prev.filter((w) => w.pokemonId !== pokemonId));
+  /** Keyed by `spriteVariantKey`, not `pokemonId` — see `WantedInReturn`'s `onRemoveWanted` comment. */
+  const removeWanted = (variantKey: string) => {
+    setWanted((prev) => prev.filter((w) => spriteVariantKey(spriteVariantOf(w)) !== variantKey));
   };
 
   /** The one `PokemonPickerModal` instance below is shared by the "CREATURE" slot and "WANTED IN
    *  RETURN" list, disambiguated by `pickerFor`. Closes the picker before touching state — same order
    *  as app/(tabs)/profile.tsx's `handleSelectPokemon` (see lib/toast.ts on modals and their own
    *  ToastHost; this flow has no toast, but the close-first order still avoids the picker's own Modal
-   *  re-rendering mid-close). */
-  const handlePickPokemon = (pokemonId: number) => {
+   *  re-rendering mid-close). `shiny` is only ever true here for a 'wanted' pick — the picker's own
+   *  Shiny pill is gated off for the 'creature' slot (`allowShiny={pickerFor === 'wanted'}` below),
+   *  since that slot already has its own Shiny toggle in the form. */
+  const handlePickPokemon = (pokemonId: number, shiny: boolean) => {
     const target = pickerFor;
     setPickerFor(null);
     const entry = findPokemon(pokemonId);
@@ -224,10 +228,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     if (target === 'creature') {
       setSelectedCreature(entry);
     } else if (target === 'wanted') {
+      const candidate: CreatureRef = { name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue, ...(shiny ? { shiny } : {}) };
+      const candidateKey = spriteVariantKey(spriteVariantOf(candidate));
       setWanted((prev) =>
-        prev.length >= 3 || prev.some((w) => w.pokemonId === pokemonId)
-          ? prev
-          : [...prev, { name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue }]
+        prev.length >= 3 || prev.some((w) => spriteVariantKey(spriteVariantOf(w)) === candidateKey) ? prev : [...prev, candidate]
       );
     }
   };
@@ -394,7 +398,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         title={pickerFor === 'wanted' ? 'Add to Looking For' : 'Choose your Pokémon'}
         onClose={() => setPickerFor(null)}
         onSelect={handlePickPokemon}
-        excludeIds={pickerFor === 'wanted' ? wanted.map((w) => w.pokemonId) : undefined}
+        allowShiny={pickerFor === 'wanted'}
+        exclude={pickerFor === 'wanted' ? wanted : undefined}
       />
     </View>
   );
@@ -474,7 +479,7 @@ function CreatureSelector({ selected, onPress }: { selected: PokedexEntry | null
           className="flex-row items-center gap-3 rounded-[14px] border px-4 py-3 active:opacity-80"
           style={{ backgroundColor: C.bgCard, borderColor: C.gold, boxShadow: '0 0 0 4px rgba(251,191,36,0.08)' }}
         >
-          <Chip pokemonId={selected.pokemonId} hue={selected.hue} size={44} />
+          <Chip creature={selected} size={44} />
           <View className="flex-1">
             <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>{selected.name}</Text>
             <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
@@ -1117,17 +1122,7 @@ function ProofUploadsSection({
   );
 }
 
-function WantedSlot({
-  pokemonId,
-  hue,
-  name,
-  onRemove,
-}: {
-  pokemonId: number;
-  hue: number;
-  name: string;
-  onRemove?: () => void;
-}) {
+function WantedSlot({ creature, onRemove }: { creature: CreatureRef; onRemove?: () => void }) {
   return (
     <View
       className="relative aspect-square flex-1 items-center justify-center rounded-xl border p-2.5"
@@ -1136,18 +1131,18 @@ function WantedSlot({
       <Pressable
         onPress={onRemove}
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${name}`}
+        accessibilityLabel={`Remove ${creature.name}`}
         className="absolute right-1 top-1 h-[18px] w-[18px] items-center justify-center rounded-full border active:opacity-70"
         style={{ backgroundColor: '#0a0a0f', borderColor: C.borderDefault }}
       >
         <X size={10} color={C.textSecondary} strokeWidth={3} />
       </Pressable>
-      <Chip pokemonId={pokemonId} hue={hue} size={36} />
+      <Chip creature={creature} size={36} />
       <Text className="mt-1.5" numberOfLines={1} style={{ fontSize: 11, fontWeight: '600', color: C.textPrimary }}>
-        {name}
+        {creature.name}
       </Text>
       <Text className="font-mono" style={{ fontSize: 9, color: C.textMuted }}>
-        {dexLabel(pokemonId)}
+        {dexLabel(creature.pokemonId)}
       </Text>
     </View>
   );
@@ -1160,7 +1155,9 @@ function WantedInReturn({
 }: {
   wanted: CreatureRef[];
   onAddWanted?: () => void;
-  onRemoveWanted?: (pokemonId: number) => void;
+  /** Keyed by `spriteVariantKey(spriteVariantOf(...))`, not `pokemonId` — a shiny and non-shiny entry
+   *  for the same species are distinct wanted slots (see `handlePickPokemon`'s dedupe). */
+  onRemoveWanted?: (variantKey: string) => void;
 }) {
   return (
     <View>
@@ -1190,15 +1187,10 @@ function WantedInReturn({
         </Pressable>
       ) : (
         <View className="flex-row gap-2">
-          {wanted.map((w) => (
-            <WantedSlot
-              key={w.pokemonId}
-              pokemonId={w.pokemonId}
-              hue={w.hue}
-              name={w.name}
-              onRemove={() => onRemoveWanted?.(w.pokemonId)}
-            />
-          ))}
+          {wanted.map((w) => {
+            const key = spriteVariantKey(spriteVariantOf(w));
+            return <WantedSlot key={key} creature={w} onRemove={() => onRemoveWanted?.(key)} />;
+          })}
           {wanted.length < 3 && (
             <Pressable
               onPress={onAddWanted}

@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { Text, View } from 'react-native';
 
-import { COLORS } from '@/constants/theme';
+import { COLORS, GO_SPRITE_ZOOM } from '@/constants/theme';
 import {
   CARD_PADDING,
   CARD_WIDTH,
@@ -19,6 +19,7 @@ import {
   type TradeListSection,
 } from '@/constants/trade-list-layout';
 import type { CreatureRef } from '@/data/types';
+import { spriteVariantOf } from '@/lib/sprite-url';
 import { useSpriteSource } from '@/lib/use-sprite-source';
 
 /** How long a slow or dead sprite host gets before the export gives up waiting on it — see `onReady`. */
@@ -220,10 +221,7 @@ function hueSolidColor(hue: number): string {
 }
 
 function CreatureTile({ creature, onSettled }: { creature: CreatureRef; onSettled: () => void }) {
-  const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource({
-    pokemonId: creature.pokemonId,
-    shiny: creature.shiny,
-  });
+  const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource(spriteVariantOf(creature));
   const settledRef = useRef(false);
   // A tile settles once — either its sprite (some candidate in the fallback chain) actually loads, or
   // every candidate has failed — never on an intermediate `onError` that just advances to the next one.
@@ -260,7 +258,11 @@ function CreatureTile({ creature, onSettled }: { creature: CreatureRef; onSettle
         <Image
           source={{ uri: uri ?? undefined }}
           recyclingKey={uri}
-          style={{ width: GRID_TILE_SIZE * 0.78, height: GRID_TILE_SIZE * 0.78 }}
+          style={{
+            width: GRID_TILE_SIZE * 0.78,
+            height: GRID_TILE_SIZE * 0.78,
+            transform: [{ scale: GO_SPRITE_ZOOM }],
+          }}
           contentFit="contain"
           onLoad={onLoad}
           onError={onError}

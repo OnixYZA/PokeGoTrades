@@ -14,7 +14,9 @@ interface ChatGroupHeaderProps {
 export function ChatGroupHeader({ listing, offerCount, locked }: ChatGroupHeaderProps) {
   return (
     <View className="flex-row items-center gap-2.5 px-1.5 pb-2.5 pt-1.5">
-      <Chip pokemonId={listing.pokemonId} hue={listing.hue} shiny={listing.shiny} size={34} />
+      {/* `lucky: false` — this header never showed a lucky marker before; Listing.lucky is always a
+       *  real boolean (never optional), so passing it through as-is would newly draw an "L" badge here. */}
+      <Chip creature={{ ...listing, lucky: false }} size={34} />
       <View className="min-w-0 flex-1">
         <Text className="font-display-semi text-text-primary" style={{ fontSize: 13 }}>
           {listing.name}

@@ -19,7 +19,7 @@ export function FormalOfferCard({ offer = formalOffer }: { offer?: FormalOffer }
         Formal Offer
       </Text>
       <View className="flex-row items-center gap-2.5">
-        <Chip pokemonId={offer.pokemonId} hue={offer.hue} shiny={offer.shiny} lucky={lucky} size={40} />
+        <Chip creature={{ ...offer, lucky }} size={40} />
         <View>
           <Text className="font-display-semi text-text-primary" style={{ fontSize: 13 }}>
             {offer.name}

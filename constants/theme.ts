@@ -10,6 +10,16 @@ import type { FriendshipLabel } from '@/data/types';
 
 import { gradient } from './gradient';
 
+/**
+ * How much `Sprite`/`Chip`/`TradeListCard`'s `CreatureTile` scale up the sprite `Image` before it's
+ * clipped to its tile. The PokeMiners-mirrored GO icons (`lib/sprite-url.ts`) carry noticeably more
+ * transparent padding around the creature than the old artwork these tiles were originally sized for,
+ * so drawn at 1x they read as small and off-center; zooming the image itself (never the tile, the
+ * background underlay, or the initial-letter placeholder — see each component's no-bleed wrapper)
+ * closes that gap without touching any of the surrounding layout math.
+ */
+export const GO_SPRITE_ZOOM = 1.3;
+
 export const COLORS = {
   bgBase: '#050810',
   bgCanvas: '#080b14',
@@ -101,11 +111,15 @@ export function hueDiscBg(hue: number): ViewStyle {
   };
 }
 
-export function hueDiscGlow(hue: number, shiny: boolean): ViewStyle {
+/**
+ * The glow every creature disc gets, shiny or not — outer bloom plus an inset rim. This used to take a
+ * `shiny` flag and fall back to a dull inset-only rim when it was `false`, which read as "the app
+ * thinks this Pokémon is boring" for the vast majority of listings/chips (almost everything isn't
+ * shiny). Every creature gets the vibrant recipe now — the ✦ badge is the one and only shiny marker.
+ */
+export function hueDiscGlow(hue: number): ViewStyle {
   return {
-    boxShadow: shiny
-      ? `0 0 18px hsla(${hue},90%,65%,.45), inset 0 0 20px hsla(${hue},80%,55%,.35)`
-      : `inset 0 0 24px hsla(${hue},50%,35%,.5)`,
+    boxShadow: `0 0 18px hsla(${hue},90%,65%,.45), inset 0 0 20px hsla(${hue},80%,55%,.35)`,
   };
 }
 
@@ -116,11 +130,10 @@ export function hueChipBg(hue: number): ViewStyle {
   };
 }
 
-export function hueChipGlow(hue: number, shiny: boolean): ViewStyle {
+/** The Chip-sized twin of `hueDiscGlow` — same "always vibrant" rule, see that function's comment. */
+export function hueChipGlow(hue: number): ViewStyle {
   return {
-    boxShadow: shiny
-      ? `0 0 14px hsla(${hue},90%,60%,.4), inset 0 1px 0 hsla(${hue},90%,70%,.5)`
-      : `inset 0 1px 0 hsla(${hue},80%,60%,.35)`,
+    boxShadow: `0 0 14px hsla(${hue},90%,60%,.4), inset 0 1px 0 hsla(${hue},90%,70%,.5)`,
   };
 }
 

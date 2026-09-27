@@ -27,6 +27,40 @@ export interface SpriteVariant {
 }
 
 /**
+ * The shape every creature-ish value in the app already carries (`CreatureRef`, `FormalOffer`, a
+ * `PokedexEntry` plus a shiny flag, ...) — `formCode`/`costumeCode` are the app-facing field names
+ * (`data/types.ts`), distinct from `SpriteVariant`'s `form`/`costume`, which are this module's own
+ * internal naming carried over from before those app-facing fields existed. `spriteVariantOf` is the
+ * one place that translates between the two, so nothing else has to know they're different names for
+ * the same PokeMiners code.
+ */
+export interface SpriteSubject {
+  pokemonId: number;
+  shiny?: boolean;
+  formCode?: string | null;
+  costumeCode?: string | null;
+}
+
+/** `SpriteSubject` (app-facing field names) -> `SpriteVariant` (this module's field names). The only
+ *  place that mapping happens, so a caller never hand-rolls `{ form: creature.formCode, ... }` itself. */
+export function spriteVariantOf(subject: SpriteSubject): SpriteVariant {
+  return {
+    pokemonId: subject.pokemonId,
+    shiny: subject.shiny,
+    form: subject.formCode,
+    costume: subject.costumeCode,
+  };
+}
+
+/** A stable primitive key for `useMemo`/state-reset purposes — callers routinely pass a fresh
+ *  `{ pokemonId, shiny, ... }` object literal every render, so identity can't be the dependency.
+ *  Also doubles as the "same species+variant" comparison for `PokemonPickerModal`'s exclude set: two
+ *  shiny/non-shiny (or form/costume) variants of the same species produce different keys on purpose. */
+export function spriteVariantKey(v: SpriteVariant): string {
+  return `${v.pokemonId}:${v.shiny ? 1 : 0}:${v.form ?? ''}:${v.costume ?? ''}`;
+}
+
+/**
  * A form/costume code is only ever safe to fold into a storage key if it is the bare token PokeMiners
  * itself uses — `[A-Z0-9_]+`, underscores included (`JAN_2020_NOEVOLVE`, `ALOLA`). Upstream is not
  * perfectly consistent about this (a live checkout of PokeMiners/pogo_assets turned up

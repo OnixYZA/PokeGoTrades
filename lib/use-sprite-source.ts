@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 
-import { spriteCandidates, type SpriteVariant } from './sprite-url';
+import { spriteCandidates, spriteVariantKey, type SpriteVariant } from './sprite-url';
 
 /** How long a known-404 stays in the negative cache before a fresh attempt is allowed again — long
  *  enough that a feed/grid full of the same un-mirrored variant doesn't hammer Storage with repeat
@@ -30,12 +30,6 @@ function firstLiveIndex(candidates: readonly string[], from: number): number {
   return i;
 }
 
-/** A stable primitive key for `useMemo`/state-reset purposes — callers routinely pass a fresh
- *  `{ pokemonId, shiny, ... }` object literal every render, so identity can't be the dependency. */
-function variantKey(v: SpriteVariant): string {
-  return `${v.pokemonId}:${v.shiny ? 1 : 0}:${v.form ?? ''}:${v.costume ?? ''}`;
-}
-
 export interface SpriteSource {
   /** The candidate to hand `expo-image` right now, or `null` once every candidate has failed. */
   uri: string | null;
@@ -57,12 +51,12 @@ interface State {
 /**
  * Walks `spriteCandidates(variant)` (`lib/sprite-url.ts`) from most to least specific, advancing past
  * a candidate on `onError` until one loads or the list runs out. Candidates are recomputed only when
- * `variant`'s actual fields change (see `variantKey`, not object identity), and the walk restarts from
- * the top whenever that key changes — so switching which Pokémon a tile shows never gets stuck
+ * `variant`'s actual fields change (see `spriteVariantKey`, not object identity), and the walk restarts
+ * from the top whenever that key changes — so switching which Pokémon a tile shows never gets stuck
  * mid-fallback for the previous one.
  */
 export function useSpriteSource(variant: SpriteVariant): SpriteSource {
-  const key = variantKey(variant);
+  const key = spriteVariantKey(variant);
   const candidates = useMemo(() => spriteCandidates(variant), [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [state, setState] = useState<State>(() => ({ key, index: firstLiveIndex(candidates, 0), loaded: false }));

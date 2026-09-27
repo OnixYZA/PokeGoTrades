@@ -4,18 +4,15 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { findPokemon } from '@/constants/pokedex';
-import { hueDiscBg, hueDiscGlow } from '@/constants/theme';
-import { backgroundObjectKey, storagePublicUrl } from '@/lib/sprite-url';
+import { GO_SPRITE_ZOOM, hueDiscBg, hueDiscGlow } from '@/constants/theme';
+import { backgroundObjectKey, spriteVariantOf, storagePublicUrl, type SpriteSubject } from '@/lib/sprite-url';
 import { useSpriteSource } from '@/lib/use-sprite-source';
 
 interface SpriteProps {
-  pokemonId: number;
-  hue: number;
-  shiny?: boolean;
-  /** Regional/mega/gigantamax/size form code (`lib/sprite-url.ts`, e.g. `'ALOLA'`). */
-  form?: string | null;
-  /** Event costume code (`lib/sprite-url.ts`, e.g. `'JAN_2020_NOEVOLVE'`). */
-  costume?: string | null;
+  /** Everything this tile needs to resolve a sprite — the app's `CreatureRef`/`FormalOffer` (plus a
+   *  computed `lucky` where a caller needs it) already have this shape. `Sprite` itself never draws a
+   *  lucky marker, so `lucky` isn't part of this prop the way it is for `Chip`. */
+  creature: SpriteSubject & { hue: number };
   /** Cleansed-from-Shadow overlay badge. Never a sprite key (R3): Purified never changes which image
    *  loads, only whether this badge is drawn on top of it. */
   purified?: boolean;
@@ -27,27 +24,20 @@ interface SpriteProps {
 /** Circular hue-tinted sprite tile — the marketplace card / detail-sheet hero creature. Layers, bottom
  *  to top: hue disc -> background underlay -> initial-letter placeholder -> sprite -> shiny/purified
  *  badges. */
-export function Sprite({
-  pokemonId,
-  hue,
-  shiny = false,
-  form = null,
-  costume = null,
-  purified = false,
-  background = null,
-  size = 72,
-}: SpriteProps) {
-  const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource({ pokemonId, shiny, form, costume });
+export function Sprite({ creature, purified = false, background = null, size = 72 }: SpriteProps) {
+  const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource(spriteVariantOf(creature));
 
   const bgKey = background != null ? backgroundObjectKey(background) : null;
   const bgUrl = bgKey ? storagePublicUrl(bgKey) : null;
+  // The inner clip radius for this tile's `borderWidth: 1` circle — see the no-bleed wrapper below.
+  const innerRadius = size / 2 - 1;
 
   return (
     <View
       style={[
         { width: size, height: size, borderRadius: size / 2, borderWidth: 1 },
-        hueDiscBg(hue),
-        hueDiscGlow(hue, shiny),
+        hueDiscBg(creature.hue),
+        hueDiscGlow(creature.hue),
       ]}
       className="shrink-0 items-center justify-center"
     >
@@ -61,25 +51,37 @@ export function Sprite({
         accessibilityElementsHidden
         importantForAccessibility="no"
       >
-        {findPokemon(pokemonId)?.name.charAt(0) ?? '?'}
+        {findPokemon(creature.pokemonId)?.name.charAt(0) ?? '?'}
       </Text>
 
-      {uri && (
-        <Image
-          source={{ uri }}
-          recyclingKey={uri}
-          style={{ width: size * 0.72, height: size * 0.72 }}
-          contentFit="contain"
-          transition={150}
-          onLoad={onLoad}
-          onError={onError}
-          accessibilityIgnoresInvertColors
-          alt={`Pokemon ${pokemonId} sprite`}
-          accessibilityLabel={`Pokemon ${pokemonId} sprite`}
-        />
-      )}
+      {/* No-bleed wrapper: ONLY the sprite image is scaled by GO_SPRITE_ZOOM and clipped, inset to the
+       *  disc's own borderWidth so its rounded corners land on the inner edge, not the outer one. The
+       *  outer disc above stays unclipped (`overflow: 'hidden'` never goes there) — the shiny/purified
+       *  badges below are deliberately drawn at `-4` offsets OUTSIDE the circle (see
+       *  `BackgroundUnderlay`'s comment), and clipping the outer disc would cut both of them off. They
+       *  render as siblings after this wrapper, so they stay on top of it either way. */}
+      <View
+        pointerEvents="none"
+        className="items-center justify-center"
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: innerRadius, overflow: 'hidden' }}
+      >
+        {uri && (
+          <Image
+            source={{ uri }}
+            recyclingKey={uri}
+            style={{ width: size * 0.72, height: size * 0.72, transform: [{ scale: GO_SPRITE_ZOOM }] }}
+            contentFit="contain"
+            transition={150}
+            onLoad={onLoad}
+            onError={onError}
+            accessibilityIgnoresInvertColors
+            alt={`Pokemon ${creature.pokemonId} sprite`}
+            accessibilityLabel={`Pokemon ${creature.pokemonId} sprite`}
+          />
+        )}
+      </View>
 
-      {shiny && (
+      {creature.shiny && (
         <View
           className="absolute items-center justify-center"
           style={{

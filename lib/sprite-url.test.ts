@@ -11,6 +11,8 @@ import {
   isSpriteCode,
   spriteCandidates,
   spriteObjectKey,
+  spriteVariantKey,
+  spriteVariantOf,
   storagePublicUrl,
 } from './sprite-url';
 
@@ -102,6 +104,47 @@ describe('storagePublicUrl / getSpriteUrl', () => {
     expect(storagePublicUrl('pokemon/25.png')).toBe(
       'https://example.supabase.co/storage/v1/object/public/sprites/pokemon/25.png',
     );
+  });
+});
+
+describe('spriteVariantOf', () => {
+  it('maps formCode/costumeCode to form/costume, carrying pokemonId and shiny through unchanged', () => {
+    expect(spriteVariantOf({ pokemonId: 386, shiny: true, formCode: 'ATTACK', costumeCode: null })).toEqual({
+      pokemonId: 386,
+      shiny: true,
+      form: 'ATTACK',
+      costume: null,
+    });
+  });
+
+  it('leaves shiny/formCode/costumeCode undefined when the subject omits them', () => {
+    expect(spriteVariantOf({ pokemonId: 1 })).toEqual({
+      pokemonId: 1,
+      shiny: undefined,
+      form: undefined,
+      costume: undefined,
+    });
+  });
+});
+
+describe('spriteVariantKey', () => {
+  it('is stable for structurally-equal variants (identity does not matter)', () => {
+    expect(spriteVariantKey({ pokemonId: 25, shiny: true })).toBe(spriteVariantKey({ pokemonId: 25, shiny: true }));
+  });
+
+  it('differs between a shiny and non-shiny variant of the same species', () => {
+    expect(spriteVariantKey({ pokemonId: 25, shiny: true })).not.toBe(spriteVariantKey({ pokemonId: 25 }));
+  });
+
+  it('differs between form/costume variants of the same species', () => {
+    const base = spriteVariantKey({ pokemonId: 386 });
+    const attack = spriteVariantKey({ pokemonId: 386, form: 'ATTACK' });
+    const attackCostume = spriteVariantKey({ pokemonId: 386, form: 'ATTACK', costume: 'X' });
+    expect(new Set([base, attack, attackCostume]).size).toBe(3);
+  });
+
+  it('treats a missing form/costume the same as an explicit empty string in the key shape', () => {
+    expect(spriteVariantKey({ pokemonId: 1 })).toBe('1:0::');
   });
 });
 

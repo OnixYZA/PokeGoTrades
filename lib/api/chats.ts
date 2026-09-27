@@ -50,7 +50,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function toFormalOffer(value: Json | null | undefined): FormalOffer | undefined {
   if (!isRecord(value)) return undefined;
-  const { name, pokemonId, hue, iv, move, shiny, lucky } = value;
+  const { name, pokemonId, hue, iv, move, shiny, lucky, formCode, costumeCode } = value;
   if (typeof name !== 'string' || typeof pokemonId !== 'number' || typeof hue !== 'number') return undefined;
   return {
     name,
@@ -60,10 +60,16 @@ function toFormalOffer(value: Json | null | undefined): FormalOffer | undefined 
     ...(typeof move === 'string' ? { move } : {}),
     ...(shiny === true ? { shiny } : {}),
     ...(lucky === true ? { lucky } : {}),
+    // See `CreatureRef.formCode`/`costumeCode` (data/types.ts): only a non-empty string counts.
+    ...(typeof formCode === 'string' && formCode.length > 0 ? { formCode } : {}),
+    ...(typeof costumeCode === 'string' && costumeCode.length > 0 ? { costumeCode } : {}),
   };
 }
 
-/** A creature as the `offer` jsonb `formal_offer_is_valid()` accepts. Only the allowed keys, so nothing else leaks in. */
+/** A creature as the `offer` jsonb `formal_offer_is_valid()` accepts. Only the allowed keys, so nothing
+ *  else leaks in — `formCode`/`costumeCode` omitted (never sent as an explicit JSON `null`) when the
+ *  offer doesn't carry one, same rule `lib/api/creature-ref.ts`'s `creatureRefToJson` follows for
+ *  `CreatureRef`, since `formal_offer_is_valid` rejects a literal `null` for either key too. */
 export function offerToJson(offer: FormalOffer): Json {
   return {
     name: offer.name,
@@ -73,6 +79,8 @@ export function offerToJson(offer: FormalOffer): Json {
     ...(offer.lucky ? { lucky: true } : {}),
     ...(offer.iv ? { iv: offer.iv } : {}),
     ...(offer.move ? { move: offer.move } : {}),
+    ...(offer.formCode != null ? { formCode: offer.formCode } : {}),
+    ...(offer.costumeCode != null ? { costumeCode: offer.costumeCode } : {}),
   };
 }
 
@@ -83,6 +91,8 @@ export function creatureToOffer(creature: CreatureRef): FormalOffer {
     hue: creature.hue,
     ...(creature.shiny ? { shiny: true } : {}),
     ...(creature.lucky ? { lucky: true } : {}),
+    ...(creature.formCode != null ? { formCode: creature.formCode } : {}),
+    ...(creature.costumeCode != null ? { costumeCode: creature.costumeCode } : {}),
   };
 }
 

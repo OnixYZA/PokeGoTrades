@@ -164,7 +164,11 @@ export interface ChatSeed extends Chat {
 export interface TradeHistoryEntry {
   id: string;
   gave: CreatureRef;
-  got: CreatureRef;
+  /** `null` when the trade's other side was negotiated in chat with no formal offer recorded
+   *  (`completed_trades.seller_gave`/`buyer_gave` — one of the two is nullable per row; see
+   *  `my_trade_history`'s definition) — a real, common outcome, not a parse failure. `TradeHistoryGrid`
+   *  renders a neutral placeholder tile for it instead of a second creature. */
+  got: CreatureRef | null;
   partner: string;
   date: string;
 }

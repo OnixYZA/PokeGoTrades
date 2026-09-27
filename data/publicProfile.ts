@@ -1,3 +1,5 @@
+import { formatTradeDate } from '@/lib/format';
+
 import type { CreatureRef, Trainer } from './types';
 import { locations } from './listings';
 
@@ -52,7 +54,7 @@ function pickMany<T>(pool: T[], seed: number, offset: number, count: number): T[
 function formatMonthsAgo(monthsAgo: number): string {
   const d = new Date();
   d.setMonth(d.getMonth() - monthsAgo);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatTradeDate(d);
 }
 
 export function buildPublicTrainerProfile(handle: string): Trainer {
