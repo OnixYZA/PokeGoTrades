@@ -106,6 +106,14 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [willTravel, setWillTravel] = useState(false);
   const [pokeball, setPokeball] = useState<Pokeball | null>(null);
   const [tradeTimeline, setTradeTimeline] = useState<TradeTimeline>('flexible');
+  // `iv_atk`/`iv_def`/`iv_sta` are seller-declared (migration …000200_tables.sql:
+  // `listings_iv_all_or_none`), read straight off the trainer's in-game Appraise screen — not
+  // something OCR extracts. `knowsIv` off keeps `draft.iv` at 'Unrated', matching the DB's
+  // all-null default; on, all three steppers are sent together.
+  const [knowsIv, setKnowsIv] = useState(false);
+  const [ivAtk, setIvAtk] = useState(0);
+  const [ivDef, setIvDef] = useState(0);
+  const [ivSta, setIvSta] = useState(0);
   // Empty until the seller actually picks something — see PokemonPickerModal below; the DB's
   // `creature_ref_array_is_valid(looking, 3)` accepts an empty array, so there's no default to fill.
   const [wanted, setWanted] = useState<CreatureRef[]>([]);
@@ -145,7 +153,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       bg,
       loc: filterLocation,
       tradeType,
-      iv: 'Unrated',
+      iv: knowsIv ? `${ivAtk}/${ivDef}/${ivSta}` : 'Unrated',
       looking,
       tags: selectedTags,
       notes: notes.trim() || undefined,
@@ -167,6 +175,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     pokeball,
     willTravel,
     tradeTimeline,
+    knowsIv,
+    ivAtk,
+    ivDef,
+    ivSta,
     wanted,
     filterLocation,
     selectedTags,
@@ -348,6 +360,16 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           onToggleCostume={() => setCostume((v) => !v)}
           willTravel={willTravel}
           onToggleWillTravel={() => setWillTravel((v) => !v)}
+        />
+        <IvSpreadSection
+          knowsIv={knowsIv}
+          onToggleKnowsIv={() => setKnowsIv((v) => !v)}
+          ivAtk={ivAtk}
+          ivDef={ivDef}
+          ivSta={ivSta}
+          onChangeAtk={setIvAtk}
+          onChangeDef={setIvDef}
+          onChangeSta={setIvSta}
         />
         <LogisticsSection
           pokeball={pokeball}
@@ -625,6 +647,103 @@ function AttributesCard({
           isLast
         />
       </View>
+    </View>
+  );
+}
+
+/** One ATK/DEF/STA stepper, clamped to the DB's `between 0 and 15` check — there's no way to type an
+ *  out-of-range or non-integer value in through +/- buttons, so `parseIv` on the write path can never
+ *  reject what this section produces. */
+function IvStepper({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  return (
+    <View
+      className="flex-1 items-center gap-1.5 rounded-[14px] border py-3"
+      style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+    >
+      <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
+        {label}
+      </Text>
+      <View className="flex-row items-center gap-3">
+        <Pressable
+          onPress={() => onChange(Math.max(0, value - 1))}
+          accessibilityRole="button"
+          accessibilityLabel={`Decrease ${label}`}
+          className="h-7 w-7 items-center justify-center rounded-full border active:opacity-70"
+          style={{ borderColor: C.borderDefault }}
+        >
+          <Text style={{ fontSize: 16, lineHeight: 16, color: C.textSecondary, fontWeight: '700' }}>−</Text>
+        </Pressable>
+        <Text className="font-display" style={{ fontSize: 18, color: C.textPrimary, minWidth: 22, textAlign: 'center' }}>
+          {value}
+        </Text>
+        <Pressable
+          onPress={() => onChange(Math.min(15, value + 1))}
+          accessibilityRole="button"
+          accessibilityLabel={`Increase ${label}`}
+          className="h-7 w-7 items-center justify-center rounded-full border active:opacity-70"
+          style={{ borderColor: C.borderDefault }}
+        >
+          <Text style={{ fontSize: 16, lineHeight: 16, color: C.textSecondary, fontWeight: '700' }}>+</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** The `iv_atk`/`iv_def`/`iv_sta` columns (migration …000200_tables.sql) are seller-declared, read off
+ *  the trainer's own in-game Appraise screen — nothing here is extracted by OCR (that's the Appraisal
+ *  *proof upload* below, which only backs a Lucky/catch-date/size claim). `knowsIv` off keeps every
+ *  listing 'Unrated' by default, matching the DB's all-or-none null columns. */
+function IvSpreadSection({
+  knowsIv,
+  onToggleKnowsIv,
+  ivAtk,
+  ivDef,
+  ivSta,
+  onChangeAtk,
+  onChangeDef,
+  onChangeSta,
+}: {
+  knowsIv: boolean;
+  onToggleKnowsIv: () => void;
+  ivAtk: number;
+  ivDef: number;
+  ivSta: number;
+  onChangeAtk: (value: number) => void;
+  onChangeDef: (value: number) => void;
+  onChangeSta: (value: number) => void;
+}) {
+  return (
+    <View>
+      <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+        IV SPREAD (OPTIONAL)
+      </Text>
+      <Pressable
+        onPress={onToggleKnowsIv}
+        accessibilityRole="switch"
+        accessibilityLabel="I know my Pokémon's IVs"
+        accessibilityState={{ checked: knowsIv }}
+        className="mb-2.5 flex-row items-center justify-between rounded-[14px] border px-4 py-3.5 active:opacity-80"
+        style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+      >
+        <View className="flex-1 pr-3">
+          <Text style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>I know my IVs</Text>
+          <Text style={{ fontSize: 12, color: C.textMuted, marginTop: 1 }}>From the in-game Appraise screen</Text>
+        </View>
+        <View
+          className="relative rounded-full"
+          style={[{ width: 44, height: 24 }, knowsIv ? MODAL_SURFACE.toggleGold : { backgroundColor: C.borderDefault }]}
+        >
+          <ToggleKnob on={knowsIv} />
+        </View>
+      </Pressable>
+      {knowsIv && (
+        <View className="flex-row gap-2.5">
+          <IvStepper label="ATK" value={ivAtk} onChange={onChangeAtk} />
+          <IvStepper label="DEF" value={ivDef} onChange={onChangeDef} />
+          <IvStepper label="STA" value={ivSta} onChange={onChangeSta} />
+        </View>
+      )}
     </View>
   );
 }
