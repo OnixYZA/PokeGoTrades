@@ -1,19 +1,23 @@
 import type { Listing } from './types';
 
 // Ported verbatim from the design handoff prototype (Trade Hub.dc.html), with a `pokemonId`
-// added to each creature reference for real sprite lookup. Most are national dex numbers, but a
-// few carry a PokéAPI form id instead — see the per-entry notes below.
+// added to each creature reference for real sprite lookup. Every `pokemonId` here is the TRUE
+// national dex number — never a PokéAPI synthetic form id (project rule: no PokéAPI anywhere,
+// AGENTS.md) — with a PokeMiners `formCode` alongside it where the form/costume needs its own
+// sprite. Sprites render from our own Supabase `sprites` bucket, keyed by dex id + formCode
+// (`lib/sprite-url.ts` `spriteObjectKey`), never from PokéAPI or raw.githubusercontent.com.
 //
-// Not every named form has one: "Apex"/"Shadow" costumes and "Legacy" move availability are
-// Pokémon GO-only concepts with no PokéAPI entry (Niantic's own asset, not in the open dataset),
-// so those fall back to the base species' official artwork until a licensed sprite pack covers
-// them. Mainline-game forms (crowned/primal/origin/mega/attack-forme) do have their own PokéAPI
-// ids and are wired up below.
+// Not every named form has a mapped code: "Apex" is a Pokémon GO-only concept, and while a
+// `249/250.fS` sprite exists in the bucket, we can't confirm it maps to "Apex" specifically, so
+// those listings carry no `formCode` and fall back to the base species' sprite until that's
+// verified. Mainline-game forms (crowned/primal/origin/mega/attack-forme) DO have verified codes
+// and are wired up below.
 export const listings: Listing[] = [
   {
     id: 'l1',
     name: 'Shiny Zacian',
-    pokemonId: 10188, // zacian-crowned (PokéAPI form id, not the national dex number)
+    pokemonId: 888,
+    formCode: 'CROWNED_SWORD',
     form: 'Crowned Sword',
     year: 2020,
     lucky: true,
@@ -43,7 +47,8 @@ export const listings: Listing[] = [
   {
     id: 'l2',
     name: 'Armored Mewtwo',
-    pokemonId: 150, // Armored is a Pokémon GO-exclusive costume; PokéAPI has no such variety
+    pokemonId: 150,
+    formCode: 'A', // Armored is a Pokémon GO-exclusive costume; 'A' is PokeMiners' own code for it
     form: 'Genesis Armor',
     year: 2019,
     lucky: true,
@@ -60,7 +65,7 @@ export const listings: Listing[] = [
     looking: [
       { name: 'Legacy Dragonite', pokemonId: 149, hue: 340 },
       { name: 'Purified Ho-Oh', pokemonId: 250, hue: 25 },
-      { name: 'Shiny Deoxys A.', pokemonId: 10001, hue: 220, shiny: true, lucky: true }, // deoxys-attack
+      { name: 'Shiny Deoxys A.', pokemonId: 386, formCode: 'ATTACK', hue: 220, shiny: true, lucky: true },
     ],
     tags: ['Legacy Move', 'Community Day'],
     purified: false,
@@ -90,7 +95,7 @@ export const listings: Listing[] = [
     looking: [
       { name: 'Shiny Kyogre', pokemonId: 382, hue: 340, shiny: true },
       { name: 'Shiny Groudon', pokemonId: 383, hue: 25, shiny: true },
-      { name: 'Origin Palkia', pokemonId: 10246, hue: 220, lucky: true }, // palkia-origin
+      { name: 'Origin Palkia', pokemonId: 484, formCode: 'ORIGIN', hue: 220, lucky: true },
     ],
     tags: ['PvP Ready', 'Hundo IV'],
     purified: false,
@@ -119,7 +124,7 @@ export const listings: Listing[] = [
     iv: '14/14/15',
     looking: [
       { name: 'Purified Lugia', pokemonId: 249, hue: 340 },
-      { name: 'Mega Rayquaza IV', pokemonId: 10079, hue: 25 }, // rayquaza-mega
+      { name: 'Mega Rayquaza IV', pokemonId: 384, formCode: 'MEGA', hue: 25 },
       { name: 'Shiny Entei', pokemonId: 244, hue: 220, shiny: true, lucky: true },
     ],
     tags: ['Raid Exclusive'],
@@ -179,7 +184,7 @@ export const listings: Listing[] = [
     iv: '15/15/15',
     looking: [
       { name: 'Purified Apex Ho-Oh', pokemonId: 250, hue: 340 },
-      { name: 'Primal Groudon', pokemonId: 10078, hue: 25 }, // groudon-primal
+      { name: 'Primal Groudon', pokemonId: 383, formCode: 'PRIMAL', hue: 25 },
       { name: 'Shiny Mew', pokemonId: 151, hue: 220, shiny: true, lucky: true },
     ],
     tags: [],

@@ -72,49 +72,52 @@ update public.profiles set trades_count = 214 where id = 'a0000000-0000-4000-800
 --    year -> catch_year, iv 'a/b/c' -> three smallints, pvp/demand -> rank columns, dist dropped (D3).
 --    l1 seller is DriftCoral (see header). l3 is locked further down, together with its trade_locks row.
 -- ============================================================================================
+-- pokemon_id is the true national dex id everywhere below; a form with no PokeMiners sprite code
+-- yet (e.g. 'Apex') leaves form_code null and falls back to the base-species sprite (see the
+-- ...000500_creature_form_codes migration header for why 'Apex' specifically stays unmapped).
 insert into public.listings (
-  id, seller_id, name, pokemon_id, form, catch_year, lucky, shiny, hue, accent, bg, loc,
+  id, seller_id, name, pokemon_id, form, form_code, catch_year, lucky, shiny, hue, accent, bg, loc,
   pvp_rank, demand_rank, trade_type, iv_atk, iv_def, iv_sta, looking) values
   ('b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001',
-   'Shiny Zacian', 10188, 'Crowned Sword', 2020, true, true, 260, '#c9a6ff', 'meta', 'Adyar',
+   'Shiny Zacian', 888, 'Crowned Sword', 'CROWNED_SWORD', 2020, true, true, 260, '#c9a6ff', 'meta', 'Adyar',
    'S+', '#1', 'Unregistered (Shiny/Legendary)', 15, 15, 14,
    '[{"name":"Shiny Zamazenta","pokemonId":889,"hue":340,"shiny":true},
      {"name":"Purified Apex Lugia","pokemonId":249,"hue":25},
      {"name":"Legacy Mewtwo","pokemonId":150,"hue":220,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000003',
-   'Armored Mewtwo', 150, 'Genesis Armor', 2019, true, false, 210, '#7fd4ff', 'legacy', 'Adyar',
+   'Armored Mewtwo', 150, 'Genesis Armor', 'A', 2019, true, false, 210, '#7fd4ff', 'legacy', 'Adyar',
    'A', '#4', 'Special (Shiny/Legendary) Registered', 14, 15, 15,
    '[{"name":"Legacy Dragonite","pokemonId":149,"hue":340},
      {"name":"Purified Ho-Oh","pokemonId":250,"hue":25},
-     {"name":"Shiny Deoxys A.","pokemonId":10001,"hue":220,"shiny":true,"lucky":true}]'::jsonb),
+     {"name":"Shiny Deoxys A.","pokemonId":386,"formCode":"ATTACK","hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000004',
-   'Shiny Rayquaza', 384, 'Standard', 2023, false, true, 145, '#7dffb3', 'shiny', 'Adyar',
+   'Shiny Rayquaza', 384, 'Standard', null, 2023, false, true, 145, '#7dffb3', 'shiny', 'Adyar',
    'S', '#2', 'Special (Shiny/Legendary) Registered', 15, 15, 15,
    '[{"name":"Shiny Kyogre","pokemonId":382,"hue":340,"shiny":true},
      {"name":"Shiny Groudon","pokemonId":383,"hue":25,"shiny":true},
-     {"name":"Origin Palkia","pokemonId":10246,"hue":220,"lucky":true}]'::jsonb),
+     {"name":"Origin Palkia","pokemonId":484,"formCode":"ORIGIN","hue":220,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000005',
-   'Purified Ho-Oh', 250, 'Standard', 2022, false, false, 25, '#ffb37a', 'meta', 'East Tambaram',
+   'Purified Ho-Oh', 250, 'Standard', null, 2022, false, false, 25, '#ffb37a', 'meta', 'East Tambaram',
    'A+', '#7', 'Unregistered (Shiny/Legendary)', 14, 14, 15,
    '[{"name":"Purified Lugia","pokemonId":249,"hue":340},
-     {"name":"Mega Rayquaza IV","pokemonId":10079,"hue":25},
+     {"name":"Mega Rayquaza IV","pokemonId":384,"formCode":"MEGA","hue":25},
      {"name":"Shiny Entei","pokemonId":244,"hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000005', 'a0000000-0000-4000-8000-000000000006',
-   'Shiny Metagross', 376, 'Frostmoves', 2018, true, true, 195, '#a3e8ff', 'meta', 'East Tambaram',
+   'Shiny Metagross', 376, 'Frostmoves', null, 2018, true, true, 195, '#a3e8ff', 'meta', 'East Tambaram',
    'S', '#3', 'Special (Shiny/Legendary) Registered', 15, 13, 15,
    '[{"name":"Shiny Beldum Comm.","pokemonId":374,"hue":340,"shiny":true},
      {"name":"Shiny Larvitar","pokemonId":246,"hue":25,"shiny":true},
      {"name":"Shiny Bagon","pokemonId":371,"hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000006', 'a0000000-0000-4000-8000-000000000007',
-   'Purified Apex Lugia', 249, 'Apex', 2024, false, false, 285, '#d4b0ff', 'legacy', 'Velachery',
+   'Purified Apex Lugia', 249, 'Apex', null, 2024, false, false, 285, '#d4b0ff', 'legacy', 'Velachery',
    'A', '#5', 'Unregistered (Shiny/Legendary)', 15, 15, 15,
    '[{"name":"Purified Apex Ho-Oh","pokemonId":250,"hue":340},
-     {"name":"Primal Groudon","pokemonId":10078,"hue":25},
+     {"name":"Primal Groudon","pokemonId":383,"formCode":"PRIMAL","hue":25},
      {"name":"Shiny Mew","pokemonId":151,"hue":220,"shiny":true,"lucky":true}]'::jsonb);
 
 -- ============================================================================================

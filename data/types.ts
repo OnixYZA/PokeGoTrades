@@ -30,6 +30,14 @@ export interface CreatureRef {
   pokemonId: number;
   shiny?: boolean;
   lucky?: boolean;
+  /** PokeMiners sprite form code (`lib/sprite-url.ts` `spriteObjectKey`'s `.f{FORM}` layer), matching
+   *  `[A-Z0-9_]+` (e.g. `'CROWNED_SWORD'`, `'ALOLA'`). Distinct from `Listing.form`, which is free
+   *  display text like `'Crowned Sword'`. `null`/absent means the base species sprite. */
+  formCode?: string | null;
+  /** PokeMiners sprite costume code (`spriteObjectKey`'s `.c{COSTUME}` layer), same `[A-Z0-9_]+` shape
+   *  as `formCode` (e.g. `'JAN_2020_NOEVOLVE'`). Distinct from `Listing.costume`, which is only a
+   *  boolean "is this a costume" flag with no code of its own. */
+  costumeCode?: string | null;
 }
 
 /** Server-side lifecycle of a listing. The feed shows `open` and `locked`. */
@@ -93,6 +101,10 @@ export interface FormalOffer {
   /** Server offers carry these so the card stops guessing; the mock offers predate them. */
   shiny?: boolean;
   lucky?: boolean;
+  /** See `CreatureRef.formCode` — same PokeMiners sprite code, same `[A-Z0-9_]+` shape. */
+  formCode?: string | null;
+  /** See `CreatureRef.costumeCode` — same PokeMiners sprite code, same `[A-Z0-9_]+` shape. */
+  costumeCode?: string | null;
 }
 
 export type ChatStatus = 'open' | 'bailed' | 'completed' | 'closed';
