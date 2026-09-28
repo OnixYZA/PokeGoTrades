@@ -1,111 +1,98 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
-# deploy-aca.sh – Deploy workers/azure-ocr to Azure Container Apps
+# deploy-aca.sh – Build workers/azure-ocr and roll it out to its Azure Container App
+#
+# The infrastructure already exists (provisioned in the portal): the resource group, the ACR (admin user
+# disabled), the Container Apps environment, and the app itself, which pulls from ACR through its user-assigned
+# identity. This script never creates any of that — it builds an image, points the app at it, and refuses to
+# roll out onto an app whose Supabase wiring is missing or holds the service role key in plaintext.
 #
 # Prerequisites:
-#   • az CLI logged in        (az login)
-#   • Docker running locally  (docker info)
+#   • az CLI logged in                       (az login)
+#   • The app's secrets set once             (the preflight below prints the commands if they aren't)
 #
 # Usage:
-#   cd workers/azure-ocr
-#   bash deploy-aca.sh
-#
-# First run creates everything. Re-runs update the container.
+#   bash workers/azure-ocr/deploy-aca.sh
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
+cd "$(dirname "$0")"
 
 # ── Tunables ────────────────────────────────────────────────
-RESOURCE_GROUP="${ACA_RESOURCE_GROUP:-pokego-ocr-rg}"
-LOCATION="${ACA_LOCATION:-centralindia}"
-ACR_NAME="${ACA_ACR_NAME:-pokegoocrregistry}"
-ACA_ENV="${ACA_ENV_NAME:-pokego-ocr-env}"
-ACA_APP="${ACA_APP_NAME:-pokego-ocr-worker}"
-IMAGE_TAG="${ACA_IMAGE_TAG:-latest}"
+RESOURCE_GROUP="${ACA_RESOURCE_GROUP:-pgt-ocr-rg}"
+ACA_APP="${ACA_APP_NAME:-pgt-ocr-app}"
+ACR_NAME="${ACA_ACR_NAME:-pgtocr}"
+IMAGE_REPO="${ACA_IMAGE_REPO:-pgt-ocr}"
 # ────────────────────────────────────────────────────────────
 
-IMAGE="${ACR_NAME}.azurecr.io/${ACA_APP}:${IMAGE_TAG}"
+# A fresh tag per deploy: pointing the app at the same `:latest` string again leaves its revision template
+# unchanged, so there is nothing new to roll out. The same id names the new revision.
+DEPLOY_ID="v$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_REPO}:${DEPLOY_ID}"
 
-echo "═══ 1/6  Resource group ═══"
-az group create \
-  --name "$RESOURCE_GROUP" \
-  --location "$LOCATION" \
-  --output none
-
-echo "═══ 2/6  Container registry (ACR) ═══"
-az acr create \
+echo "═══ 1/3  Preflight ═══"
+# Names and secret refs only (`SUPABASE_URL=`, `SUPABASE_SERVICE_ROLE_KEY=service-role-key`, ...), never values.
+ENV_WIRING=$(az containerapp show \
+  --name "$ACA_APP" \
   --resource-group "$RESOURCE_GROUP" \
-  --name "$ACR_NAME" \
-  --sku Basic \
-  --admin-enabled true \
-  --output none 2>/dev/null || true   # idempotent
+  --query "properties.template.containers[0].env[].join('=', [name, secretRef || ''])" \
+  --output tsv)
 
-echo "═══ 3/6  Build & push image ═══"
-az acr build \
-  --registry "$ACR_NAME" \
-  --image "${ACA_APP}:${IMAGE_TAG}" \
-  --file Dockerfile \
-  .
+if ! grep -qx 'SUPABASE_URL=' <<<"$ENV_WIRING" \
+  || ! grep -qx 'SUPABASE_SERVICE_ROLE_KEY=service-role-key' <<<"$ENV_WIRING"; then
+  cat >&2 <<EOF
+$ACA_APP needs SUPABASE_URL set and SUPABASE_SERVICE_ROLE_KEY read from its 'service-role-key' secret
+(src/core/env.ts throws without them). Set them once, then re-run:
 
-echo "═══ 4/6  Container Apps environment ═══"
-az containerapp env create \
-  --name "$ACA_ENV" \
-  --resource-group "$RESOURCE_GROUP" \
-  --location "$LOCATION" \
-  --output none 2>/dev/null || true   # idempotent
-
-echo "═══ 5/6  Deploy container app ═══"
-ACR_PASSWORD=$(az acr credential show --name "$ACR_NAME" --query "passwords[0].value" -o tsv)
-
-if az containerapp show --name "$ACA_APP" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
-  # Update existing app
-  az containerapp update \
-    --name "$ACA_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --image "$IMAGE" \
-    --output none
-else
-  # Create new app
-  az containerapp create \
-    --name "$ACA_APP" \
-    --resource-group "$RESOURCE_GROUP" \
-    --environment "$ACA_ENV" \
-    --image "$IMAGE" \
-    --registry-server "${ACR_NAME}.azurecr.io" \
-    --registry-username "$ACR_NAME" \
-    --registry-password "$ACR_PASSWORD" \
-    --target-port 80 \
-    --ingress external \
-    --cpu 1 \
-    --memory 2Gi \
-    --min-replicas 1 \
-    --max-replicas 3 \
-    --env-vars \
-      "AzureWebJobsStorage=UseDevelopmentStorage=false" \
-      "FUNCTIONS_WORKER_RUNTIME=node" \
-      "SUPABASE_URL=secretref:supabase-url" \
-      "SUPABASE_SERVICE_ROLE_KEY=secretref:service-role-key" \
-      "OCR_SWEEP_ON_STARTUP=true" \
-    --output none
+  printf 'Supabase service_role key: '; read -rs SRK; echo
+  printf %s "\$SRK" | az containerapp secret set -g $RESOURCE_GROUP -n $ACA_APP --secrets service-role-key=@- --output none
+  unset SRK
+  az containerapp update -g $RESOURCE_GROUP -n $ACA_APP --output none --set-env-vars \\
+    SUPABASE_URL=https://<project-ref>.supabase.co \\
+    SUPABASE_SERVICE_ROLE_KEY=secretref:service-role-key
+EOF
+  exit 1
 fi
 
-echo "═══ 6/6  Done! ═══"
+# The Functions host keeps the timer's schedule and the function keys (profileOcr is authLevel 'function') in
+# AzureWebJobsStorage. Warn rather than fail: the worker's own code never reads it.
+if ! grep -qx 'AzureWebJobsStorage=webjobs-storage' <<<"$ENV_WIRING"; then
+  echo "warning: AzureWebJobsStorage is not read from a 'webjobs-storage' secret on $ACA_APP." >&2
+fi
+
+echo "═══ 2/3  Build & push ${IMAGE} ═══"
+# ACR Tasks are blocked on Azure for Students subscriptions, so we build locally and push.
+# We explicitly build for linux/amd64 so the image matches Container Apps even when deployed from Apple Silicon.
+az acr login --name "$ACR_NAME"
+docker build --platform linux/amd64 \
+  -t "${ACR_NAME}.azurecr.io/${IMAGE_REPO}:${DEPLOY_ID}" \
+  -t "${ACR_NAME}.azurecr.io/${IMAGE_REPO}:latest" \
+  -f Dockerfile \
+  .
+
+docker push "${ACR_NAME}.azurecr.io/${IMAGE_REPO}:${DEPLOY_ID}"
+docker push "${ACR_NAME}.azurecr.io/${IMAGE_REPO}:latest"
+
+echo "═══ 3/3  Roll out ═══"
+# min-replicas 1: ocrSweep is a timer inside the Functions host, so it only fires while a replica is running.
+# Scaled to zero, nothing drains listing_proofs at all, and profile_proofs only moves when the webhook calls in.
+az containerapp update \
+  --name "$ACA_APP" \
+  --resource-group "$RESOURCE_GROUP" \
+  --image "$IMAGE" \
+  --min-replicas 1 \
+  --output none
+
 FQDN=$(az containerapp show \
   --name "$ACA_APP" \
   --resource-group "$RESOURCE_GROUP" \
   --query "properties.configuration.ingress.fqdn" \
-  -o tsv)
+  --output tsv)
 
+LATEST_REV=$(az containerapp show -g "$RESOURCE_GROUP" -n "$ACA_APP" --query properties.latestRevisionName -o tsv)
 echo ""
-echo "  App URL:  https://${FQDN}"
+echo "  Revision:              ${LATEST_REV}"
+echo "  Image:                 ${IMAGE}"
 echo "  Profile OCR endpoint:  https://${FQDN}/api/profile-ocr"
 echo ""
-echo "  ┌──────────────────────────────────────────────────────────┐"
-echo "  │  IMPORTANT: Set secrets before the first sweep fires:   │"
-echo "  │                                                         │"
-echo "  │  az containerapp secret set \\                           │"
-echo "  │    --name $ACA_APP \\                                    │"
-echo "  │    --resource-group $RESOURCE_GROUP \\                   │"
-echo "  │    --secrets \\                                          │"
-echo "  │      supabase-url=<your-supabase-url> \\                 │"
-echo "  │      service-role-key=<your-service-role-key>            │"
-echo "  └──────────────────────────────────────────────────────────┘"
+echo "  Health:  az containerapp revision show -g $RESOURCE_GROUP -n $ACA_APP --revision ${LATEST_REV} \"
+echo "             --query '{health:properties.healthState, running:properties.runningState}'"
