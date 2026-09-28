@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { Image } from 'expo-image';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -39,7 +39,15 @@ import {
   type Pokeball,
   type TradeTimeline,
 } from '@/constants/listing-attributes';
-import { listingErrorMessage, publishListing, type NewListingInput, type ProofKind } from '@/lib/api/listings';
+import {
+  fetchListingVerification,
+  listingErrorMessage,
+  publishListing,
+  type ListingProofStatus,
+  type ListingVerification,
+  type NewListingInput,
+  type ProofKind,
+} from '@/lib/api/listings';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
@@ -82,7 +90,14 @@ const MAX_TAGS = 5;
 
 const NOTES_MAX_LENGTH = 280;
 
-type Step = 'form' | 'preview';
+/** How long one round of polling waits for the OCR worker's once-a-minute sweep (see the cron
+ *  schedule in `workers/azure-ocr/src/functions/ocrSweep.ts`) plus OCR time before offering to keep
+ *  waiting. Same values as `ProfileProofStep`'s reference pattern — a shorter timeout would routinely
+ *  fire before the sweep has even run once. */
+const VERIFY_POLL_TIMEOUT_MS = 90_000;
+const VERIFY_POLL_INTERVAL_MS = 3_000;
+
+type Step = 'form' | 'preview' | 'verifying';
 
 interface CreateListingModalProps {
   onClose?: () => void;
@@ -131,6 +146,27 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [publishError, setPublishError] = useState<string | null>(null);
   // Generated once per modal, so retrying a publish that half-succeeded reuses the same listing row.
   const [draftId] = useState(() => randomUUID());
+
+  // ——— 'verifying' step: the listing already exists once we get here, so every field below is about
+  // watching the OCR worker settle its proofs, never about the listing itself. ———
+  // Set once `publish()` posts a listing that has at least one proof — see that function. Kept
+  // separate from `previewListing` because the server-owned fields (`lucky`, `sizeClass`) the worker
+  // fills in are exactly what this step is waiting to read back.
+  const [postedListing, setPostedListing] = useState<Listing | null>(null);
+  // Null until the first successful poll; per-proof statuses come from here, keyed by `kind` (a listing
+  // can have at most one proof per kind, so `kind` is a safe join key back to `uploads`).
+  const [verification, setVerification] = useState<ListingVerification | null>(null);
+  const [verifyTimedOut, setVerifyTimedOut] = useState(false);
+  // Refs, not state, for the same reason `ProfileProofStep` (components/onboarding/ProfileProofStep.tsx)
+  // uses them: a timer id never needs to trigger a re-render, and reading `.current` inside a callback
+  // always sees the latest value instead of one captured at the render that scheduled it.
+  const verifyPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const verifyPollDeadline = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards two different races: a poll tick or the deadline firing after the component has unmounted
+  // (no state updates after unmount), and `onPublish` firing more than once when several exits race
+  // (Done button, header close) — see `exitVerifying`.
+  const verifyMounted = useRef(true);
+  const verifyExited = useRef(false);
 
   /** Exactly what gets inserted: only the fields a trainer supplies (see `NewListingInput`). */
   const draft = useMemo<NewListingInput | null>(() => {
@@ -269,6 +305,72 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     setStep('preview');
   };
 
+  const stopVerifyPolling = () => {
+    if (verifyPollTimer.current) {
+      clearInterval(verifyPollTimer.current);
+      verifyPollTimer.current = null;
+    }
+    if (verifyPollDeadline.current) {
+      clearTimeout(verifyPollDeadline.current);
+      verifyPollDeadline.current = null;
+    }
+  };
+
+  // Unmount only: `publish()` starts polling imperatively (there is no "resume on mount" case here —
+  // unlike ProfileProofStep, this modal is only ever entered right after a fresh post), so the mount
+  // effect's one job is making sure a timer never outlives the component.
+  useEffect(() => {
+    return () => {
+      verifyMounted.current = false;
+      stopVerifyPolling();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** One poll tick: read every proof's current settle state. A transient network error just waits for
+   *  the next tick (mirrors `ProfileProofStep.checkLatestProof`) rather than ending the round early —
+   *  the listing is already posted, so there is nothing to roll back and no reason to alarm the seller
+   *  over one dropped request. `proofCount` is `uploads.length` at the moment polling began: it can't
+   *  change mid-poll since the form is left behind once this step is entered. */
+  const checkVerification = async (listingId: string, proofCount: number) => {
+    let result: ListingVerification;
+    try {
+      result = await fetchListingVerification(listingId);
+    } catch {
+      return;
+    }
+    if (!verifyMounted.current) return;
+    setVerification(result);
+    const settled =
+      result.proofs.length >= proofCount &&
+      result.proofs.every((p: ListingProofStatus) => p.status !== 'pending' && p.status !== 'processing');
+    if (settled) stopVerifyPolling();
+  };
+
+  const beginVerifyPolling = (listingId: string, proofCount: number) => {
+    stopVerifyPolling();
+    setVerifyTimedOut(false);
+    void checkVerification(listingId, proofCount);
+    verifyPollTimer.current = setInterval(() => void checkVerification(listingId, proofCount), VERIFY_POLL_INTERVAL_MS);
+    verifyPollDeadline.current = setTimeout(() => {
+      stopVerifyPolling();
+      if (verifyMounted.current) setVerifyTimedOut(true);
+    }, VERIFY_POLL_TIMEOUT_MS);
+  };
+
+  /** Every way out of the verifying step funnels through here, so `onPublish` — which the caller
+   *  (app/(tabs)/index.tsx) uses to refresh the feed and close the modal — fires exactly once no matter
+   *  which exit fired (Done, header close, or a future one). The guard is never reset: hiding the parent
+   *  `Modal` unmounts this component (on iOS only after the dismiss animation, which is the window a
+   *  second tap can land in), so the next "+" starts from a fresh mount anyway. Polling is always stopped
+   *  here too: the worker's own once-a-minute sweep keeps verifying regardless. */
+  const exitVerifying = () => {
+    stopVerifyPolling();
+    if (verifyExited.current || !postedListing) return;
+    verifyExited.current = true;
+    onPublish?.(postedListing);
+  };
+
   const publish = async () => {
     if (!draft || !previewListing || publishing) return;
     if (!USE_SUPABASE) {
@@ -288,7 +390,19 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           data: await readProofBytes(u.image),
         }))
       );
-      onPublish?.(await publishListing(draft, proofs));
+      const listing = await publishListing(draft, proofs);
+      if (uploads.length > 0) {
+        // The listing (and its proofs) already exist server-side — `onPublish` fires later, once the
+        // seller leaves this step (`exitVerifying`), not now. Going straight to 'verifying' rather than
+        // calling `onPublish` here is the one behavior change from before: with zero proofs there is
+        // nothing to watch, so that case still calls `onPublish` immediately, exactly as today.
+        setPostedListing(listing);
+        setVerification(null);
+        setStep('verifying');
+        beginVerifyPolling(listing.id, uploads.length);
+      } else {
+        onPublish?.(listing);
+      }
     } catch (error) {
       setPublishError(listingErrorMessage(error));
     } finally {
@@ -341,6 +455,79 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           error={publishError}
           bottomInset={insets.bottom}
         />
+      </View>
+    );
+  }
+
+  if (step === 'verifying' && postedListing) {
+    // Keyed by `kind`, not proof id: `listing_proofs_one_per_kind` guarantees at most one proof per
+    // kind, so this is a safe (and the only available) join back to the local `uploads` thumbnails —
+    // the fetched rows carry a DB-generated `id` this component never saw before now.
+    const statusByKind = new Map<ProofKind, ListingProofStatus['status']>(
+      (verification?.proofs ?? []).map((p) => [p.kind, p.status])
+    );
+    const rows = uploads.map((upload) => ({ upload, status: statusByKind.get(upload.proofKind) ?? null }));
+    const allSettled =
+      verification !== null && rows.every(({ status }) => status === 'verified' || status === 'failed' || status === 'rejected');
+
+    return (
+      <View className="flex-1" style={{ backgroundColor: C.bgSurface, paddingTop: insets.top }}>
+        {/* No `onSave`: the listing is already posted, so there is no draft left to save. */}
+        <Header onClose={exitVerifying} />
+        <ProgressBar filled={3} />
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24, gap: 16 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View>
+            <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+              VERIFYING
+            </Text>
+            <Text style={{ fontSize: 13, color: C.textSecondary, lineHeight: 19 }}>
+              Your listing is live. We're reading your proof photos automatically — this usually takes a
+              minute or two, and you don't need to keep this open.
+            </Text>
+          </View>
+
+          <View className="gap-2.5">
+            {rows.map(({ upload, status }) => (
+              <VerifyProofRow key={upload.proofKind} upload={upload} status={status} />
+            ))}
+          </View>
+
+          {allSettled && verification ? (
+            <VerificationSummary verification={verification} />
+          ) : verifyTimedOut ? (
+            <View
+              className="gap-3 rounded-[14px] border p-4"
+              style={{ borderColor: 'rgba(251,191,36,0.3)', backgroundColor: 'rgba(251,191,36,0.06)' }}
+            >
+              <Text style={{ fontSize: 13, lineHeight: 19, color: C.textSecondary }}>
+                Verification is taking longer than usual. Your listing is posted — proofs keep verifying
+                in the background and badges appear on the listing automatically.
+              </Text>
+              <Pressable
+                onPress={() => beginVerifyPolling(postedListing.id, uploads.length)}
+                accessibilityRole="button"
+                accessibilityLabel="Keep waiting"
+                className="items-center rounded-xl py-3 active:opacity-90"
+                style={MODAL_SURFACE.ctaGold}
+              >
+                <Text className="font-display" style={{ fontSize: 14, color: '#0a0a0f', letterSpacing: -0.15 }}>
+                  Keep Waiting
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View className="flex-row items-center gap-2">
+              <ActivityIndicator size="small" color={C.gold} />
+              <Text className="font-mono" style={{ fontSize: 12, color: C.textMuted }}>
+                Reading your screenshots…
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+        <VerifyingFooter onDone={exitVerifying} bottomInset={insets.bottom} />
       </View>
     );
   }
@@ -430,14 +617,18 @@ function Header({ onClose, onSave, busy }: { onClose?: () => void; onSave?: () =
           STEP 2 OF 3
         </Text>
       </View>
-      <Pressable
-        onPress={onSave}
-        accessibilityRole="button"
-        accessibilityLabel="Save draft"
-        className="px-3 py-2 active:opacity-70"
-      >
-        <Text style={{ fontSize: 13, fontWeight: '600', color: C.textMuted }}>Save</Text>
-      </Pressable>
+      {onSave ? (
+        <Pressable
+          onPress={onSave}
+          accessibilityRole="button"
+          accessibilityLabel="Save draft"
+          className="px-3 py-2 active:opacity-70"
+        >
+          <Text style={{ fontSize: 13, fontWeight: '600', color: C.textMuted }}>Save</Text>
+        </Pressable>
+      ) : (
+        <View className="h-10 w-10" />
+      )}
     </View>
   );
 }
@@ -1003,6 +1194,105 @@ function ProofRow({ upload, onRemove }: { upload: ProofUpload; onRemove: () => v
   );
 }
 
+/** `ProofRow`'s 'verifying'-step twin: same thumbnail-plus-metadata row, but the trailing remove
+ *  button (nothing can be removed once posted) is replaced by a status badge over the thumbnail
+ *  itself. `status` is null until the first poll response names this proof, which reads the same as
+ *  'pending'/'processing' — still in flight, just not confirmed as such yet. */
+function VerifyProofRow({ upload, status }: { upload: ProofUpload; status: ListingProofStatus['status'] | null }) {
+  const { image } = upload;
+  const inFlight = status === null || status === 'pending' || status === 'processing';
+  const verified = status === 'verified';
+  const failed = status === 'failed' || status === 'rejected';
+
+  return (
+    <View
+      className="flex-row items-center gap-4 rounded-[14px] border px-4 py-3.5"
+      style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+    >
+      <View
+        className="relative h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-xl"
+        style={MODAL_SURFACE.stripedTile}
+      >
+        <Image
+          source={{ uri: image.uri }}
+          style={{ width: 52, height: 52, opacity: inFlight ? 0.45 : 1 }}
+          contentFit="cover"
+          accessibilityLabel={`${upload.kind} screenshot`}
+        />
+        {inFlight && (
+          <View
+            className="absolute inset-0 items-center justify-center"
+            style={{ backgroundColor: 'rgba(0,0,0,0.25)' }}
+          >
+            <ActivityIndicator size="small" color={C.gold} />
+          </View>
+        )}
+        {(verified || failed) && (
+          <View
+            className="absolute bottom-0 right-0 h-5 w-5 items-center justify-center rounded-full border"
+            style={{ backgroundColor: verified ? C.success : C.danger, borderColor: C.bgCard }}
+          >
+            {verified ? (
+              <Check size={11} color={C.successText} strokeWidth={3} />
+            ) : (
+              <X size={11} color={C.textPrimary} strokeWidth={3} />
+            )}
+          </View>
+        )}
+      </View>
+      <View className="flex-1">
+        <Text className="font-mono-semi" style={{ fontSize: 9, color: C.gold, letterSpacing: 0.8 }}>
+          {upload.kind.toUpperCase()}
+        </Text>
+        <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary, marginTop: 2 }}>
+          {image.filename}
+        </Text>
+        <Text
+          className="font-mono"
+          style={{ fontSize: 11, marginTop: 2, color: failed ? C.danger : verified ? C.success : C.textSecondary }}
+        >
+          {verified ? 'Verified' : failed ? "Couldn't read this screenshot" : 'Reading…'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** Shown once every proof in the 'verifying' step has settled (see `allSettled` above). Badges are
+ *  additive and independent — a listing can pick up any subset of the three, including none, if the
+ *  photos verified but didn't back a size/lucky/location claim. Never renders the location itself
+ *  (only whether one was saved): see `ListingVerification.catchLocationSaved`'s comment in
+ *  lib/api/listings.ts on why that string never reaches this client. */
+function VerificationSummary({ verification }: { verification: ListingVerification }) {
+  const { sizeClass, lucky, catchLocationSaved } = verification;
+  const hasBadges = sizeClass !== null || lucky || catchLocationSaved;
+
+  return (
+    <View
+      className="gap-2.5 rounded-[14px] border p-4"
+      style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+    >
+      <View className="flex-row items-center gap-2">
+        <CheckSquare size={16} color={C.success} strokeWidth={2.5} />
+        <Text className="font-mono-bold" style={{ fontSize: 12, color: C.success, letterSpacing: 1.1 }}>
+          VERIFICATION COMPLETE
+        </Text>
+      </View>
+      {hasBadges ? (
+        <View className="flex-row flex-wrap gap-2">
+          {sizeClass ? <TextBadge label={`${sizeClass} confirmed`} accent={C.gold} selected /> : null}
+          {lucky ? <TextBadge label="Guaranteed Lucky applied" accent={C.gold} selected /> : null}
+          {catchLocationSaved ? <TextBadge label="Catch location saved privately" accent={C.blue} selected /> : null}
+        </View>
+      ) : (
+        <Text style={{ fontSize: 12, color: C.textMuted }}>
+          Your photos checked out, but didn't back any extra badges.
+        </Text>
+      )}
+    </View>
+  );
+}
+
 function ProofUploadsSection({
   uploads,
   picking,
@@ -1115,8 +1405,9 @@ function ProofUploadsSection({
       )}
       {uploads.length > 0 && USE_SUPABASE && (
         <Text className="mt-3" style={{ fontSize: 12, lineHeight: 18, color: C.textMuted }}>
-          Proofs are stored privately and uploaded when you post. Automatic verification is not live yet, so
-          nothing is read from these photos.
+          Proofs are stored privately and uploaded when you post. They're verified automatically after
+          that — usually within a minute or two — and any badges they unlock appear on the listing on
+          their own.
         </Text>
       )}
     </View>
@@ -1301,6 +1592,35 @@ function PreviewFooter({
       >
         <ArrowLeft size={16} color={C.textMuted} strokeWidth={2.5} />
         <Text style={{ fontSize: 13, fontWeight: '600', color: C.textMuted }}>Back to Edit</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/** The 'verifying' step's only footer action. Always enabled, even mid-poll: the listing is already
+ *  live and the worker's own sweep keeps verifying it in the background regardless of whether this
+ *  modal is still open, so there is nothing "Done" needs to wait for. */
+function VerifyingFooter({ onDone, bottomInset = 0 }: { onDone?: () => void; bottomInset?: number }) {
+  return (
+    <View
+      className="border-t px-5 pt-4"
+      style={{
+        borderTopColor: C.borderSubtle,
+        backgroundImage: 'linear-gradient(180deg, transparent, #0d0d14 30%)',
+        paddingBottom: Math.max(bottomInset, 24),
+      }}
+    >
+      <Pressable
+        onPress={onDone}
+        accessibilityRole="button"
+        accessibilityLabel="Done"
+        className="flex-row items-center justify-center gap-2 rounded-2xl py-4 active:opacity-90"
+        style={MODAL_SURFACE.ctaGold}
+      >
+        <Check size={18} color="#0a0a0f" strokeWidth={2.5} />
+        <Text className="font-display" style={{ fontSize: 15, color: '#0a0a0f', letterSpacing: -0.15 }}>
+          Done
+        </Text>
       </Pressable>
     </View>
   );

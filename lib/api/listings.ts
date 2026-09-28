@@ -7,6 +7,7 @@ import {
   TRADE_TIMELINES,
   type FilterEnumField,
   type FilterFlagField,
+  type PokemonSize,
 } from '@/constants/listing-attributes';
 import type { FilterSpec } from '@/store/listing-filters';
 import type { BackgroundHint, Listing, TradeType } from '@/data/types';
@@ -393,4 +394,49 @@ export async function publishListing(input: NewListingInput, proofs: ProofUpload
     }
   }
   return listing;
+}
+
+// ——— post-publish verification (polled by CreateListingModal's 'verifying' step) ———
+
+export type ProofOcrStatus = Database['public']['Enums']['ocr_status'];
+
+export interface ListingProofStatus {
+  id: string;
+  kind: ProofKind;
+  status: ProofOcrStatus;
+}
+
+export interface ListingVerification {
+  proofs: ListingProofStatus[];
+  /** Service-role only (see `NewListingInput`'s comment); still `null` until a verified appraisal sets it. */
+  sizeClass: PokemonSize | null;
+  lucky: boolean;
+  /** Whether the worker upserted a private `listing_proof_private` row for this listing — never the
+   *  `catch_location` value itself, which is seller-only by RLS and never rendered anywhere in the UI. */
+  catchLocationSaved: boolean;
+}
+
+/**
+ * One round trip: the listing's own service-role fields (`size_class`, `lucky`) plus every proof's
+ * settle state, embedded via the `listing_proofs_listing_id_fkey` / `listing_proof_private_proof_id_fkey`
+ * relationships. `ocr_status` is the single authoritative completion signal — the worker
+ * (`workers/azure-ocr/src/core/process.ts`) writes `size_class` / `lucky` / `listing_proof_private`
+ * *before* it settles a proof's `ocr_status` to `verified` | `failed` | `rejected`, so once every proof
+ * here is settled those fields are final for this publish. `listing_proof_private` is selected only for
+ * `proof_id` (never `catch_location`) so a location string never even reaches this client.
+ */
+export async function fetchListingVerification(listingId: string): Promise<ListingVerification> {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('size_class, lucky, listing_proofs(id, kind, ocr_status, listing_proof_private(proof_id))')
+    .eq('id', listingId)
+    .single();
+  if (error) throw apiError(error);
+
+  return {
+    proofs: data.listing_proofs.map((proof) => ({ id: proof.id, kind: proof.kind, status: proof.ocr_status })),
+    sizeClass: data.size_class,
+    lucky: data.lucky,
+    catchLocationSaved: data.listing_proofs.some((proof) => proof.listing_proof_private !== null),
+  };
 }
