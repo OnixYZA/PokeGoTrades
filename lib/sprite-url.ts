@@ -130,8 +130,8 @@ export function getSpriteUrl(v: SpriteVariant): string | null {
  * `normalizeCode` — an invalid code collapses step 1 down to the same key step 3 already produces
  * (see `CODE_RE`'s doc comment), and the dedup below is what keeps that from appearing twice.
  *
- * A synthetic id with no `POKEDEX` entry (e.g. a PokéAPI-only forme id) can never have a mirrored
- * sprite, so it — and a request made with no bucket base URL at all — short-circuits to `[]`, which
+ * An id with no `POKEDEX` entry can never have a mirrored sprite, so it — and a request made with no
+ * bucket base URL at all — short-circuits to `[]`, which
  * `useSpriteSource` reads as "exhausted" on the very first render instead of ever making a request.
  */
 export function spriteCandidates(v: SpriteVariant): string[] {

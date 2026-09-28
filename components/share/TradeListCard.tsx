@@ -41,8 +41,8 @@ export interface TradeListCardProps {
   /**
    * Fires exactly once: when every visible sprite (after the per-list cap) has either loaded or
    * errored, or after `SETTLE_TIMEOUT_MS` — whichever comes first. Drives the Share button's disabled
-   * state in `ShareTradeListModal`; a dead or slow raw.githubusercontent.com host must never leave the
-   * export stuck waiting forever.
+   * state in `ShareTradeListModal`; a dead or slow `sprites` bucket must never leave the export stuck
+   * waiting forever.
    */
   onReady?: () => void;
 }

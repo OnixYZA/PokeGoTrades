@@ -137,10 +137,6 @@ export function hueChipGlow(hue: number): ViewStyle {
   };
 }
 
-export function hueSilhouetteBg(hue: number): ViewStyle {
-  return { backgroundColor: `hsla(${hue},60%,12%,.85)` };
-}
-
 export function hueBadgeStyle(hue: number): ViewStyle {
   return {
     backgroundColor: `hsla(${hue},70%,55%,.14)`,

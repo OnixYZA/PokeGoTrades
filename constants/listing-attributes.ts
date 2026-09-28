@@ -51,13 +51,6 @@ export const POKEBALL_LABELS: Record<Pokeball, string> = {
   safari: 'Safari Ball',
 };
 
-export const POKEMON_SIZE_LABELS: Record<PokemonSize, string> = {
-  XXS: 'XXS',
-  XS: 'XS',
-  XL: 'XL',
-  XXL: 'XXL',
-};
-
 // ——— filter registry ———
 
 /** The boolean `listings` columns a filter chip can toggle. Named after the `Listing` field (camelCase);
