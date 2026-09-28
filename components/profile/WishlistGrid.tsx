@@ -44,8 +44,7 @@ export function WishlistGrid({ wishlist, onEdit }: WishlistGridProps) {
             className="flex-row items-center gap-2.5 rounded-2xl border border-dashed p-3"
             style={[SURFACE.card, { borderColor: '#2a3350' }]}
           >
-            {/* `lucky: false` — Wishlist tiles never drew a lucky marker before this refactor. */}
-            <Chip creature={{ ...p, lucky: false }} size={44} />
+            <Chip creature={p} size={44} />
             <View className="min-w-0 flex-1">
               <Text className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
                 {p.name}

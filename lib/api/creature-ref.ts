@@ -16,6 +16,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The object member of the `Json` union (`lib/database.types.ts`) — never its array/primitive members.
+ *  `creatureRefToJson` returns this instead of the full `Json` so a caller building a wider jsonb object
+ *  (e.g. `chats.ts`'s `offerToJson` layering `iv`/`move` on top) can spread it directly instead of
+ *  re-narrowing it first. */
+type JsonObject = { [key: string]: Json | undefined };
+
 /** A non-empty string, or `undefined` for anything else — what `formCode`/`costumeCode` must be to
  *  survive a parse; an empty string is never a real PokeMiners code. */
 function nonEmptyString(value: unknown): string | undefined {
@@ -68,7 +74,7 @@ export function parseCreatureRefs(value: Json | unknown): CreatureRef[] {
  * one, since the check constraint rejects a literal `null` for either key (see `data/types.ts`'s
  * `CreatureRef.formCode` comment).
  */
-export function creatureRefToJson(ref: CreatureRef): Json {
+export function creatureRefToJson(ref: CreatureRef): JsonObject {
   return {
     name: ref.name,
     pokemonId: ref.pokemonId,

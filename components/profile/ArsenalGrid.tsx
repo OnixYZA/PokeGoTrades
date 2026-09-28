@@ -42,9 +42,8 @@ export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
         renderItem={(p) => (
           <View className="relative items-center gap-2 overflow-hidden rounded-2xl border border-border bg-bg-card p-2.5">
             <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(p.hue)]} />
-            {/* `lucky: false` here, not `p.lucky` — this tile already renders its own "✦ LUCKY" text
-             *  below, so passing the real value through would draw a second "L" badge on the Chip. */}
-            <Chip creature={{ ...p, lucky: false }} size={52} />
+            {/* A lucky entry shows both the Chip's small gold "L" and this tile's "✦ LUCKY" caption below. */}
+            <Chip creature={p} size={52} />
             <Text className="text-center font-display-semi text-text-primary" style={{ fontSize: 11, lineHeight: 13.2 }}>
               {p.name}
             </Text>
