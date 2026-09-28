@@ -10,16 +10,16 @@ import { locations } from './listings';
  * a live lookup.
  */
 const CREATURE_POOL: CreatureRef[] = [
-  { name: 'Sh. Rayquaza', pokemonId: 384, hue: 145, shiny: true },
+  { name: 'Rayquaza', pokemonId: 384, hue: 145, shiny: true },
   { name: 'Legacy Dragonite', pokemonId: 149, hue: 205 },
-  { name: 'Sh. Metagross', pokemonId: 376, hue: 195, shiny: true },
+  { name: 'Metagross', pokemonId: 376, hue: 195, shiny: true },
   { name: 'Purified Ho-Oh', pokemonId: 250, hue: 25 },
-  { name: 'Sh. Mewtwo', pokemonId: 150, hue: 275, shiny: true },
-  { name: 'Sh. Garchomp', pokemonId: 445, hue: 220, shiny: true },
-  { name: 'Sh. Zamazenta', pokemonId: 889, hue: 340, shiny: true },
-  { name: 'Sh. Kyogre', pokemonId: 382, hue: 210, shiny: true },
+  { name: 'Mewtwo', pokemonId: 150, hue: 275, shiny: true },
+  { name: 'Garchomp', pokemonId: 445, hue: 220, shiny: true },
+  { name: 'Zamazenta', pokemonId: 889, hue: 340, shiny: true },
+  { name: 'Kyogre', pokemonId: 382, hue: 210, shiny: true },
   { name: 'Purified Apex Lugia', pokemonId: 249, hue: 285 },
-  { name: 'Sh. Mew', pokemonId: 151, hue: 320, shiny: true },
+  { name: 'Mew', pokemonId: 151, hue: 320, shiny: true },
   { name: 'Zapdos', pokemonId: 145, hue: 48 },
   { name: 'Articuno', pokemonId: 144, hue: 210 },
   { name: 'Moltres', pokemonId: 146, hue: 15 },

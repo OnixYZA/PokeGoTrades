@@ -9,6 +9,7 @@ import { ToastHost } from '@/components/ui/ToastHost';
 import type { CreatureRef, Listing } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { useTradeStore, type OfferSelection } from '@/store/trade-store';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
@@ -79,7 +80,7 @@ export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModa
         }}
       >
         <Grabber />
-        <Heading sellerName={listing.seller} listingName={listing.name} />
+        <Heading sellerName={listing.seller} listingName={creatureDisplayName(listing)} />
 
         <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
           WHAT ARE YOU OFFERING?
@@ -166,7 +167,7 @@ function CreatureOptionRow({
     <Pressable
       onPress={onPress}
       accessibilityRole="radio"
-      accessibilityLabel={creature.name}
+      accessibilityLabel={creatureDisplayName(creature)}
       accessibilityState={{ selected: !!selected }}
       className="flex-row items-center gap-3.5 rounded-2xl border px-4 py-3 active:opacity-90"
       style={{
@@ -176,7 +177,9 @@ function CreatureOptionRow({
     >
       <Chip creature={creature} size={44} />
       <View className="flex-1">
-        <Text style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>{creature.name}</Text>
+        <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
+          {creatureDisplayName(creature)}
+        </Text>
         <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, marginTop: 2, letterSpacing: 0.5 }}>
           OFFER THIS
         </Text>

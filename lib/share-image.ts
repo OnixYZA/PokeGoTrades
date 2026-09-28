@@ -33,7 +33,7 @@ export type ShareTradeListResult = { ok: true } | { ok: false; message: string }
  *   `RefObject<View | null>`, not `RefObject<View>`: that's what `useRef<View>(null)` actually
  *   produces (React 19's `useRef` overloads resolve a literal `null` argument to
  *   `RefObject<T | null>`, not `RefObject<T>` — see @types/react's `useRef` overloads).
- * @param canvasHeight `computeTradeListLayout(arsenal, wishlist).canvasHeight` — in pt, at the card's
+ * @param canvasHeight `computeTradeListLayout(arsenal, wishlist, hasTeam).canvasHeight` — in pt, at the card's
  *   own fixed width — so the captured image's aspect ratio always matches what's on screen.
  */
 export async function shareTradeListImage(

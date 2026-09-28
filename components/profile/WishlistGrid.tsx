@@ -6,6 +6,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
 import { SURFACE } from '@/constants/theme';
 import type { CreatureRef } from '@/data/types';
+import { creatureDisplayName } from '@/lib/format';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
 interface WishlistGridProps {
@@ -46,8 +47,8 @@ export function WishlistGrid({ wishlist, onEdit }: WishlistGridProps) {
           >
             <Chip creature={p} size={44} />
             <View className="min-w-0 flex-1">
-              <Text className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
-                {p.name}
+              <Text numberOfLines={1} className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
+                {creatureDisplayName(p)}
               </Text>
               <Text className="font-mono text-accent-blue" style={{ fontSize: 9, letterSpacing: 0.72, marginTop: 2 }}>
                 HUNTING

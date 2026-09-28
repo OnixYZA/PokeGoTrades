@@ -33,8 +33,38 @@ export const MAX_VISIBLE_PER_LIST = 24;
 // ——— block heights (pt) — TradeListCard gives each of these blocks exactly this much height, so
 // summing them (see `computeTradeListLayout` below) always equals the card's true rendered height ———
 
-/** App wordmark row + handle/level row + team pill row, with the card's top padding. */
-export const HEADER_HEIGHT = 132;
+/** Vertical rhythm shared by every gap inside the header (wordmark -> handle -> team pill) — one
+ *  number reused three times, replacing what used to be two unrelated ad-hoc margins (14, then 8),
+ *  so the header reads as one consistent scale instead of two arbitrary ones. */
+export const HEADER_ROW_GAP = 12;
+/** Icon + wordmark row — the fixed 22pt icon square is the tallest thing in it. */
+export const HEADER_WORDMARK_ROW_HEIGHT = 22;
+/** Handle (+ optional LVL badge) row, sized for the fontSize-20 display handle — the tallest thing in
+ *  it. Fixed rather than left to the text's natural line height so `computeHeaderHeight` below is exact
+ *  regardless of platform font metrics, the same reasoning `CardSection`'s fixed-height rows already
+ *  follow for the grid/label rows. */
+export const HEADER_HANDLE_ROW_HEIGHT = 24;
+/** Team pill row — rendered only when the trainer has picked a team (`team` is non-null; a live
+ *  profile may not have one yet). */
+export const HEADER_TEAM_ROW_HEIGHT = 22;
+
+/**
+ * The header block's rendered height: `CARD_PADDING` on top (the same inset the content wrapper below
+ * uses, so the two rhythms match), the wordmark and handle rows with `HEADER_ROW_GAP` between them, and
+ * — only when `hasTeam` — one more `HEADER_ROW_GAP` plus the team pill row, leaving `CARD_PADDING` of
+ * clear space below whichever row is last. Without the `hasTeam` branch, a team-less profile (`team`
+ * can be null) would render fewer rows inside a height still sized for the pill, leaving an arbitrary
+ * gap at the bottom instead of the same breathing room every other block gets — the same reason
+ * `computeSectionHeight` below takes the actual section instead of a flat constant.
+ */
+export function computeHeaderHeight(hasTeam: boolean): number {
+  const withoutTeam = CARD_PADDING + HEADER_WORDMARK_ROW_HEIGHT + HEADER_ROW_GAP + HEADER_HANDLE_ROW_HEIGHT + CARD_PADDING;
+  return hasTeam ? withoutTeam + HEADER_ROW_GAP + HEADER_TEAM_ROW_HEIGHT : withoutTeam;
+}
+
+/** `computeHeaderHeight(true)` — the common (has-a-team) case, kept as a flat constant for call sites
+ *  and tests that don't need to vary it. */
+export const HEADER_HEIGHT = computeHeaderHeight(true);
 /** "HAVE" / "WANT" label + divider row. */
 export const SECTION_LABEL_HEIGHT = 26;
 /** Vertical gap between the HAVE and WANT sections. */
@@ -104,11 +134,27 @@ export function computeSectionHeight(section: TradeListSection): number {
  * / `.web.ts` need to size the capture (`canvasHeight`), from the trainer's own Arsenal + Wishlist.
  * Pure and platform-free: safe to call from the modal (to size the preview) and from the capture
  * helpers (to size captureRef's output) without either importing the other.
+ *
+ * `hasTeam` (the caller's `team !== null`) feeds `computeHeaderHeight` — required, not defaulted, so a
+ * caller can't forget it and silently size the capture for a header the card doesn't actually render.
  */
-export function computeTradeListLayout(arsenal: readonly CreatureRef[], wishlist: readonly CreatureRef[]): TradeListLayout {
+export function computeTradeListLayout(
+  arsenal: readonly CreatureRef[],
+  wishlist: readonly CreatureRef[],
+  hasTeam: boolean,
+): TradeListLayout {
   const arsenalSection = buildSection(arsenal);
   const wishlistSection = buildSection(wishlist);
   const canvasHeight =
-    HEADER_HEIGHT + computeSectionHeight(arsenalSection) + SECTION_GAP + computeSectionHeight(wishlistSection) + FOOTER_HEIGHT;
+    computeHeaderHeight(hasTeam) +
+    // Breathing room above "HAVE" and below the last WANT row — the content wrapper's own top/bottom
+    // insets (TradeListCard.tsx), reusing CARD_PADDING so they match its horizontal rhythm instead of
+    // sitting flush against the header/footer edges.
+    CARD_PADDING +
+    computeSectionHeight(arsenalSection) +
+    SECTION_GAP +
+    computeSectionHeight(wishlistSection) +
+    CARD_PADDING +
+    FOOTER_HEIGHT;
   return { arsenal: arsenalSection, wishlist: wishlistSection, canvasHeight };
 }

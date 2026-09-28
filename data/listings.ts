@@ -15,7 +15,7 @@ import type { Listing } from './types';
 export const listings: Listing[] = [
   {
     id: 'l1',
-    name: 'Shiny Zacian',
+    name: 'Zacian',
     pokemonId: 888,
     formCode: 'CROWNED_SWORD',
     form: 'Crowned Sword',
@@ -32,7 +32,7 @@ export const listings: Listing[] = [
     tradeType: 'Unregistered (Shiny/Legendary)',
     iv: '15/15/14',
     looking: [
-      { name: 'Shiny Zamazenta', pokemonId: 889, hue: 340, shiny: true },
+      { name: 'Zamazenta', pokemonId: 889, hue: 340, shiny: true },
       { name: 'Purified Apex Lugia', pokemonId: 249, hue: 25 },
       { name: 'Legacy Mewtwo', pokemonId: 150, hue: 220, lucky: true },
     ],
@@ -65,7 +65,7 @@ export const listings: Listing[] = [
     looking: [
       { name: 'Legacy Dragonite', pokemonId: 149, hue: 340 },
       { name: 'Purified Ho-Oh', pokemonId: 250, hue: 25 },
-      { name: 'Shiny Deoxys A.', pokemonId: 386, formCode: 'ATTACK', hue: 220, shiny: true, lucky: true },
+      { name: 'Deoxys A.', pokemonId: 386, formCode: 'ATTACK', hue: 220, shiny: true, lucky: true },
     ],
     tags: ['Legacy Move', 'Community Day'],
     purified: false,
@@ -77,7 +77,7 @@ export const listings: Listing[] = [
   },
   {
     id: 'l3',
-    name: 'Shiny Rayquaza',
+    name: 'Rayquaza',
     pokemonId: 384,
     form: 'Standard',
     year: 2023,
@@ -93,8 +93,8 @@ export const listings: Listing[] = [
     tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '15/15/15',
     looking: [
-      { name: 'Shiny Kyogre', pokemonId: 382, hue: 340, shiny: true },
-      { name: 'Shiny Groudon', pokemonId: 383, hue: 25, shiny: true },
+      { name: 'Kyogre', pokemonId: 382, hue: 340, shiny: true },
+      { name: 'Groudon', pokemonId: 383, hue: 25, shiny: true },
       { name: 'Origin Palkia', pokemonId: 484, formCode: 'ORIGIN', hue: 220, lucky: true },
     ],
     tags: ['PvP Ready', 'Hundo IV'],
@@ -125,7 +125,7 @@ export const listings: Listing[] = [
     looking: [
       { name: 'Purified Lugia', pokemonId: 249, hue: 340 },
       { name: 'Mega Rayquaza IV', pokemonId: 384, formCode: 'MEGA', hue: 25 },
-      { name: 'Shiny Entei', pokemonId: 244, hue: 220, shiny: true, lucky: true },
+      { name: 'Entei', pokemonId: 244, hue: 220, shiny: true, lucky: true },
     ],
     tags: ['Raid Exclusive'],
     purified: true,
@@ -137,7 +137,7 @@ export const listings: Listing[] = [
   },
   {
     id: 'l5',
-    name: 'Shiny Metagross',
+    name: 'Metagross',
     pokemonId: 376,
     form: 'Frostmoves',
     year: 2018,
@@ -153,9 +153,9 @@ export const listings: Listing[] = [
     tradeType: 'Special (Shiny/Legendary) Registered',
     iv: '15/13/15',
     looking: [
-      { name: 'Shiny Beldum Comm.', pokemonId: 374, hue: 340, shiny: true },
-      { name: 'Shiny Larvitar', pokemonId: 246, hue: 25, shiny: true },
-      { name: 'Shiny Bagon', pokemonId: 371, hue: 220, shiny: true, lucky: true },
+      { name: 'Beldum Comm.', pokemonId: 374, hue: 340, shiny: true },
+      { name: 'Larvitar', pokemonId: 246, hue: 25, shiny: true },
+      { name: 'Bagon', pokemonId: 371, hue: 220, shiny: true, lucky: true },
     ],
     tags: ['Level 1'],
     purified: false,
@@ -185,7 +185,7 @@ export const listings: Listing[] = [
     looking: [
       { name: 'Purified Apex Ho-Oh', pokemonId: 250, hue: 340 },
       { name: 'Primal Groudon', pokemonId: 383, formCode: 'PRIMAL', hue: 25 },
-      { name: 'Shiny Mew', pokemonId: 151, hue: 220, shiny: true, lucky: true },
+      { name: 'Mew', pokemonId: 151, hue: 220, shiny: true, lucky: true },
     ],
     tags: [],
     purified: true,

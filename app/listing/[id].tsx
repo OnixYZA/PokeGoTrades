@@ -28,6 +28,7 @@ import { demandTier, marketLabel } from '@/constants/market';
 import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
@@ -178,8 +179,15 @@ export default function ListingDetailScreen() {
                 {listing.shiny && (
                   <Text style={{ color: '#ff6bd6', textShadow: '0 0 8px #ff6bd6', fontSize: 22 } as any}>✦</Text>
                 )}
-                <Text className="font-display text-text-primary" style={{ fontSize: 22, letterSpacing: -0.44 }}>
-                  {listing.name}
+                {/* `flexShrink: 1` + `numberOfLines`: "Shiny " (Task 1) makes this ~6 characters longer,
+                 *  and a Text sibling next to a fixed-size glyph in a row doesn't shrink by default in RN
+                 *  (unlike the web), so a long name would overflow past the card edge instead of eliding. */}
+                <Text
+                  numberOfLines={1}
+                  className="font-display text-text-primary"
+                  style={{ fontSize: 22, letterSpacing: -0.44, flexShrink: 1 }}
+                >
+                  {creatureDisplayName(listing)}
                 </Text>
               </View>
               <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">

@@ -6,6 +6,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { CreatureRef } from '@/data/types';
+import { creatureDisplayName } from '@/lib/format';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
 interface ArsenalGridProps {
@@ -44,8 +45,15 @@ export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
             <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(p.hue)]} />
             {/* A lucky entry shows both the Chip's small gold "L" and this tile's "✦ LUCKY" caption below. */}
             <Chip creature={p} size={52} />
-            <Text className="text-center font-display-semi text-text-primary" style={{ fontSize: 11, lineHeight: 13.2 }}>
-              {p.name}
+            {/* numberOfLines: 3 narrow columns (Task 1) + the "Shiny " prefix means a name like "Shiny
+             *  Crabominable" needs to wrap — capped at 2 lines so a long one still fits its tile instead
+             *  of pushing the row's height around unpredictably. */}
+            <Text
+              numberOfLines={2}
+              className="text-center font-display-semi text-text-primary"
+              style={{ fontSize: 11, lineHeight: 13.2 }}
+            >
+              {creatureDisplayName(p)}
             </Text>
             {p.lucky && (
               <Text className="font-display" style={{ fontSize: 8, letterSpacing: 0.9, color: '#f5c518' }}>

@@ -5,6 +5,7 @@ import { Chip } from '@/components/ui/Chip';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { SURFACE } from '@/constants/theme';
 import type { TradeHistoryEntry } from '@/data/types';
+import { creatureDisplayName } from '@/lib/format';
 
 /** Same footprint as a `Chip` so a negotiated-in-chat row lines up with a formal-offer row. */
 const GOT_TILE_SIZE = 40;
@@ -28,10 +29,10 @@ export function TradeHistoryGrid({ history }: { history: TradeHistoryEntry[] }) 
               )}
               <View className="min-w-0 flex-1">
                 <Text numberOfLines={1} className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
-                  {trade.gave.name}{' '}
+                  {creatureDisplayName(trade.gave)}{' '}
                   {trade.got ? (
                     <>
-                      <Text style={{ color: '#6d7690', fontWeight: '400' }}>for</Text> {trade.got.name}
+                      <Text style={{ color: '#6d7690', fontWeight: '400' }}>for</Text> {creatureDisplayName(trade.got)}
                     </>
                   ) : (
                     <Text style={{ color: '#6d7690', fontWeight: '400' }}>· negotiated in chat</Text>

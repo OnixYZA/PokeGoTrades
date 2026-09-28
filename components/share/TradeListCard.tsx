@@ -10,10 +10,14 @@ import {
   FOOTER_HEIGHT,
   GRID_GAP,
   GRID_TILE_SIZE,
-  HEADER_HEIGHT,
+  HEADER_HANDLE_ROW_HEIGHT,
+  HEADER_ROW_GAP,
+  HEADER_TEAM_ROW_HEIGHT,
+  HEADER_WORDMARK_ROW_HEIGHT,
   OVERFLOW_ROW_HEIGHT,
   SECTION_GAP,
   SECTION_LABEL_HEIGHT,
+  computeHeaderHeight,
   computeSectionHeight,
   computeTradeListLayout,
   type TradeListSection,
@@ -63,7 +67,8 @@ export const TradeListCard = forwardRef<View, TradeListCardProps>(function Trade
   { handle, team, level, arsenal, wishlist, onReady },
   ref,
 ) {
-  const layout = computeTradeListLayout(arsenal, wishlist);
+  const hasTeam = team !== null;
+  const layout = computeTradeListLayout(arsenal, wishlist, hasTeam);
   const totalSprites = layout.arsenal.visible.length + layout.wishlist.visible.length;
 
   const settledCountRef = useRef(0);
@@ -100,7 +105,11 @@ export const TradeListCard = forwardRef<View, TradeListCardProps>(function Trade
   return (
     <View ref={ref} collapsable={false} style={{ width: CARD_WIDTH, backgroundColor: COLORS.bgPanel }}>
       <CardHeader handle={handle} team={team} level={level} />
-      <View style={{ paddingHorizontal: CARD_PADDING }}>
+      {/* `padding` (not `paddingHorizontal`): top/bottom breathing room matching CARD_PADDING's
+       *  horizontal rhythm, so "HAVE" doesn't start flush against the header and the last WANT row
+       *  doesn't touch the footer's border. Both insets are in `computeTradeListLayout`'s `canvasHeight`
+       *  sum (constants/trade-list-layout.ts) — never add spacing here without adding it there too. */}
+      <View style={{ padding: CARD_PADDING }}>
         <CardSection label="HAVE" section={layout.arsenal} onTileSettled={handleTileSettled} />
         <View style={{ height: SECTION_GAP }} />
         <CardSection label="WANT" section={layout.wishlist} onTileSettled={handleTileSettled} />
@@ -110,18 +119,27 @@ export const TradeListCard = forwardRef<View, TradeListCardProps>(function Trade
   );
 });
 
+/**
+ * Every row below gets an explicit height from `constants/trade-list-layout.ts` instead of being left
+ * to stack organically (padding/margin + whatever the text's natural line height happens to render at)
+ * — the same fixed-height-block treatment `CardSection`/`CardFooter` already use. That's what lets
+ * `computeHeaderHeight` compute this block's true height by arithmetic alone, so the space left below
+ * the last row is always exactly `CARD_PADDING`, matching the top, in both the has-a-team and no-team
+ * (`team` can be null) cases — never a slab whose size only happens to work out for one of them.
+ */
 function CardHeader({ handle, team, level }: { handle: string; team: string | null; level?: number }) {
+  const hasTeam = team !== null;
   return (
     <View
       style={{
-        height: HEADER_HEIGHT,
+        height: computeHeaderHeight(hasTeam),
         overflow: 'hidden',
         backgroundColor: COLORS.bgCard,
         paddingHorizontal: CARD_PADDING,
         paddingTop: CARD_PADDING,
       }}
     >
-      <View className="flex-row items-center gap-2">
+      <View className="flex-row items-center gap-2" style={{ height: HEADER_WORDMARK_ROW_HEIGHT }}>
         <View
           className="items-center justify-center rounded-md"
           style={{ width: 22, height: 22, backgroundColor: COLORS.accentBlue }}
@@ -135,7 +153,10 @@ function CardHeader({ handle, team, level }: { handle: string; team: string | nu
         </Text>
       </View>
 
-      <View className="flex-row items-center gap-2" style={{ marginTop: 14 }}>
+      <View
+        className="flex-row items-center gap-2"
+        style={{ height: HEADER_HANDLE_ROW_HEIGHT, marginTop: HEADER_ROW_GAP }}
+      >
         <Text
           numberOfLines={1}
           className="font-display"
@@ -154,8 +175,13 @@ function CardHeader({ handle, team, level }: { handle: string; team: string | nu
 
       {team && (
         <View
-          className="mt-2 self-start rounded-full border px-2.5 py-1"
-          style={{ backgroundColor: COLORS.bgCardAlt, borderColor: COLORS.borderDefault }}
+          className="flex-row items-center self-start rounded-full border px-2.5"
+          style={{
+            height: HEADER_TEAM_ROW_HEIGHT,
+            marginTop: HEADER_ROW_GAP,
+            backgroundColor: COLORS.bgCardAlt,
+            borderColor: COLORS.borderDefault,
+          }}
         >
           <Text className="font-display" style={{ fontSize: 10, color: COLORS.accentBlue, letterSpacing: 0.6 }}>
             TEAM {team.toUpperCase()}

@@ -16,6 +16,7 @@ import type {
 import * as chatsApi from '@/lib/api/chats';
 import { fetchListingsByIds } from '@/lib/api/listings';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { openPrivateChannel } from '@/lib/realtime';
 import { describeError, type ErrorInfo } from '@/lib/rpc-errors';
 import { toast } from '@/lib/toast';
@@ -54,7 +55,8 @@ function splitChatSeeds(
   const messages: Record<string, ChatMessage[]> = {};
   for (const { offers, ...chat } of seeds) {
     chats[chat.id] = chat;
-    messages[chat.id] = offers.length ? offers : fallbackOffers(listingsById[chat.listingId]?.name ?? '');
+    const listing = listingsById[chat.listingId];
+    messages[chat.id] = offers.length ? offers : fallbackOffers(listing ? creatureDisplayName(listing) : '');
   }
   return { chats, messages };
 }
@@ -531,7 +533,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
           id: chatId,
           listingId,
           partner: listing.seller,
-          preview: `Formal offer sent · ${offer.name}`,
+          preview: `Formal offer sent · ${creatureDisplayName(offer)}`,
           unread: 0,
           active: true,
           offers: [{ role: 'me', text: '', time: timeNow(), offer }],

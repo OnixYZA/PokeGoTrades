@@ -28,6 +28,7 @@ import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
 import { findPokemon, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
+import { creatureDisplayName } from '@/lib/format';
 import {
   LISTING_TAGS,
   POKEBALLS,
@@ -1131,7 +1132,7 @@ function WantedSlot({ creature, onRemove }: { creature: CreatureRef; onRemove?: 
       <Pressable
         onPress={onRemove}
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${creature.name}`}
+        accessibilityLabel={`Remove ${creatureDisplayName(creature)}`}
         className="absolute right-1 top-1 h-[18px] w-[18px] items-center justify-center rounded-full border active:opacity-70"
         style={{ backgroundColor: '#0a0a0f', borderColor: C.borderDefault }}
       >
@@ -1139,7 +1140,7 @@ function WantedSlot({ creature, onRemove }: { creature: CreatureRef; onRemove?: 
       </Pressable>
       <Chip creature={creature} size={36} />
       <Text className="mt-1.5" numberOfLines={1} style={{ fontSize: 11, fontWeight: '600', color: C.textPrimary }}>
-        {creature.name}
+        {creatureDisplayName(creature)}
       </Text>
       <Text className="font-mono" style={{ fontSize: 9, color: C.textMuted }}>
         {dexLabel(creature.pokemonId)}

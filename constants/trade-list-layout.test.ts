@@ -10,7 +10,9 @@ import type { CreatureRef } from '@/data/types';
 
 import {
   CARD_CONTENT_WIDTH,
+  CARD_PADDING,
   chunkIntoRows,
+  computeHeaderHeight,
   computeSectionHeight,
   computeTradeListLayout,
   EMPTY_SECTION_HEIGHT,
@@ -18,7 +20,11 @@ import {
   GRID_COLUMNS,
   GRID_GAP,
   GRID_TILE_SIZE,
+  HEADER_HANDLE_ROW_HEIGHT,
   HEADER_HEIGHT,
+  HEADER_ROW_GAP,
+  HEADER_TEAM_ROW_HEIGHT,
+  HEADER_WORDMARK_ROW_HEIGHT,
   MAX_VISIBLE_PER_LIST,
   OVERFLOW_ROW_HEIGHT,
   SECTION_GAP,
@@ -66,22 +72,47 @@ describe('chunkIntoRows', () => {
   });
 });
 
+describe('computeHeaderHeight', () => {
+  it('is the top padding, wordmark row, one gap, and handle row, plus the same padding again, with no team', () => {
+    expect(computeHeaderHeight(false)).toBe(
+      CARD_PADDING + HEADER_WORDMARK_ROW_HEIGHT + HEADER_ROW_GAP + HEADER_HANDLE_ROW_HEIGHT + CARD_PADDING,
+    );
+  });
+
+  it('adds one more gap and the team pill row when hasTeam is true', () => {
+    expect(computeHeaderHeight(true) - computeHeaderHeight(false)).toBe(HEADER_ROW_GAP + HEADER_TEAM_ROW_HEIGHT);
+  });
+
+  it('the exported HEADER_HEIGHT constant is exactly the has-a-team case', () => {
+    expect(HEADER_HEIGHT).toBe(computeHeaderHeight(true));
+  });
+
+  it('leaves the same clear space (CARD_PADDING) below the last row in both cases', () => {
+    // Rebuild each case's "content height" (everything above the trailing padding) and check the
+    // total minus that content is exactly CARD_PADDING — i.e. the bottom inset matches the top one.
+    const withoutTeamContent = CARD_PADDING + HEADER_WORDMARK_ROW_HEIGHT + HEADER_ROW_GAP + HEADER_HANDLE_ROW_HEIGHT;
+    const withTeamContent = withoutTeamContent + HEADER_ROW_GAP + HEADER_TEAM_ROW_HEIGHT;
+    expect(computeHeaderHeight(false) - withoutTeamContent).toBe(CARD_PADDING);
+    expect(computeHeaderHeight(true) - withTeamContent).toBe(CARD_PADDING);
+  });
+});
+
 describe('computeTradeListLayout — caps and overflow', () => {
   it('shows every entry with zero overflow when a list is under the cap', () => {
-    const { arsenal } = computeTradeListLayout(listOf(10), []);
+    const { arsenal } = computeTradeListLayout(listOf(10), [], true);
     expect(arsenal.visible).toHaveLength(10);
     expect(arsenal.overflowCount).toBe(0);
     expect(arsenal.rows.map((r) => r.length)).toEqual([4, 4, 2]);
   });
 
   it('shows exactly the cap with zero overflow right at the boundary', () => {
-    const { arsenal } = computeTradeListLayout(listOf(MAX_VISIBLE_PER_LIST), []);
+    const { arsenal } = computeTradeListLayout(listOf(MAX_VISIBLE_PER_LIST), [], true);
     expect(arsenal.visible).toHaveLength(MAX_VISIBLE_PER_LIST);
     expect(arsenal.overflowCount).toBe(0);
   });
 
   it('caps at 24 and reports the rest as overflow for a full 50-slot list', () => {
-    const { wishlist } = computeTradeListLayout([], listOf(50));
+    const { wishlist } = computeTradeListLayout([], listOf(50), true);
     expect(wishlist.visible).toHaveLength(MAX_VISIBLE_PER_LIST);
     expect(wishlist.overflowCount).toBe(50 - MAX_VISIBLE_PER_LIST);
     // visible items are the first 24, in order — not an arbitrary subset
@@ -90,7 +121,7 @@ describe('computeTradeListLayout — caps and overflow', () => {
   });
 
   it('handles both lists empty', () => {
-    const layout = computeTradeListLayout([], []);
+    const layout = computeTradeListLayout([], [], true);
     expect(layout.arsenal.visible).toHaveLength(0);
     expect(layout.arsenal.overflowCount).toBe(0);
     expect(layout.arsenal.rows).toEqual([]);
@@ -99,35 +130,49 @@ describe('computeTradeListLayout — caps and overflow', () => {
 });
 
 describe('computeTradeListLayout — canvasHeight', () => {
-  it('is exactly header + two empty sections + the gap + footer when both lists are empty', () => {
-    const layout = computeTradeListLayout([], []);
+  it('is exactly header + top/bottom content padding + two empty sections + the gap + footer, with a team', () => {
+    const layout = computeTradeListLayout([], [], true);
     const emptySection = SECTION_LABEL_HEIGHT + EMPTY_SECTION_HEIGHT;
-    expect(layout.canvasHeight).toBe(HEADER_HEIGHT + emptySection + SECTION_GAP + emptySection + FOOTER_HEIGHT);
+    expect(layout.canvasHeight).toBe(
+      HEADER_HEIGHT + CARD_PADDING + emptySection + SECTION_GAP + emptySection + CARD_PADDING + FOOTER_HEIGHT,
+    );
+  });
+
+  it('shrinks by exactly one header gap + the team row when hasTeam flips to false, everything else equal', () => {
+    const withTeam = computeTradeListLayout([], [], true);
+    const withoutTeam = computeTradeListLayout([], [], false);
+    expect(withTeam.canvasHeight - withoutTeam.canvasHeight).toBe(HEADER_ROW_GAP + HEADER_TEAM_ROW_HEIGHT);
   });
 
   it('grows by exactly one grid-row-and-gap when a section gains a 5th item (a 2nd row)', () => {
-    const four = computeTradeListLayout(listOf(4), []);
-    const five = computeTradeListLayout(listOf(5), []);
+    const four = computeTradeListLayout(listOf(4), [], true);
+    const five = computeTradeListLayout(listOf(5), [], true);
     expect(five.canvasHeight - four.canvasHeight).toBe(GRID_TILE_SIZE + GRID_GAP);
   });
 
   it('adds the overflow row height exactly once when a list crosses the cap', () => {
-    const atCap = computeTradeListLayout(listOf(MAX_VISIBLE_PER_LIST), []);
-    const overCap = computeTradeListLayout(listOf(MAX_VISIBLE_PER_LIST + 1), []);
+    const atCap = computeTradeListLayout(listOf(MAX_VISIBLE_PER_LIST), [], true);
+    const overCap = computeTradeListLayout(listOf(MAX_VISIBLE_PER_LIST + 1), [], true);
     // The extra (25th) item is hidden, not rendered as a new row — only the overflow row's height is added.
     expect(overCap.canvasHeight - atCap.canvasHeight).toBe(OVERFLOW_ROW_HEIGHT);
   });
 
   it('is deterministic for the same input', () => {
-    const a = computeTradeListLayout(listOf(6), listOf(3));
-    const b = computeTradeListLayout(listOf(6), listOf(3));
+    const a = computeTradeListLayout(listOf(6), listOf(3), true);
+    const b = computeTradeListLayout(listOf(6), listOf(3), true);
     expect(a.canvasHeight).toBe(b.canvasHeight);
   });
 
-  it('always equals the sum of computeSectionHeight for both sections plus the fixed blocks', () => {
-    const layout = computeTradeListLayout(listOf(30), listOf(2));
+  it('always equals computeHeaderHeight + the top/bottom content padding + both sections + the fixed blocks', () => {
+    const layout = computeTradeListLayout(listOf(30), listOf(2), false);
     const expected =
-      HEADER_HEIGHT + computeSectionHeight(layout.arsenal) + SECTION_GAP + computeSectionHeight(layout.wishlist) + FOOTER_HEIGHT;
+      computeHeaderHeight(false) +
+      CARD_PADDING +
+      computeSectionHeight(layout.arsenal) +
+      SECTION_GAP +
+      computeSectionHeight(layout.wishlist) +
+      CARD_PADDING +
+      FOOTER_HEIGHT;
     expect(layout.canvasHeight).toBe(expected);
   });
 });

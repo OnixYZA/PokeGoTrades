@@ -17,6 +17,7 @@ import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { hueBadgeStyle } from '@/constants/theme';
 import { POKEDEX, searchPokedex, type PokedexEntry } from '@/constants/pokedex';
+import { creatureDisplayName } from '@/lib/format';
 import { spriteVariantKey, spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
@@ -266,13 +267,14 @@ function PokedexRow({
   onPress: () => void;
 }) {
   const dex = `#${String(entry.pokemonId).padStart(3, '0')}`;
-  const label = shiny ? `Add Shiny ${entry.name}, ${dex}, ${entry.type} type` : `Add ${entry.name}, ${dex}, ${entry.type} type`;
+  const displayName = creatureDisplayName({ name: entry.name, shiny });
+  const label = `Add ${displayName}, ${dex}, ${entry.type} type`;
   return (
     <Pressable
       onPress={added ? undefined : onPress}
       disabled={added}
       accessibilityRole="button"
-      accessibilityLabel={added ? `${entry.name}, already added` : label}
+      accessibilityLabel={added ? `${displayName}, already added` : label}
       accessibilityState={{ disabled: added }}
       className={`flex-row items-center gap-3 rounded-[14px] border px-3 py-2.5 ${added ? 'opacity-50' : 'active:opacity-80'}`}
       style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
@@ -280,7 +282,7 @@ function PokedexRow({
       <Chip creature={{ pokemonId: entry.pokemonId, hue: entry.hue, shiny }} size={44} />
       <View className="min-w-0 flex-1">
         <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
-          {entry.name}
+          {displayName}
         </Text>
         <View className="mt-1 flex-row items-center gap-1.5">
           <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.5 }}>

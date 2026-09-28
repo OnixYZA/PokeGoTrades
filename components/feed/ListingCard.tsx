@@ -10,6 +10,7 @@ import { Sprite } from '@/components/ui/Sprite';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { Listing } from '@/data/types';
+import { creatureDisplayName } from '@/lib/format';
 
 /** At most this many attribute/tag badges render before the row collapses the rest into "+N" — keeps
  *  a listing with every attribute set (and a full 5 tags) from overflowing a 360pt-wide card. */
@@ -58,8 +59,15 @@ export function ListingCard({ listing }: { listing: Listing }) {
           {listing.shiny && (
             <Text style={{ fontSize: 11, color: '#ff6bd6', textShadow: '0 0 6px #ff6bd6' } as any}>✦</Text>
           )}
-          <Text className="font-display text-text-primary" style={{ fontSize: 16, letterSpacing: -0.16 }}>
-            {listing.name}
+          {/* `flexShrink: 1` + `numberOfLines`: the "Shiny " prefix (Task 1) is ~6 characters longer, and
+           *  a Text next to the fixed-size glyph in this row doesn't shrink by default in RN — without
+           *  this a long name (e.g. "Shiny Blacephalon") would overflow the card instead of eliding. */}
+          <Text
+            numberOfLines={1}
+            className="font-display text-text-primary"
+            style={{ fontSize: 16, letterSpacing: -0.16, flexShrink: 1 }}
+          >
+            {creatureDisplayName(listing)}
           </Text>
         </View>
         <Text className="font-mono text-text-subtle" style={{ fontSize: 12, pointerEvents: 'none' }}>

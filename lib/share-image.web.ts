@@ -58,7 +58,7 @@ function downloadBlob(blob: Blob): void {
  *   `useRef<View>(null)` produces exactly this, not `RefObject<View>`). React Native Web forwards a
  *   `View`'s ref straight to its underlying DOM node, which is exactly what the web `captureRef`
  *   (html2canvas) expects to be handed.
- * @param canvasHeight `computeTradeListLayout(arsenal, wishlist).canvasHeight` — see
+ * @param canvasHeight `computeTradeListLayout(arsenal, wishlist, hasTeam).canvasHeight` — see
  *   `lib/share-image.ts`'s matching doc comment for why this (not width alone) is what pins the
  *   output to `SHARE_IMAGE_OUTPUT_WIDTH` px.
  */

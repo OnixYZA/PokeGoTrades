@@ -27,6 +27,7 @@ import {
   type MyProfile,
 } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
@@ -203,7 +204,7 @@ export default function ProfileScreen() {
     if (addingCreature) return;
     const entry = findPokemon(pokemonId);
     const listLabel = list === 'arsenal' ? 'Arsenal' : 'Wishlist';
-    const displayName = entry ? (shiny ? `Shiny ${entry.name}` : entry.name) : 'That Pokémon';
+    const displayName = entry ? creatureDisplayName({ name: entry.name, shiny }) : 'That Pokémon';
     setAddingCreature(true);
     try {
       await (list === 'arsenal' ? addToArsenal(pokemonId, shiny) : addToWishlist(pokemonId, shiny));
@@ -367,14 +368,16 @@ export default function ProfileScreen() {
 }
 
 /** "Share trade list" (Task 2B): exports the Arsenal + Wishlist grids above as a single PNG. Sits right
- *  under both grids in both branches that render it — see the two call sites above. */
+ *  under both grids in both branches that render it — see the two call sites above. `mt-3` groups it with
+ *  the Wishlist (which has no bottom margin of its own); no bottom margin here, since `TradeHistoryGrid`
+ *  already brings the 22px section gap — adding one too doubled it to 44px. */
 function ShareTradeListButton({ onPress }: { onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel="Share trade list"
-      className="mb-[22px] flex-row items-center justify-center gap-2 rounded-2xl border border-border-strong bg-bg-card py-3 active:opacity-80"
+      className="mt-3 flex-row items-center justify-center gap-2 rounded-2xl border border-border-strong bg-bg-card py-3 active:opacity-80"
     >
       <Share2 size={15} color="#4fb3ff" />
       <Text className="font-display text-accent-blue" style={{ fontSize: 13 }}>

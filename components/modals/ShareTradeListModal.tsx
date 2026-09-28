@@ -40,7 +40,7 @@ export function ShareTradeListModal({ handle, team, level, arsenal, wishlist, on
   const [spritesReady, setSpritesReady] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  const layout = useMemo(() => computeTradeListLayout(arsenal, wishlist), [arsenal, wishlist]);
+  const layout = useMemo(() => computeTradeListLayout(arsenal, wishlist, team !== null), [arsenal, wishlist, team]);
   const isEmpty = arsenal.length === 0 && wishlist.length === 0;
   const canShare = spritesReady && !isEmpty && !sharing;
 
