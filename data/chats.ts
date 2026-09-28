@@ -54,5 +54,3 @@ export const fallbackOffers = (listingName: string): ChatMessage[] => [
 
 export const formalOffer = { name: 'Legacy Dragonite', pokemonId: 149, hue: 205, iv: '96% IV', move: 'Draco Meteor' };
 
-export const totalUnread = chats.reduce((sum, c) => sum + c.unread, 0);
-

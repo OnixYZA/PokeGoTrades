@@ -69,8 +69,6 @@ export const HEADER_HEIGHT = computeHeaderHeight(true);
 export const SECTION_LABEL_HEIGHT = 26;
 /** Vertical gap between the HAVE and WANT sections. */
 export const SECTION_GAP = 16;
-/** One grid row's height, including the gap above it (rows after the first only). */
-export const GRID_ROW_HEIGHT = GRID_TILE_SIZE + GRID_GAP;
 /** The "+N more" row, shown only when a list has overflow. */
 export const OVERFLOW_ROW_HEIGHT = 24;
 /** "Nothing here yet" row, shown only when a list has zero entries. */
