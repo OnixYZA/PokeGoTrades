@@ -5,7 +5,9 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { findPokemon } from '../constants/pokedex';
 import {
+  BASE_FORM_CODES,
   backgroundObjectKey,
   getSpriteUrl,
   isSpriteCode,
@@ -215,5 +217,78 @@ describe('spriteCandidates', () => {
       url('pokemon/133.s.png'),
       url('pokemon/133.png'),
     ]);
+  });
+});
+
+describe('spriteCandidates — species whose default art lives under a form token', () => {
+  const BASE = 'https://example.supabase.co';
+  const url = (key: string) => `${BASE}/storage/v1/object/public/sprites/${key}`;
+
+  // The five species whose plain non-shiny key exists in the bucket but whose plain shiny key does not
+  // (verified against the live bucket; see BASE_FORM_CODES).
+  const CASES: [name: string, pokemonId: number, baseForm: string][] = [
+    ['Giratina', 487, 'ALTERED'],
+    ['Meloetta', 648, 'ARIA'],
+    ['Morpeko', 877, 'FULL_BELLY'],
+    ['Zacian', 888, 'HERO'],
+    ['Zamazenta', 889, 'HERO'],
+  ];
+
+  it.each(CASES)('%s (#%i) knows its default form code', (_name, pokemonId, baseForm) => {
+    expect(BASE_FORM_CODES[pokemonId]).toBe(baseForm);
+  });
+
+  it.each(CASES)('%s (#%i) regular: plain key first, then the default-form key', (_name, pokemonId, baseForm) => {
+    process.env.EXPO_PUBLIC_SUPABASE_URL = BASE;
+    expect(spriteCandidates({ pokemonId })).toEqual([
+      url(`pokemon/${pokemonId}.png`),
+      url(`pokemon/${pokemonId}.f${baseForm}.png`),
+    ]);
+  });
+
+  it.each(CASES)(
+    '%s (#%i) shiny: tries the default form\'s SHINY art before any non-shiny art',
+    (_name, pokemonId, baseForm) => {
+      process.env.EXPO_PUBLIC_SUPABASE_URL = BASE;
+      expect(spriteCandidates({ pokemonId, shiny: true })).toEqual([
+        url(`pokemon/${pokemonId}.s.png`),
+        url(`pokemon/${pokemonId}.f${baseForm}.s.png`),
+        url(`pokemon/${pokemonId}.png`),
+        url(`pokemon/${pokemonId}.f${baseForm}.png`),
+      ]);
+    },
+  );
+
+  it('the plain keys the mirror now fills are ordinary spriteObjectKey output', () => {
+    expect(spriteObjectKey({ pokemonId: 888, shiny: true })).toBe('pokemon/888.s.png');
+    expect(spriteObjectKey({ pokemonId: 888, shiny: true, form: BASE_FORM_CODES[888] })).toBe('pokemon/888.fHERO.s.png');
+  });
+
+  it('an explicit default-form request does not list its own key twice', () => {
+    process.env.EXPO_PUBLIC_SUPABASE_URL = BASE;
+    expect(spriteCandidates({ pokemonId: 888, form: 'HERO', shiny: true })).toEqual([
+      url('pokemon/888.fHERO.s.png'),
+      url('pokemon/888.s.png'),
+      url('pokemon/888.png'),
+      url('pokemon/888.fHERO.png'),
+    ]);
+  });
+
+  it('a different form still falls back through the default form (Origin -> Altered Giratina)', () => {
+    process.env.EXPO_PUBLIC_SUPABASE_URL = BASE;
+    expect(spriteCandidates({ pokemonId: 487, form: 'ORIGIN', shiny: true })).toEqual([
+      url('pokemon/487.fORIGIN.s.png'),
+      url('pokemon/487.s.png'),
+      url('pokemon/487.fALTERED.s.png'),
+      url('pokemon/487.png'),
+      url('pokemon/487.fALTERED.png'),
+    ]);
+  });
+
+  it('every default form code is a valid sprite code for a real dex entry', () => {
+    for (const [id, code] of Object.entries(BASE_FORM_CODES)) {
+      expect(isSpriteCode(code), `#${id} ${code}`).toBe(true);
+      expect(findPokemon(Number(id)), `#${id}`).toBeDefined();
+    }
   });
 });

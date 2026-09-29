@@ -11,12 +11,12 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, Plus, Search, Sparkles, X } from 'lucide-react-native';
+import { Ban, Check, Plus, Search, Sparkles, X } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { hueBadgeStyle } from '@/constants/theme';
-import { POKEDEX, searchPokedex, type PokedexEntry } from '@/constants/pokedex';
+import { isPokemonUntradable, POKEDEX, searchPokedex, type PokedexEntry } from '@/constants/pokedex';
 import { creatureDisplayName } from '@/lib/format';
 import { spriteVariantKey, spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
 
@@ -48,7 +48,11 @@ interface PokemonPickerModalProps {
 }
 
 /**
- * Full-dex search sheet shared by the Arsenal and Wishlist "+" buttons (app/(tabs)/profile.tsx). Owns
+ * Full-dex search sheet shared by the Arsenal and Wishlist "+" buttons (app/(tabs)/profile.tsx) and by
+ * CreateListingModal's "CREATURE" and "WANTED IN RETURN" slots. Every one of those is a trade list, so
+ * untradable species (`isPokemonUntradable`) are never selectable here. They are still listed, dimmed and
+ * marked, and tapping one explains why instead of silently doing nothing. Rows are species only (no form
+ * codes), so in practice this catches Mythicals and Zygarde; fused forms cannot be picked here at all. Owns
  * its own native `Modal`, unlike the other components in this folder which are mounted inside a `Modal`
  * by their screen — this one has no screen-specific chrome to coordinate with, so keeping the two
  * together avoids every caller re-declaring the same `Modal` props.
@@ -64,12 +68,15 @@ export function PokemonPickerModal({
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [shiny, setShiny] = useState(false);
+  /** The untradable row the trainer last tapped, shown as an explanation above the list. */
+  const [refused, setRefused] = useState<PokedexEntry | null>(null);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (!visible) return;
     setQuery(''); // never reopen showing the previous search
     setShiny(false); // never reopen with the previous open's shiny toggle still on
+    setRefused(null);
     // The sheet's TextInput mounts into a fresh native Modal host each time `visible` flips true;
     // focusing on the very same tick can race that mount, so defer one frame. (`autoFocus` only ever
     // fires on first mount, not on a later re-open, which is why this manages focus itself instead.)
@@ -86,14 +93,23 @@ export function PokemonPickerModal({
     [query],
   );
 
-  const renderItem = ({ item }: ListRenderItemInfo<PokedexEntry>) => (
-    <PokedexRow
-      entry={item}
-      shiny={shiny}
-      added={excluded.has(spriteVariantKey(spriteVariantOf({ pokemonId: item.pokemonId, shiny })))}
-      onPress={() => onSelect(item.pokemonId, allowShiny ? shiny : false)}
-    />
-  );
+  const changeQuery = (next: string) => {
+    setQuery(next);
+    setRefused(null);
+  };
+
+  const renderItem = ({ item }: ListRenderItemInfo<PokedexEntry>) => {
+    const untradable = isPokemonUntradable(item.pokemonId);
+    return (
+      <PokedexRow
+        entry={item}
+        shiny={shiny}
+        untradable={untradable}
+        added={excluded.has(spriteVariantKey(spriteVariantOf({ pokemonId: item.pokemonId, shiny })))}
+        onPress={() => (untradable ? setRefused(item) : onSelect(item.pokemonId, allowShiny ? shiny : false))}
+      />
+    );
+  };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -115,12 +131,13 @@ export function PokemonPickerModal({
                 <Header title={title} onClose={onClose} />
                 <SearchField
                   query={query}
-                  onChangeQuery={setQuery}
+                  onChangeQuery={changeQuery}
                   inputRef={inputRef}
                   allowShiny={allowShiny}
                   shiny={shiny}
                   onToggleShiny={() => setShiny((v) => !v)}
                 />
+                {refused && <UntradableNotice name={refused.name} onDismiss={() => setRefused(null)} />}
                 <FlatList
                   data={results}
                   keyExtractor={(item) => String(item.pokemonId)}
@@ -255,28 +272,61 @@ function SearchField({
   );
 }
 
+/** Why the row the trainer just tapped did nothing. Sits between the search field and the list, so it stays
+ *  in view however far the list has scrolled. */
+function UntradableNotice({ name, onDismiss }: { name: string; onDismiss: () => void }) {
+  return (
+    <View
+      accessibilityRole="alert"
+      className="mx-5 mb-3 flex-row items-start gap-2.5 rounded-[14px] border px-3.5 py-3"
+      style={{ backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.35)' }}
+    >
+      <Ban size={16} color={C.danger} strokeWidth={2.5} style={{ marginTop: 1 }} />
+      <Text className="flex-1" style={{ fontSize: 12.5, lineHeight: 18, color: C.textSecondary }}>
+        <Text style={{ fontWeight: '700', color: C.textPrimary }}>{name}</Text> can’t be traded in Pokémon GO. Mythical
+        Pokémon (except Meltan and Melmetal), Zygarde and fused forms like White Kyurem never change hands, so they
+        can’t be listed, wanted or offered.
+      </Text>
+      <Pressable onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss" hitSlop={8} className="active:opacity-70">
+        <X size={14} color={C.textMuted} strokeWidth={2.5} />
+      </Pressable>
+    </View>
+  );
+}
+
 function PokedexRow({
   entry,
   shiny,
+  untradable,
   added,
   onPress,
 }: {
   entry: PokedexEntry;
   shiny: boolean;
+  /** Dimmed and marked, and the press explains the refusal (`UntradableNotice`) rather than adding. */
+  untradable: boolean;
   added: boolean;
   onPress: () => void;
 }) {
   const dex = `#${String(entry.pokemonId).padStart(3, '0')}`;
   const displayName = creatureDisplayName({ name: entry.name, shiny });
-  const label = `Add ${displayName}, ${dex}, ${entry.type} type`;
+  const label = untradable
+    ? `${displayName}, ${dex}, can’t be traded in Pokémon GO`
+    : added
+      ? `${displayName}, already added`
+      : `Add ${displayName}, ${dex}, ${entry.type} type`;
+  // An untradable row stays pressable (the press explains the refusal), so only an added one is disabled.
+  const blocked = added && !untradable;
+  const dimmed = untradable || added;
   return (
     <Pressable
-      onPress={added ? undefined : onPress}
-      disabled={added}
+      onPress={blocked ? undefined : onPress}
+      disabled={blocked}
       accessibilityRole="button"
-      accessibilityLabel={added ? `${displayName}, already added` : label}
-      accessibilityState={{ disabled: added }}
-      className={`flex-row items-center gap-3 rounded-[14px] border px-3 py-2.5 ${added ? 'opacity-50' : 'active:opacity-80'}`}
+      accessibilityLabel={label}
+      accessibilityHint={untradable ? 'Explains why it can’t be added' : undefined}
+      accessibilityState={{ disabled: blocked }}
+      className={`flex-row items-center gap-3 rounded-[14px] border px-3 py-2.5 ${dimmed ? 'opacity-50' : 'active:opacity-80'}`}
       style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
     >
       <Chip creature={{ pokemonId: entry.pokemonId, hue: entry.hue, shiny }} size={44} />
@@ -295,7 +345,17 @@ function PokedexRow({
           </View>
         </View>
       </View>
-      {added ? (
+      {untradable ? (
+        <View
+          className="flex-row items-center gap-1 rounded-full px-2.5 py-1"
+          style={{ backgroundColor: 'rgba(239,68,68,0.15)' }}
+        >
+          <Ban size={12} color={C.danger} strokeWidth={3} />
+          <Text className="font-mono-bold" style={{ fontSize: 9, color: C.danger, letterSpacing: 0.6 }}>
+            UNTRADABLE
+          </Text>
+        </View>
+      ) : added ? (
         <View
           className="flex-row items-center gap-1 rounded-full px-2.5 py-1"
           style={{ backgroundColor: 'rgba(34,197,94,0.15)' }}

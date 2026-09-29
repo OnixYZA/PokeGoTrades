@@ -28,7 +28,7 @@
  * base sprite.
  */
 import { findPokemon } from '../constants/pokedex';
-import { isSpriteCode, spriteObjectKey } from '../lib/sprite-url';
+import { BASE_FORM_CODES, isSpriteCode, spriteObjectKey } from '../lib/sprite-url';
 
 export interface ParsedPokeMinersIcon {
   pokemonId: number;
@@ -73,13 +73,16 @@ export interface PlannedUpload {
 
 export interface MirrorPlan {
   uploads: PlannedUpload[];
+  /** Plain species keys (`pokemon/{id}[.s].png`) that upstream has no plain file for, filled from the
+   *  species' default-form file instead (`BASE_FORM_CODES`). They are also in `uploads`. */
+  defaultFormFills: string[];
   /** In-scope source files refused because a form/costume code fails `isSpriteCode` (see header). */
   invalidCode: string[];
   /** Two distinct source files resolving to one key. With invalid codes refused up front this should
    *  never happen; it stays as a guard, and neither file is uploaded. */
   collisions: string[];
-  /** In-range Pokédex ids with no base (non-shiny, no form/costume) icon upstream. They render the
-   *  initial-letter placeholder in the app. */
+  /** In-range Pokédex ids with no base (non-shiny, no form/costume) icon upstream, not even a default-form
+   *  one. They render the initial-letter placeholder in the app. */
   missingBase: number[];
 }
 
@@ -87,17 +90,30 @@ function inRange(pokemonId: number, range: [number, number] | null): boolean {
   return range === null || (pokemonId >= range[0] && pokemonId <= range[1]);
 }
 
-/** Pure: source listing + scope -> what to upload. Every key comes from `spriteObjectKey` (R4). */
+/**
+ * Pure: source listing + scope -> what to upload. Every key comes from `spriteObjectKey` (R4).
+ *
+ * A species whose default art exists upstream only under a form token (`pm888.fHERO.s.icon.png`, with no
+ * `pm888.s.icon.png`) gets its plain key filled from that default-form file, so the bucket always holds
+ * `pokemon/{id}[.s].png` wherever upstream has the art at all. A real plain file always wins, so the fill
+ * can never collide with it. The fill is a BASE key, so it happens even without `--forms`.
+ */
 export function planMirror(sourceFiles: readonly string[], scope: MirrorScope): MirrorPlan {
   const sourcesByKey = new Map<string, string[]>();
   const invalidCode: string[] = [];
   const hasBase = new Set<number>();
+  /** Plain key -> the default-form file that could fill it, if upstream turns out to have no plain file. */
+  const defaultFormSources = new Map<string, { pokemonId: number; shiny: boolean; file: string }>();
 
   for (const file of sourceFiles) {
     const parsed = parsePokeMinersIcon(file);
     if (!parsed || parsed.gender2) continue; // not an icon, or the alternate gender (no gender axis in the key)
     if (!findPokemon(parsed.pokemonId) || !inRange(parsed.pokemonId, scope.range)) continue;
     if (!parsed.form && !parsed.costume && !parsed.shiny) hasBase.add(parsed.pokemonId);
+    if (parsed.form && !parsed.costume && parsed.form === BASE_FORM_CODES[parsed.pokemonId]) {
+      const { pokemonId, shiny } = parsed;
+      defaultFormSources.set(spriteObjectKey({ pokemonId, shiny }), { pokemonId, shiny, file });
+    }
     if (parsed.form && !scope.forms) continue;
     if (parsed.costume && !scope.costumes) continue;
     if ((parsed.form && !isSpriteCode(parsed.form)) || (parsed.costume && !isSpriteCode(parsed.costume))) {
@@ -106,6 +122,14 @@ export function planMirror(sourceFiles: readonly string[], scope: MirrorScope): 
     }
     const key = spriteObjectKey(parsed);
     sourcesByKey.set(key, [...(sourcesByKey.get(key) ?? []), file]);
+  }
+
+  const defaultFormFills: string[] = [];
+  for (const [key, { pokemonId, shiny, file }] of defaultFormSources) {
+    if (sourcesByKey.has(key)) continue;
+    sourcesByKey.set(key, [file]);
+    defaultFormFills.push(key);
+    if (!shiny) hasBase.add(pokemonId);
   }
 
   const uploads: PlannedUpload[] = [];
@@ -122,5 +146,11 @@ export function planMirror(sourceFiles: readonly string[], scope: MirrorScope): 
   }
 
   uploads.sort((a, b) => a.key.localeCompare(b.key));
-  return { uploads, invalidCode: invalidCode.sort(), collisions: collisions.sort(), missingBase };
+  return {
+    uploads,
+    defaultFormFills: defaultFormFills.sort(),
+    invalidCode: invalidCode.sort(),
+    collisions: collisions.sort(),
+    missingBase,
+  };
 }

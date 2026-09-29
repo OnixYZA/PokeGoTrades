@@ -26,7 +26,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import { findPokemon, type PokedexEntry } from '@/constants/pokedex';
+import { findPokemon, isPokemonUntradable, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
 import { creatureDisplayName } from '@/lib/format';
 import {
@@ -256,12 +256,14 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
    *  ToastHost; this flow has no toast, but the close-first order still avoids the picker's own Modal
    *  re-rendering mid-close). `shiny` is only ever true here for a 'wanted' pick — the picker's own
    *  Shiny pill is gated off for the 'creature' slot (`allowShiny={pickerFor === 'wanted'}` below),
-   *  since that slot already has its own Shiny toggle in the form. */
+   *  since that slot already has its own Shiny toggle in the form. This is the only way into
+   *  `selectedCreature` and `wanted`, so refusing untradable species here means a draft can never hold one.
+   *  The picker already refuses them; the database (`listings_tradable_guard`) is the backstop. */
   const handlePickPokemon = (pokemonId: number, shiny: boolean) => {
     const target = pickerFor;
     setPickerFor(null);
     const entry = findPokemon(pokemonId);
-    if (!entry) return;
+    if (!entry || isPokemonUntradable(entry.pokemonId)) return;
     if (target === 'creature') {
       setSelectedCreature(entry);
     } else if (target === 'wanted') {

@@ -138,4 +138,50 @@ describe('planMirror', () => {
     const plan = planMirror(['pm1.icon.png', 'pm2.s.icon.png'], { ...BASE_ONLY, range: [1, 3] });
     expect(plan.missingBase).toEqual([2, 3]);
   });
+
+  // Real upstream names (confirmed by a dry run on 2026-09-29): Zacian has a plain base icon but its shiny
+  // exists only as the Hero form, and Unown has no plain icon at all.
+  const ZACIAN = ['pm888.icon.png', 'pm888.fHERO.icon.png', 'pm888.fHERO.s.icon.png', 'pm888.fCROWNED_SWORD.s.icon.png'];
+  const UNOWN = ['pm201.fUNOWN_A.icon.png', 'pm201.fUNOWN_A.s.icon.png', 'pm201.fUNOWN_B.icon.png'];
+
+  it('fills a missing plain shiny key from the default form, even without --forms', () => {
+    const plan = planMirror(ZACIAN, { ...BASE_ONLY, range: [888, 888] });
+    expect(plan.uploads).toEqual([
+      { key: 'pokemon/888.png', sourceFile: 'pm888.icon.png' },
+      { key: 'pokemon/888.s.png', sourceFile: 'pm888.fHERO.s.icon.png' },
+    ]);
+    expect(plan.defaultFormFills).toEqual(['pokemon/888.s.png']);
+  });
+
+  it('fills both plain keys for a species with no plain icon, which then no longer counts as missing', () => {
+    const plan = planMirror(UNOWN, { ...BASE_ONLY, range: [201, 201] });
+    expect(plan.uploads).toEqual([
+      { key: 'pokemon/201.png', sourceFile: 'pm201.fUNOWN_A.icon.png' },
+      { key: 'pokemon/201.s.png', sourceFile: 'pm201.fUNOWN_A.s.icon.png' },
+    ]);
+    expect(plan.missingBase).toEqual([]);
+  });
+
+  it('with --forms, the default form ALSO uploads under its own key, with no collision', () => {
+    const plan = planMirror(ZACIAN, { forms: true, costumes: false, range: [888, 888] });
+    expect(plan.uploads.map((u) => u.key)).toEqual([
+      'pokemon/888.fCROWNED_SWORD.s.png',
+      'pokemon/888.fHERO.png',
+      'pokemon/888.fHERO.s.png',
+      'pokemon/888.png',
+      'pokemon/888.s.png',
+    ]);
+    expect(plan.collisions).toEqual([]);
+  });
+
+  it('never fills over a real plain file', () => {
+    const plan = planMirror(['pm888.s.icon.png', 'pm888.fHERO.s.icon.png'], { ...BASE_ONLY, range: [888, 888] });
+    expect(plan.uploads).toEqual([{ key: 'pokemon/888.s.png', sourceFile: 'pm888.s.icon.png' }]);
+    expect(plan.defaultFormFills).toEqual([]);
+  });
+
+  it('only a default form fills the plain key, never another form', () => {
+    const plan = planMirror(['pm888.icon.png', 'pm888.fCROWNED_SWORD.s.icon.png'], { ...BASE_ONLY, range: [888, 888] });
+    expect(plan.uploads.map((u) => u.key)).toEqual(['pokemon/888.png']);
+  });
 });

@@ -65,7 +65,7 @@ export const listings: Listing[] = [
     looking: [
       { name: 'Legacy Dragonite', pokemonId: 149, hue: 340 },
       { name: 'Purified Ho-Oh', pokemonId: 250, hue: 25 },
-      { name: 'Deoxys A.', pokemonId: 386, formCode: 'ATTACK', hue: 220, shiny: true, lucky: true },
+      { name: 'Giratina O.', pokemonId: 487, formCode: 'ORIGIN', hue: 220, shiny: true, lucky: true },
     ],
     tags: ['Legacy Move', 'Community Day'],
     purified: false,
@@ -185,7 +185,7 @@ export const listings: Listing[] = [
     looking: [
       { name: 'Purified Apex Ho-Oh', pokemonId: 250, hue: 340 },
       { name: 'Primal Groudon', pokemonId: 383, formCode: 'PRIMAL', hue: 25 },
-      { name: 'Mew', pokemonId: 151, hue: 220, shiny: true, lucky: true },
+      { name: 'Melmetal', pokemonId: 809, hue: 220, shiny: true, lucky: true },
     ],
     tags: [],
     purified: true,
