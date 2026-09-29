@@ -40,6 +40,34 @@ export function readDateOrder(): DateOrder {
   return raw;
 }
 
+/** `PGT_WORKER_SECRET` must be at least this long: `openssl rand -hex 32` produces 64 hex characters, and this
+ * floor is deliberately half that so it rejects an obviously-weak placeholder (`your_custom_secret_here` is 24
+ * characters) without being tied to hex encoding specifically. */
+const MIN_WORKER_SECRET_LENGTH = 32;
+
+/**
+ * The shared secret `src/functions/profileOcr.ts` checks the `x-api-key` header against (see `src/core/auth.ts`
+ * for the comparison itself). It replaces Azure's own function keys, which are opaque and awkward to fetch back
+ * out for a containerized Functions host (see the migration's header comment,
+ * `20260928000100_ocr_vault_auth.sql`): this is instead a value we generate ourselves, store once as the
+ * Container App secret `pgt-worker-secret` (env var `PGT_WORKER_SECRET`), and store again under the SAME name,
+ * `azure_ocr_key`, in Supabase Vault, so `private.notify_profile_ocr` can send it back to us unchanged.
+ *
+ * Deliberately NOT part of `Config` / `loadConfig()`: the timer trigger (`ocrSweep`) never receives or checks
+ * this header, so it must never fail a sweep just because this var happens to be unset — only the HTTP handler
+ * that actually needs it calls this function, and only at the point it needs the value.
+ */
+export function readWorkerSecret(): string {
+  const value = required('PGT_WORKER_SECRET');
+  if (value.length < MIN_WORKER_SECRET_LENGTH) {
+    throw new Error(
+      `PGT_WORKER_SECRET must be at least ${MIN_WORKER_SECRET_LENGTH} characters, got ${value.length}. ` +
+        `Generate one with: openssl rand -hex 32`,
+    );
+  }
+  return value;
+}
+
 const MODEL = 'eng.traineddata.gz';
 
 /**

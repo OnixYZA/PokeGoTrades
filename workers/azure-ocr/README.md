@@ -102,11 +102,12 @@ which cannot reach a `localhost` port on your machine. Two consequences:
   next minute mark or:
 
   ```bash
-  curl -X POST http://localhost:7071/api/profile-ocr -d '{}'
+  curl -X POST http://localhost:7071/api/profile-ocr -H "x-api-key: <same value as local.settings.json's PGT_WORKER_SECRET>" -d '{}'
   ```
 
   The empty body is fine — `proofId` is only ever a hint (see `src/functions/profileOcr.ts`); with none, it just
-  sweeps the whole queue.
+  sweeps the whole queue. The `x-api-key` header is not optional: `profileOcr` is `authLevel: 'anonymous'` and
+  checks this header itself against `PGT_WORKER_SECRET`, so a request without a matching header gets a bare 401.
 
 **With real uploads from the app.** Run the app with `EXPO_PUBLIC_DATA_SOURCE=supabase`, publish a listing with
 proof screenshots or upload a profile proof, then either wait for `ocrSweep`'s next tick or `curl` the endpoint
@@ -300,6 +301,7 @@ Set in `local.settings.json` locally (see `local.settings.json.example`), as App
 | `OCR_LANG_PATH` | unset | Folder with `eng.traineddata.gz`. Default: resolved from the `@tesseract.js-data/eng` dependency. |
 | `OCR_RUN_BUDGET_SECONDS` | `540` | `ocrSweep`'s own time budget, shared across both queues (profile first, then listing) |
 | `OCR_SWEEP_ON_STARTUP` | `false` | `true` runs `ocrSweep` immediately when the Function App starts, instead of waiting for the next minute mark |
+| `PGT_WORKER_SECRET` | required (only for `profileOcr`) | The shared secret `profileOcr` checks the `x-api-key` header against (`src/core/auth.ts`). `ocrSweep` never reads it. Generate with `openssl rand -hex 32`; must be ≥32 characters and equal Supabase Vault's `azure_ocr_key` (see "Deploy to Azure" below). |
 
 ## Deploy to Azure
 
@@ -343,17 +345,28 @@ az functionapp config appsettings set --name <app-name> --resource-group pokegot
 (Flex Consumption's per-instance concurrency for HTTP triggers is otherwise set via the `http` section of the
 plan's scale settings in the portal — set it to 1 for the same CPU-bound reason.)
 
-Get the function key `notify_profile_ocr` needs to call `profileOcr` (`authLevel: 'function'`):
+`profileOcr` is `authLevel: 'anonymous'` and checks its own shared secret instead of an Azure function key (see
+`src/functions/profileOcr.ts` and migration `20260928000100_ocr_vault_auth.sql`) — Azure's own function keys are
+opaque and awkward to read back out for a containerized Functions host. Generate that secret and store it as the
+Container App secret `pgt-worker-secret`, mapped to the `PGT_WORKER_SECRET` env var (never echo the value, and
+never put it in a command line that stays in your shell history):
 
 ```bash
-az functionapp function keys list --name <app-name> --resource-group pokegotrades-ocr --function-name profileOcr
+SECRET=$(openssl rand -hex 32)
+printf %s "$SECRET" | az containerapp secret set -g <resource-group> -n <container-app> --secrets pgt-worker-secret=@- --output none
+printf %s "$SECRET" | pbcopy   # macOS; the Vault step below needs the same value
+unset SECRET
+az containerapp update -g <resource-group> -n <container-app> --output none \
+  --set-env-vars PGT_WORKER_SECRET=secretref:pgt-worker-secret
 ```
 
-Then, in the Supabase SQL editor, point the trigger at the deployed endpoint:
+Then, in the Supabase dashboard's **Vault** UI (preferred over the SQL editor, so the value never lands in SQL
+history), paste that same value under the secret name `azure_ocr_key`, and copy something else over the
+clipboard. Point the trigger at the deployed endpoint's URL as before, in the SQL editor (the URL itself is not
+secret):
 
 ```sql
-select vault.create_secret('https://<app-name>.azurewebsites.net/api/profile-ocr', 'azure_ocr_url');
-select vault.create_secret('<function key>', 'azure_ocr_key');
+select vault.create_secret('https://<container-app-fqdn>/api/profile-ocr', 'azure_ocr_url');
 ```
 
 Watch it:

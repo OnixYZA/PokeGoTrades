@@ -53,8 +53,27 @@ EOF
   exit 1
 fi
 
-# The Functions host keeps the timer's schedule and the function keys (profileOcr is authLevel 'function') in
-# AzureWebJobsStorage. Warn rather than fail: the worker's own code never reads it.
+if ! grep -qx 'PGT_WORKER_SECRET=pgt-worker-secret' <<<"$ENV_WIRING"; then
+  cat >&2 <<EOF
+$ACA_APP needs PGT_WORKER_SECRET read from its 'pgt-worker-secret' secret (src/core/env.ts's readWorkerSecret,
+checked by src/functions/profileOcr.ts on every request now that it's authLevel 'anonymous'). Set it once, then
+re-run:
+
+  SECRET=\$(openssl rand -hex 32)
+  printf %s "\$SECRET" | az containerapp secret set -g $RESOURCE_GROUP -n $ACA_APP --secrets pgt-worker-secret=@- --output none
+  printf %s "\$SECRET" | pbcopy
+  unset SECRET
+  az containerapp update -g $RESOURCE_GROUP -n $ACA_APP --output none --set-env-vars \\
+    PGT_WORKER_SECRET=secretref:pgt-worker-secret
+
+The same value is now on your clipboard: paste it into Supabase Vault as 'azure_ocr_key' (the dashboard's Vault
+UI, not the SQL editor, so it never lands in SQL history), then copy something else over it.
+EOF
+  exit 1
+fi
+
+# The Functions host keeps the timer's schedule in AzureWebJobsStorage (profileOcr no longer needs a function
+# key from it — see the PGT_WORKER_SECRET check above). Warn rather than fail: the worker's own code never reads it.
 if ! grep -qx 'AzureWebJobsStorage=webjobs-storage' <<<"$ENV_WIRING"; then
   echo "warning: AzureWebJobsStorage is not read from a 'webjobs-storage' secret on $ACA_APP." >&2
 fi
@@ -94,5 +113,5 @@ echo "  Revision:              ${LATEST_REV}"
 echo "  Image:                 ${IMAGE}"
 echo "  Profile OCR endpoint:  https://${FQDN}/api/profile-ocr"
 echo ""
-echo "  Health:  az containerapp revision show -g $RESOURCE_GROUP -n $ACA_APP --revision ${LATEST_REV} \"
+echo "  Health:  az containerapp revision show -g $RESOURCE_GROUP -n $ACA_APP --revision ${LATEST_REV} \\"
 echo "             --query '{health:properties.healthState, running:properties.runningState}'"

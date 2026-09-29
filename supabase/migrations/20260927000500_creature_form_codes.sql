@@ -29,8 +29,8 @@
 -- the same bare-token shape lib/sprite-url.ts's `normalizeCode`/`CODE_RE` accepts, so nothing can ever
 -- be written here that `spriteObjectKey` would silently drop.
 alter table public.listings
-  add column form_code text check (form_code ~ '^[A-Z0-9_]{1,40}$'),
-  add column costume_code text check (costume_code ~ '^[A-Z0-9_]{1,40}$');
+  add column if not exists form_code text check (form_code ~ '^[A-Z0-9_]{1,40}$'),
+  add column if not exists costume_code text check (costume_code ~ '^[A-Z0-9_]{1,40}$');
 
 -- Column grants (§2.1 pattern, ...000100_listing_attributes): seller-settable, like `costume`/`pokeball`.
 grant insert (form_code, costume_code),
