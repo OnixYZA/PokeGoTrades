@@ -90,7 +90,7 @@ insert into public.listings (
    'A', '#4', 'Special (Shiny/Legendary) Registered', 14, 15, 15,
    '[{"name":"Legacy Dragonite","pokemonId":149,"hue":340},
      {"name":"Purified Ho-Oh","pokemonId":250,"hue":25},
-     {"name":"Deoxys A.","pokemonId":386,"formCode":"ATTACK","hue":220,"shiny":true,"lucky":true}]'::jsonb),
+     {"name":"Giratina O.","pokemonId":487,"formCode":"ORIGIN","hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000004',
    'Rayquaza', 384, 'Standard', null, 2023, false, true, 145, '#7dffb3', 'shiny', 'Adyar',
@@ -118,7 +118,7 @@ insert into public.listings (
    'A', '#5', 'Unregistered (Shiny/Legendary)', 15, 15, 15,
    '[{"name":"Purified Apex Ho-Oh","pokemonId":250,"hue":340},
      {"name":"Primal Groudon","pokemonId":383,"formCode":"PRIMAL","hue":25},
-     {"name":"Mew","pokemonId":151,"hue":220,"shiny":true,"lucky":true}]'::jsonb);
+     {"name":"Melmetal","pokemonId":809,"hue":220,"shiny":true,"lucky":true}]'::jsonb);
 
 -- ============================================================================================
 -- 3. Chats  ids: c0000000-0000-4000-8000-00000000000N

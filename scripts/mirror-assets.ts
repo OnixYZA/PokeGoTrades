@@ -200,6 +200,13 @@ function printPlan(sha: string, flags: Flags, plan: MirrorPlan): void {
     for (const line of plan.collisions) console.log(`  ! ${line}`);
     console.log('');
   }
+  if (plan.defaultFormFills.length > 0) {
+    console.log(
+      `${plan.defaultFormFills.length} plain key(s) filled from the species' default form (no plain file upstream; see BASE_FORM_CODES):`,
+    );
+    console.log(`  ${plan.defaultFormFills.join(', ')}`);
+    console.log('');
+  }
   if (plan.missingBase.length > 0) {
     console.log(`${plan.missingBase.length} Pokédex id(s) have no base icon upstream (the app shows the letter tile):`);
     console.log(`  ${plan.missingBase.join(', ')}`);

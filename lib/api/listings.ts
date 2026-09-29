@@ -13,6 +13,7 @@ import type { FilterSpec } from '@/store/listing-filters';
 import type { BackgroundHint, Listing, TradeType } from '@/data/types';
 import { creatureRefToJson, parseCreatureRefs } from '@/lib/api/creature-ref';
 import type { Database } from '@/lib/database.types';
+import { describeError } from '@/lib/rpc-errors';
 import { supabase } from '@/lib/supabase';
 
 // ——— DB-derived types ———
@@ -94,6 +95,9 @@ function apiError(error: { message: string; code?: string }): ListingsApiError {
 /** Turns a failed feed / publish call into a sentence for the UI. */
 export function listingErrorMessage(error: unknown): string {
   if (!(error instanceof ListingsApiError)) return error instanceof Error ? error.message : 'Something went wrong.';
+  // A trigger's `raise sqlstate 'PTxxx' using message = '<stable code>'` (e.g. `untradable_pokemon_listed`)
+  // shares one code -> sentence table with the RPCs.
+  if (error.code?.startsWith('PT')) return describeError(error).message;
   switch (error.code) {
     case '42501':
       return 'Finish setting up your trainer profile before posting.';

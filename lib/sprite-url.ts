@@ -41,6 +41,63 @@ export interface SpriteSubject {
   costumeCode?: string | null;
 }
 
+/**
+ * The PokeMiners form code of each species' DEFAULT form, for species whose default art upstream exists
+ * only under a form token and never as a plain `pm{id}[.s].icon.png`. Without this, the plain
+ * `pokemon/{id}[.s].png` key is missing from the bucket. For example, there is `888.fHERO.s.png` but no
+ * `888.s.png`, so a shiny Zacian with no form code fell back to the non-shiny sprite. It is used in two places:
+ * `scripts/pokeminers.ts` `planMirror` fills the missing plain key from this form's file, and
+ * `spriteCandidates` below tries this form's key right after the plain one, for a bucket not yet re-mirrored.
+ *
+ * Every entry was checked against the live `sprites` bucket (2026-09-29): the `.f{CODE}` key exists and no plain
+ * key does, or, for 487/648/877/888/889, the plain non-shiny key exists but its shiny does not. #892 has no shiny
+ * upstream in any Single Strike art. #666 Vivillon (Meadow, its default pattern) is not from the original
+ * issue list: it was found in the same bucket scan. #669 Flabébé already has plain keys, and is listed only
+ * because RED is its default.
+ */
+export const BASE_FORM_CODES: Readonly<Record<number, string>> = {
+  201: 'UNOWN_A', // Unown
+  327: '00', // Spinda
+  412: 'BURMY_PLANT', // Burmy
+  413: 'WORMADAM_PLANT', // Wormadam
+  421: 'OVERCAST', // Cherrim
+  422: 'WEST_SEA', // Shellos
+  423: 'WEST_SEA', // Gastrodon
+  487: 'ALTERED', // Giratina
+  550: 'RED_STRIPED', // Basculin
+  555: 'STANDARD', // Darmanitan
+  585: 'SPRING', // Deerling
+  586: 'SPRING', // Sawsbuck
+  641: 'INCARNATE', // Tornadus
+  642: 'INCARNATE', // Thundurus
+  645: 'INCARNATE', // Landorus
+  646: 'NORMAL', // Kyurem
+  647: 'ORDINARY', // Keldeo
+  648: 'ARIA', // Meloetta
+  649: 'NORMAL', // Genesect
+  666: 'MEADOW', // Vivillon
+  669: 'RED', // Flabébé
+  670: 'RED', // Floette
+  671: 'RED', // Florges
+  676: 'NATURAL', // Furfrou
+  681: 'SHIELD', // Aegislash
+  718: 'FIFTY_PERCENT', // Zygarde
+  741: 'BAILE', // Oricorio
+  745: 'MIDDAY', // Lycanroc
+  746: 'SOLO', // Wishiwashi
+  778: 'DISGUISED', // Mimikyu
+  849: 'AMPED', // Toxtricity
+  876: 'MALE', // Indeedee
+  877: 'FULL_BELLY', // Morpeko
+  888: 'HERO', // Zacian
+  889: 'HERO', // Zamazenta
+  892: 'SINGLE_STRIKE', // Urshifu
+  905: 'INCARNATE', // Enamorus
+  925: 'FAMILY_OF_FOUR', // Maushold
+  931: 'GREEN', // Squawkabilly
+  978: 'CURLY', // Tatsugiri
+};
+
 /** `SpriteSubject` (app-facing field names) -> `SpriteVariant` (this module's field names). The only
  *  place that mapping happens, so a caller never hand-rolls `{ form: creature.formCode, ... }` itself. */
 export function spriteVariantOf(subject: SpriteSubject): SpriteVariant {
@@ -123,8 +180,11 @@ export function getSpriteUrl(v: SpriteVariant): string | null {
  * walk one at a time as each candidate 404s:
  *   1. the full key (only if `form` or `costume` was supplied)
  *   2. `form` + shiny, costume dropped (only if BOTH `form` and `costume` were supplied)
- *   3. species + shiny
- *   4. species base, no shiny (only if `shiny` is set)
+ *   3. species + shiny, then the species' default form + shiny (`BASE_FORM_CODES`, if it has one)
+ *   4. the same two without shiny (only if `shiny` is set)
+ *
+ * In step 3, a shiny request tries the default form's shiny art before dropping to non-shiny art. For a
+ * shiny Zacian that order is `888.s` -> `888.fHERO.s` -> `888` -> `888.fHERO`.
  *
  * Steps 1/2 gate on whether `form`/`costume` were *supplied*, not whether they survive
  * `normalizeCode` — an invalid code collapses step 1 down to the same key step 3 already produces
@@ -140,11 +200,15 @@ export function spriteCandidates(v: SpriteVariant): string[] {
   const hasForm = Boolean(v.form);
   const hasCostume = Boolean(v.costume);
 
+  const baseForm = BASE_FORM_CODES[v.pokemonId];
+
   const wanted: SpriteVariant[] = [];
   if (hasForm || hasCostume) wanted.push(v);
   if (hasForm && hasCostume) wanted.push({ pokemonId: v.pokemonId, shiny: v.shiny, form: v.form });
-  wanted.push({ pokemonId: v.pokemonId, shiny: v.shiny });
-  if (v.shiny) wanted.push({ pokemonId: v.pokemonId });
+  for (const shiny of v.shiny ? [true, false] : [false]) {
+    wanted.push({ pokemonId: v.pokemonId, shiny });
+    if (baseForm) wanted.push({ pokemonId: v.pokemonId, shiny, form: baseForm });
+  }
 
   const urls: string[] = [];
   for (const variant of wanted) {

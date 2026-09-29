@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Send } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
+import { isPokemonUntradable } from '@/constants/pokedex';
 import { trainer } from '@/data/trainer';
 import type { CreatureRef } from '@/data/types';
 import { fetchMyArsenal } from '@/lib/api/profile';
@@ -16,7 +17,8 @@ interface ArsenalOfferSheetProps {
 }
 
 /** Bottom sheet for the Composer's "+" button — pick a Pokémon from the trainer's Arsenal to
- *  send into the chat as a FormalOfferCard. */
+ *  send into the chat as a FormalOfferCard. Untradable creatures are left out: the Arsenal itself can still
+ *  hold one (e.g. added before the picker refused them), but `chat_messages_tradable_offer` would reject it. */
 export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps) {
   const insets = useSafeAreaInsets();
   // Supabase: the trainer's own `trainer_creatures` (arsenal). Mock: the seeded DriftCoral profile.
@@ -38,6 +40,16 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
       active = false;
     };
   }, []);
+
+  const offerable = (arsenal ?? []).filter((creature) => !isPokemonUntradable(creature.pokemonId, creature.formCode));
+  const hiddenCount = (arsenal?.length ?? 0) - offerable.length;
+
+  let emptyText: string | null = null;
+  if (arsenal !== null && offerable.length === 0) {
+    if (loadFailed) emptyText = 'Could not load your Arsenal. Close this and try again.';
+    else if (arsenal.length === 0) emptyText = 'Your Arsenal is empty, so there is nothing to offer yet. You can still describe your offer in the chat.';
+    else emptyText = 'Nothing in your Arsenal can be traded in Pokémon GO. You can still describe your offer in the chat.';
+  }
 
   return (
     <View
@@ -66,12 +78,12 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
           {arsenal === null ? <ActivityIndicator color="#4fb3ff" style={{ paddingVertical: 24 }} /> : null}
-          {arsenal !== null && arsenal.length === 0 ? (
+          {emptyText ? (
             <Text className="py-6 text-center text-text-subtle" style={{ fontSize: 13, lineHeight: 19 }}>
-              {loadFailed ? 'Could not load your Arsenal. Close this and try again.' : 'Your Arsenal is empty, so there is nothing to offer yet. You can still describe your offer in the chat.'}
+              {emptyText}
             </Text>
           ) : null}
-          {(arsenal ?? []).map((creature) => (
+          {offerable.map((creature) => (
             <Pressable
               key={creature.name}
               onPress={() => onSelect(creature)}
@@ -91,6 +103,12 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
               <Send size={16} color="#4fb3ff" />
             </Pressable>
           ))}
+          {hiddenCount > 0 && offerable.length > 0 ? (
+            <Text className="pt-1 text-center text-text-subtle" style={{ fontSize: 12, lineHeight: 17 }}>
+              {hiddenCount === 1 ? '1 Pokémon' : `${hiddenCount} Pokémon`} in your Arsenal can’t be traded in Pokémon GO, so{' '}
+              {hiddenCount === 1 ? 'it is' : 'they are'} not shown.
+            </Text>
+          ) : null}
         </ScrollView>
 
         <Pressable

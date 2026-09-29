@@ -6,6 +6,7 @@ import { Check, Send, Sparkles } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
 import { ToastHost } from '@/components/ui/ToastHost';
+import { isPokemonUntradable } from '@/constants/pokedex';
 import type { CreatureRef, Listing } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
@@ -44,6 +45,10 @@ export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModa
   const [selection, setSelection] = useState<BuyerOfferSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // `listings_tradable_guard` keeps untradable creatures out of looking[] server-side. This only matters for a
+  // listing that predates that guard, or for mock data, where offering one would just bounce off
+  // `chat_messages_tradable_offer`.
+  const offerable = listing.looking.filter((creature) => !isPokemonUntradable(creature.pokemonId, creature.formCode));
 
   const send = async () => {
     if (!selection || submitting) return;
@@ -87,7 +92,7 @@ export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModa
         </Text>
 
         <View className="mb-5 gap-2.5">
-          {listing.looking.map((creature) => (
+          {offerable.map((creature) => (
             <CreatureOptionRow
               key={creature.name}
               creature={creature}

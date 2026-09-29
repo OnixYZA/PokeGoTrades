@@ -42,6 +42,14 @@ const KNOWN: Record<string, Omit<ErrorInfo, 'code' | 'sqlState'>> = {
     message: 'This listing already has offers, so its trade details can no longer be changed.',
     followUp: 'resync',
   },
+  // Raised by the untradable-Pokémon triggers (…20260929000100): one on `listings`, and one on `chat_messages`,
+  // which covers both `open_offer` and in-chat offers.
+  untradable_pokemon_listed: { message: 'That Pokémon cannot be traded in Pokémon GO, so it cannot be listed.', followUp: 'none' },
+  untradable_pokemon_wanted: {
+    message: 'Remove the Pokémon that cannot be traded in Pokémon GO from what you want in return.',
+    followUp: 'none',
+  },
+  untradable_pokemon_offered: { message: 'That Pokémon cannot be traded in Pokémon GO, so it cannot be offered.', followUp: 'none' },
   chat_not_open: { message: 'This chat was closed.', followUp: 'resync' },
   not_participant: { message: 'You are not part of this trade.', followUp: 'resync' },
   listing_not_open: {
