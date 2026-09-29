@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { Text, View } from 'react-native';
 
+import { BrandLogo } from '@/components/ui/BrandLogo';
 import { COLORS, GO_SPRITE_ZOOM } from '@/constants/theme';
 import {
   CARD_PADDING,
@@ -39,10 +40,10 @@ export interface TradeListCardProps {
   arsenal: CreatureRef[];
   wishlist: CreatureRef[];
   /**
-   * Fires exactly once: when every visible sprite (after the per-list cap) has either loaded or
-   * errored, or after `SETTLE_TIMEOUT_MS` — whichever comes first. Drives the Share button's disabled
-   * state in `ShareTradeListModal`; a dead or slow `sprites` bucket must never leave the export stuck
-   * waiting forever.
+   * Fires exactly once: when every visible sprite (after the per-list cap) and the header logo have
+   * either loaded or errored, or after `SETTLE_TIMEOUT_MS` — whichever comes first. Drives the Share
+   * button's disabled state in `ShareTradeListModal`; a dead or slow `sprites` bucket must never leave
+   * the export stuck waiting forever.
    */
   onReady?: () => void;
 }
@@ -69,12 +70,13 @@ export const TradeListCard = forwardRef<View, TradeListCardProps>(function Trade
 ) {
   const hasTeam = team !== null;
   const layout = computeTradeListLayout(arsenal, wishlist, hasTeam);
-  const totalSprites = layout.arsenal.visible.length + layout.wishlist.visible.length;
+  // Every visible sprite plus the header's `BrandLogo` — so there is always at least one image to wait for.
+  const totalImages = layout.arsenal.visible.length + layout.wishlist.visible.length + 1;
 
   const settledCountRef = useRef(0);
   const firedRef = useRef(false);
   // Keeps `fireReady` callback-identity-stable while always calling the *latest* `onReady` — so the
-  // effect below can depend on `totalSprites` alone without re-arming every time the parent re-renders.
+  // effect below can depend on `totalImages` alone without re-arming every time the parent re-renders.
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
 
@@ -87,32 +89,28 @@ export const TradeListCard = forwardRef<View, TradeListCardProps>(function Trade
   useEffect(() => {
     firedRef.current = false;
     settledCountRef.current = 0;
-    if (totalSprites === 0) {
-      fireReady(); // both lists empty (or capped to zero, which never happens): nothing to wait for
-      return;
-    }
     const timer = setTimeout(fireReady, SETTLE_TIMEOUT_MS);
     return () => clearTimeout(timer);
-    // Re-arm only when the number of sprites to wait for changes, not on every re-render.
+    // Re-arm only when the number of images to wait for changes, not on every re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalSprites]);
+  }, [totalImages]);
 
-  const handleTileSettled = useCallback(() => {
+  const handleImageSettled = useCallback(() => {
     settledCountRef.current += 1;
-    if (settledCountRef.current >= totalSprites) fireReady();
-  }, [totalSprites, fireReady]);
+    if (settledCountRef.current >= totalImages) fireReady();
+  }, [totalImages, fireReady]);
 
   return (
     <View ref={ref} collapsable={false} style={{ width: CARD_WIDTH, backgroundColor: COLORS.bgPanel }}>
-      <CardHeader handle={handle} team={team} level={level} />
+      <CardHeader handle={handle} team={team} level={level} onLogoSettled={handleImageSettled} />
       {/* `padding` (not `paddingHorizontal`): top/bottom breathing room matching CARD_PADDING's
        *  horizontal rhythm, so "HAVE" doesn't start flush against the header and the last WANT row
        *  doesn't touch the footer's border. Both insets are in `computeTradeListLayout`'s `canvasHeight`
        *  sum (constants/trade-list-layout.ts) — never add spacing here without adding it there too. */}
       <View style={{ padding: CARD_PADDING }}>
-        <CardSection label="HAVE" section={layout.arsenal} onTileSettled={handleTileSettled} />
+        <CardSection label="HAVE" section={layout.arsenal} onTileSettled={handleImageSettled} />
         <View style={{ height: SECTION_GAP }} />
-        <CardSection label="WANT" section={layout.wishlist} onTileSettled={handleTileSettled} />
+        <CardSection label="WANT" section={layout.wishlist} onTileSettled={handleImageSettled} />
       </View>
       <CardFooter />
     </View>
@@ -127,7 +125,17 @@ export const TradeListCard = forwardRef<View, TradeListCardProps>(function Trade
  * the last row is always exactly `CARD_PADDING`, matching the top, in both the has-a-team and no-team
  * (`team` can be null) cases — never a slab whose size only happens to work out for one of them.
  */
-function CardHeader({ handle, team, level }: { handle: string; team: string | null; level?: number }) {
+function CardHeader({
+  handle,
+  team,
+  level,
+  onLogoSettled,
+}: {
+  handle: string;
+  team: string | null;
+  level?: number;
+  onLogoSettled: () => void;
+}) {
   const hasTeam = team !== null;
   return (
     <View
@@ -140,14 +148,7 @@ function CardHeader({ handle, team, level }: { handle: string; team: string | nu
       }}
     >
       <View className="flex-row items-center gap-2" style={{ height: HEADER_WORDMARK_ROW_HEIGHT }}>
-        <View
-          className="items-center justify-center rounded-md"
-          style={{ width: 22, height: 22, backgroundColor: COLORS.accentBlue }}
-        >
-          <Text className="font-display" style={{ fontSize: 12, color: COLORS.bgBase }}>
-            P
-          </Text>
-        </View>
+        <BrandLogo size={HEADER_WORDMARK_ROW_HEIGHT} onSettled={onLogoSettled} />
         <Text className="font-display" style={{ fontSize: 12, color: COLORS.accentBlue, letterSpacing: 1.2 }}>
           POKEGOTRADES
         </Text>

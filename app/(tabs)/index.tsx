@@ -7,6 +7,7 @@ import { ListingCard } from '@/components/feed/ListingCard';
 import { LocationDropdown } from '@/components/feed/LocationDropdown';
 import { CreateListingModal } from '@/components/modals/CreateListingModal';
 import { ListingFilterSheet } from '@/components/modals/ListingFilterSheet';
+import { BrandLogo } from '@/components/ui/BrandLogo';
 import { IconButton } from '@/components/ui/IconButton';
 import { StatTile } from '@/components/ui/StatTile';
 import { COLORS, SURFACE } from '@/constants/theme';
@@ -62,13 +63,16 @@ export default function FeedScreen() {
     <View className="flex-1">
       <View className="px-[22px] pb-3.5 pt-2">
         <View className="mb-3.5 flex-row items-center justify-between">
-          <View>
-            <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 11, letterSpacing: 1.1 }}>
-              Trade Hub
-            </Text>
-            <Text className="mt-0.5 font-display text-text-primary" style={{ fontSize: 26, letterSpacing: -0.52 }}>
-              Near you
-            </Text>
+          <View className="flex-row items-center gap-3">
+            <BrandLogo size={44} />
+            <View>
+              <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 11, letterSpacing: 1.1 }}>
+                Trade Hub
+              </Text>
+              <Text className="mt-0.5 font-display text-text-primary" style={{ fontSize: 26, letterSpacing: -0.52 }}>
+                Near you
+              </Text>
+            </View>
           </View>
           <IconButton accessibilityLabel="Search listings">
             <Search size={18} color="#8b93a7" />
