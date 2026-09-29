@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.*
+local.settings.json
+.git
+.gitignore
+.funcignore
+test
+scripts
+README.md

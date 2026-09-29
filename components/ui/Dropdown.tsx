@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'rea
 import { Dimensions, Modal, Pressable, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { COLORS } from '@/constants/theme';
+
 interface DropdownProps {
   visible: boolean;
   onRequestClose: () => void;
@@ -92,6 +94,13 @@ export function Dropdown({ visible, onRequestClose, anchorRef, children, align =
                 width: align === 'stretch' ? rect.width : undefined,
                 minWidth,
                 boxShadow: '0 12px 40px rgba(0,0,0,.6)',
+                // `bg-bg-card` (className) isn't guaranteed to land as a style on web for a Reanimated
+                // Animated.View, which is how this panel has been reported rendering transparent over
+                // the feed there — set the same fill directly so opacity never depends on that
+                // conversion. `zIndex` keeps it above the feed/card stack it floats over on web, where
+                // the Modal's own native stacking isn't in play.
+                backgroundColor: COLORS.bgCard,
+                zIndex: 1000,
               },
             ]}
           >

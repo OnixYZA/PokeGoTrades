@@ -16,6 +16,7 @@ import type {
 import * as chatsApi from '@/lib/api/chats';
 import { fetchListingsByIds } from '@/lib/api/listings';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { openPrivateChannel } from '@/lib/realtime';
 import { describeError, type ErrorInfo } from '@/lib/rpc-errors';
 import { toast } from '@/lib/toast';
@@ -27,6 +28,7 @@ import {
   type LockConfirmations,
   type LockVersion,
 } from './lock-state';
+import { cycleFilter, type FilterKey, type FilterState } from './listing-filters';
 
 // The lock rules live in ./lock-state so they can be tested without the Expo/Supabase module graph.
 // Re-exported here because this is where the rest of the app already imports them from.
@@ -53,7 +55,8 @@ function splitChatSeeds(
   const messages: Record<string, ChatMessage[]> = {};
   for (const { offers, ...chat } of seeds) {
     chats[chat.id] = chat;
-    messages[chat.id] = offers.length ? offers : fallbackOffers(listingsById[chat.listingId]?.name ?? '');
+    const listing = listingsById[chat.listingId];
+    messages[chat.id] = offers.length ? offers : fallbackOffers(listing ? creatureDisplayName(listing) : '');
   }
   return { chats, messages };
 }
@@ -180,6 +183,11 @@ interface TradeState {
   setFilterLocation: (loc: string) => void;
   friendship: FriendshipLabel;
   setFriendship: (level: FriendshipLabel) => void;
+  /** Tristate feed-attribute filters (constants/listing-attributes.ts / store/listing-filters.ts).
+   *  Not persisted — a fresh app open starts with every chip neutral. */
+  listingFilters: FilterState;
+  cycleListingFilter: (key: FilterKey) => void;
+  clearListingFilters: () => void;
 
   // ——— listings ———
   /** Appends a fully-formed listing — including its `screenshots` (multi-image proof) and
@@ -475,6 +483,9 @@ export const useTradeStore = create<TradeState>((set, get) => {
     setFilterLocation: (loc) => set({ filterLocation: loc }),
     friendship: 'Great',
     setFriendship: (level) => set({ friendship: level }),
+    listingFilters: {},
+    cycleListingFilter: (key) => set((state) => ({ listingFilters: cycleFilter(state.listingFilters, key) })),
+    clearListingFilters: () => set({ listingFilters: {} }),
 
     addListing: (listing) => set((state) => ({ listings: { [listing.id]: listing, ...state.listings } })),
     upsertListings: (incoming) => set((state) => ({ listings: { ...state.listings, ...byId(incoming) } })),
@@ -522,7 +533,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
           id: chatId,
           listingId,
           partner: listing.seller,
-          preview: `Formal offer sent · ${offer.name}`,
+          preview: `Formal offer sent · ${creatureDisplayName(offer)}`,
           unread: 0,
           active: true,
           offers: [{ role: 'me', text: '', time: timeNow(), offer }],

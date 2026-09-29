@@ -47,6 +47,7 @@ src/core/env.ts          environment variables and locating the tesseract langua
 src/core/log.ts          one JSON object per log line; never OCR text, a handle, or a friend code
 src/core/ocr.ts          a shared tesseract.js worker, with a per-image timeout
 src/core/date.ts         the catch-date regex and validation (pure, unit-tested)
+src/core/catch.ts        the size-class and catch-location regexes and validation, off an appraisal (pure, unit-tested)
 src/core/parser.ts       what a proof's OCR text amounts to — interpretProof (listing) and interpretProfile (profile)
 src/core/qr.ts           decodes a QR code out of a profile screenshot, if there is one (pure-ish: only reads pixels)
 src/core/process.ts      the shared claim → download → OCR → decide → settle engine (QueueSpec), plus both queues' specs
@@ -101,11 +102,12 @@ which cannot reach a `localhost` port on your machine. Two consequences:
   next minute mark or:
 
   ```bash
-  curl -X POST http://localhost:7071/api/profile-ocr -d '{}'
+  curl -X POST http://localhost:7071/api/profile-ocr -H "x-api-key: <same value as local.settings.json's PGT_WORKER_SECRET>" -d '{}'
   ```
 
   The empty body is fine — `proofId` is only ever a hint (see `src/functions/profileOcr.ts`); with none, it just
-  sweeps the whole queue.
+  sweeps the whole queue. The `x-api-key` header is not optional: `profileOcr` is `authLevel: 'anonymous'` and
+  checks this header itself against `PGT_WORKER_SECRET`, so a request without a matching header gets a bare 401.
 
 **With real uploads from the app.** Run the app with `EXPO_PUBLIC_DATA_SOURCE=supabase`, publish a listing with
 proof screenshots or upload a profile proof, then either wait for `ocrSweep`'s next tick or `curl` the endpoint
@@ -151,6 +153,7 @@ never sets).
 | `processing` | `{"claimedAt": "<ISO time>"}` | A run has it. Older than `OCR_CLAIM_LEASE_SECONDS`, it is put back to `pending` (the run died). |
 | `verified` | `{"caughtAt": "YYYY-MM-DD"}` | An **appraisal** proof with a believable catch date. |
 | `verified` | `{"caughtAt": "YYYY-MM-DD", "ambiguous": true}` | Same, but day and month could be either way round, so `OCR_DATE_ORDER` decided (below). |
+| `verified` | `{"caughtAt": "YYYY-MM-DD", "sizeClass": "XXS" \| "XS" \| "XL" \| "XXL"}` | Same, plus a trustworthy size label was also read off the same screenshot (below). Absent when none was, or two disagreeing ones were. |
 | `verified` | `{}` | A **movesets** or **event_badge** proof: OCR read text off it. Nothing is extracted. |
 | `failed` | `{"reason": "unreadable"}` | Appraisal: no catch date. Movesets / event_badge: no readable text. Any kind: not a decodable image, the image took too long, or the file is missing from Storage. |
 | `failed` | `{"reason": "image_too_large"}` | More pixels than `MAX_PIXELS` (`src/core/process.ts`) — rejected from its header alone, before decoding. |
@@ -184,6 +187,49 @@ the badge from then on.
 **The date.** Pokémon GO prints `Caught MM/DD/YYYY` or `DD/MM/YYYY`, depending on the game's language. See
 `src/core/date.ts`'s doc comment for the exact rules (the 40-character window after "Caught", OCR noise
 tolerance, how an ambiguous reading is settled by elimination or by `OCR_DATE_ORDER`).
+
+**Size class and catch location.** An appraisal screenshot can also carry the game's own size label (XXS / XS /
+XL / XXL, printed next to the weight and height) and where the Pokémon was caught (printed on the "Caught
+&lt;date&gt;" line itself). Both are read by `src/core/catch.ts` (`extractSizeClass`, `extractCatchLocation`) —
+pure text checks, same "never guess" posture as the date: no size or location is not an error, just nothing to
+tag. Applied inside the listing queue's `handle` step, right alongside `grantLucky`, so a run that dies in
+between leaves the proof `processing` and both (idempotent) writes simply repeat once it is retried.
+
+- **Size class is public.** A trustworthy read goes into `extracted.sizeClass` (the table above) and is applied
+  with `update listings set size_class = $1 where id = $2 and size_class is null` — like `lucky`, this is a
+  one-way, one-shot write: it is **never overwritten or downgraded** once set, even by a later, different read on
+  a re-verified proof. `size_class` is deliberately absent from `guard_listing_update`'s frozen-fields tuple (a
+  value the seller never set cannot be their bait-and-switch — see migration ...000100_listing_attributes.sql),
+  so the `listing_has_offers` error `applySizeClass` (`src/core/process.ts`) maps to a `blocked` outcome should
+  not happen today; it is mapped anyway, exactly like `grantLucky`'s own `blocked`, purely so this worker keeps
+  working rather than throwing if that guard's tuple ever changes.
+  - Read only within ~40 characters of a weight or height token (`kg`, `m`, `Weight`, `Height`): a bare "XL"
+    anywhere else on the screen is not trusted.
+  - A bare "XL" immediately followed by "Candy" is ignored outright — trainers level 31+ see a running "XL
+    Candy" counter on the very same appraisal screen, and that is never the size label.
+  - Two different size labels both found near a weight/height token → `undefined` (never resolved by guessing).
+- **Catch location is PRIVATE — never public, never logged.** A trustworthy read is upserted into
+  `public.listing_proof_private` (`proof_id`, `catch_location`; migration ...000200_listing_proof_private.sql),
+  readable only by the listing's own seller, and is **never** written to `listing_proofs.ocr_extracted` (which
+  anyone who can see the listing can read) and **never** passed to `log()` — only the boolean `locationFound` (and,
+  for size, `sizeTagged`) reaches a log line; the values themselves never do. This is `interpretProof`'s `Verdict`
+  type made to enforce the same rule in code: a verified appraisal's location lives in a separate, top-level
+  `privateFacts` field that is never merged into `extracted`, so a future change to what gets logged or saved from
+  `extracted` cannot accidentally start leaking it.
+  - Anchored on the "Caught" line itself, taking whatever text follows the connector word ("around", "at", "in",
+    "·", or "-") that introduces the location — on either side of the date, since the game's own phrasing puts
+    the connector after it ("Caught 11/23/2018 · Adyar") in most locales but before it in at least one observed
+    shape ("caught around Paris, France on 3/14/2021").
+  - Rejected outright (not truncated, not guessed at) if the candidate contains a run of 3+ digits or a UI word
+    (`Weight`, `Height`, `Stardust`, `Candy`, `CP`, `HP`, `Type`, `Power Up`, `Evolve`) — either means the search
+    read past the true end of the location and into the rest of the screen — or if its cleaned length falls
+    outside 2-120 characters (`listing_proof_private`'s own constraint).
+- **The Poké Ball is not read here, or anywhere in this worker.** `listings.pokeball` stays seller-declared; the
+  product decision is that it is never auto-tagged from a screenshot the way size and (privately) location are.
+- **Known limitation, same as Lucky today:** neither extraction cross-checks the proof's own species against the
+  listing it is attached to. A seller who uploads the wrong appraisal screenshot gets that screenshot's size and
+  location applied to their listing regardless of whether the Pokémon on it matches. `verified` means a
+  trustworthy value was read off *some* screenshot, not that it is a screenshot *of this listing's Pokémon*.
 
 ### Profile proofs
 
@@ -255,6 +301,7 @@ Set in `local.settings.json` locally (see `local.settings.json.example`), as App
 | `OCR_LANG_PATH` | unset | Folder with `eng.traineddata.gz`. Default: resolved from the `@tesseract.js-data/eng` dependency. |
 | `OCR_RUN_BUDGET_SECONDS` | `540` | `ocrSweep`'s own time budget, shared across both queues (profile first, then listing) |
 | `OCR_SWEEP_ON_STARTUP` | `false` | `true` runs `ocrSweep` immediately when the Function App starts, instead of waiting for the next minute mark |
+| `PGT_WORKER_SECRET` | required (only for `profileOcr`) | The shared secret `profileOcr` checks the `x-api-key` header against (`src/core/auth.ts`). `ocrSweep` never reads it. Generate with `openssl rand -hex 32`; must be ≥32 characters and equal Supabase Vault's `azure_ocr_key` (see "Deploy to Azure" below). |
 
 ## Deploy to Azure
 
@@ -298,17 +345,28 @@ az functionapp config appsettings set --name <app-name> --resource-group pokegot
 (Flex Consumption's per-instance concurrency for HTTP triggers is otherwise set via the `http` section of the
 plan's scale settings in the portal — set it to 1 for the same CPU-bound reason.)
 
-Get the function key `notify_profile_ocr` needs to call `profileOcr` (`authLevel: 'function'`):
+`profileOcr` is `authLevel: 'anonymous'` and checks its own shared secret instead of an Azure function key (see
+`src/functions/profileOcr.ts` and migration `20260928000100_ocr_vault_auth.sql`) — Azure's own function keys are
+opaque and awkward to read back out for a containerized Functions host. Generate that secret and store it as the
+Container App secret `pgt-worker-secret`, mapped to the `PGT_WORKER_SECRET` env var (never echo the value, and
+never put it in a command line that stays in your shell history):
 
 ```bash
-az functionapp function keys list --name <app-name> --resource-group pokegotrades-ocr --function-name profileOcr
+SECRET=$(openssl rand -hex 32)
+printf %s "$SECRET" | az containerapp secret set -g <resource-group> -n <container-app> --secrets pgt-worker-secret=@- --output none
+printf %s "$SECRET" | pbcopy   # macOS; the Vault step below needs the same value
+unset SECRET
+az containerapp update -g <resource-group> -n <container-app> --output none \
+  --set-env-vars PGT_WORKER_SECRET=secretref:pgt-worker-secret
 ```
 
-Then, in the Supabase SQL editor, point the trigger at the deployed endpoint:
+Then, in the Supabase dashboard's **Vault** UI (preferred over the SQL editor, so the value never lands in SQL
+history), paste that same value under the secret name `azure_ocr_key`, and copy something else over the
+clipboard. Point the trigger at the deployed endpoint's URL as before, in the SQL editor (the URL itself is not
+secret):
 
 ```sql
-select vault.create_secret('https://<app-name>.azurewebsites.net/api/profile-ocr', 'azure_ocr_url');
-select vault.create_secret('<function key>', 'azure_ocr_key');
+select vault.create_secret('https://<container-app-fqdn>/api/profile-ocr', 'azure_ocr_url');
 ```
 
 Watch it:
@@ -319,8 +377,10 @@ func azure functionapp logstream <app-name>
 
 Logs are one JSON object per line (`src/core/log.ts`). Useful filters: `level = "error"` (alarm on this),
 `msg = "verified"`, `msg = "failed"` grouped by `cause` (`no_date`, `decode_error`, `file_missing`, `no_text`,
-`no_handle`, `no_friend_code`, `handle_taken`, `friend_code_taken`, `invalid_handle`). OCR text, a handle, and a
-friend code are never logged — only that a row was verified or failed, and why.
+`no_handle`, `no_friend_code`, `handle_taken`, `friend_code_taken`, `invalid_handle`). A verified listing proof's
+log line also carries `sizeTagged` and `locationFound` — booleans only, never the size or the location itself
+(see "Size class and catch location" above). OCR text, a handle, a friend code, and a catch location are never
+logged — only that a row was verified or failed, and why.
 
 ## Known limits
 

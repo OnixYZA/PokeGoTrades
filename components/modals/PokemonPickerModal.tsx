@@ -11,14 +11,16 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, Plus, Search, X } from 'lucide-react-native';
+import { Check, Plus, Search, Sparkles, X } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { hueBadgeStyle } from '@/constants/theme';
 import { POKEDEX, searchPokedex, type PokedexEntry } from '@/constants/pokedex';
+import { creatureDisplayName } from '@/lib/format';
+import { spriteVariantKey, spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
 
-import { MODAL_COLORS } from './tokens';
+import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
 
 const C = MODAL_COLORS;
 
@@ -31,10 +33,18 @@ interface PokemonPickerModalProps {
   visible: boolean;
   title: string;
   onClose: () => void;
-  onSelect: (pokemonId: number) => void;
+  /** `shiny` is always `false` when `allowShiny` is off — a caller with its own separate Shiny toggle
+   *  (`CreateListingModal`'s "CREATURE" slot) sets `allowShiny={false}` and ignores this argument. */
+  onSelect: (pokemonId: number, shiny: boolean) => void;
+  /** Whether this picker offers a Shiny toggle at all. Defaults on: most pickers (Arsenal, Wishlist,
+   *  "Wanted in Return") have no shiny toggle of their own elsewhere in the flow. */
+  allowShiny?: boolean;
   /** Already on the list this picker is adding to — shown disabled with an "ADDED" badge instead of
-   *  being left out, so re-opening the picker still reads as the same dex, just partly checked off. */
-  excludeIds?: readonly number[];
+   *  being left out, so re-opening the picker still reads as the same dex, just partly checked off.
+   *  Compared by `spriteVariantKey`, so a shiny and non-shiny entry for the same species are distinct:
+   *  a row has no form/costume codes of its own (the dex doesn't carry those), so in practice this only
+   *  ever discriminates on shiny. */
+  exclude?: readonly SpriteSubject[];
 }
 
 /**
@@ -43,14 +53,23 @@ interface PokemonPickerModalProps {
  * by their screen — this one has no screen-specific chrome to coordinate with, so keeping the two
  * together avoids every caller re-declaring the same `Modal` props.
  */
-export function PokemonPickerModal({ visible, title, onClose, onSelect, excludeIds }: PokemonPickerModalProps) {
+export function PokemonPickerModal({
+  visible,
+  title,
+  onClose,
+  onSelect,
+  allowShiny = true,
+  exclude,
+}: PokemonPickerModalProps) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
+  const [shiny, setShiny] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (!visible) return;
     setQuery(''); // never reopen showing the previous search
+    setShiny(false); // never reopen with the previous open's shiny toggle still on
     // The sheet's TextInput mounts into a fresh native Modal host each time `visible` flips true;
     // focusing on the very same tick can race that mount, so defer one frame. (`autoFocus` only ever
     // fires on first mount, not on a later re-open, which is why this manages focus itself instead.)
@@ -58,14 +77,22 @@ export function PokemonPickerModal({ visible, title, onClose, onSelect, excludeI
     return () => clearTimeout(timer);
   }, [visible]);
 
-  const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
+  const excluded = useMemo(
+    () => new Set((exclude ?? []).map((s) => spriteVariantKey(spriteVariantOf(s)))),
+    [exclude],
+  );
   const results = useMemo(
     () => (query.trim().length === 0 ? POKEDEX : searchPokedex(query, SEARCH_RESULT_LIMIT)),
     [query],
   );
 
   const renderItem = ({ item }: ListRenderItemInfo<PokedexEntry>) => (
-    <PokedexRow entry={item} added={excluded.has(item.pokemonId)} onPress={() => onSelect(item.pokemonId)} />
+    <PokedexRow
+      entry={item}
+      shiny={shiny}
+      added={excluded.has(spriteVariantKey(spriteVariantOf({ pokemonId: item.pokemonId, shiny })))}
+      onPress={() => onSelect(item.pokemonId, allowShiny ? shiny : false)}
+    />
   );
 
   return (
@@ -86,7 +113,14 @@ export function PokemonPickerModal({ visible, title, onClose, onSelect, excludeI
             >
               <View className="flex-1" style={{ backgroundColor: C.bgSurface, paddingTop: insets.top }}>
                 <Header title={title} onClose={onClose} />
-                <SearchField query={query} onChangeQuery={setQuery} inputRef={inputRef} />
+                <SearchField
+                  query={query}
+                  onChangeQuery={setQuery}
+                  inputRef={inputRef}
+                  allowShiny={allowShiny}
+                  shiny={shiny}
+                  onToggleShiny={() => setShiny((v) => !v)}
+                />
                 <FlatList
                   data={results}
                   keyExtractor={(item) => String(item.pokemonId)}
@@ -134,18 +168,54 @@ function Header({ title, onClose }: { title: string; onClose: () => void }) {
   );
 }
 
+/** Beside the search field, not inside it — the picker's own Shiny toggle (Task 2), independent of the
+ *  text query. Pink/✦, the same accent as the shiny badge drawn on `Chip`/`Sprite` (`#ff6bd6`), so a
+ *  trainer already reads "pink sparkle = shiny" before ever looking at the label. */
+function ShinyToggle({ shiny, onToggle }: { shiny: boolean; onToggle: () => void }) {
+  return (
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: shiny }}
+      accessibilityLabel="Shiny"
+      accessibilityHint="Adds the shiny variant of the Pokémon you pick"
+      className="ml-2 flex-row items-center gap-1.5 rounded-[14px] border px-3 active:opacity-80"
+      // No fixed height: the row's default `alignItems: 'stretch'` sizes the pill to the search input.
+      style={
+        shiny
+          ? [MODAL_SURFACE.togglePink, { borderColor: C.pink }]
+          : { backgroundColor: C.bgCard, borderColor: C.borderDefault }
+      }
+    >
+      <Sparkles size={15} color={shiny ? '#fff' : C.textMuted} strokeWidth={2.2} />
+      <Text
+        className="font-display-semi"
+        style={{ fontSize: 12, color: shiny ? '#fff' : C.textMuted }}
+      >
+        Shiny
+      </Text>
+    </Pressable>
+  );
+}
+
 function SearchField({
   query,
   onChangeQuery,
   inputRef,
+  allowShiny,
+  shiny,
+  onToggleShiny,
 }: {
   query: string;
   onChangeQuery: (query: string) => void;
   inputRef: RefObject<TextInput | null>;
+  allowShiny: boolean;
+  shiny: boolean;
+  onToggleShiny: () => void;
 }) {
   return (
-    <View className="px-5 pb-3 pt-4">
-      <View className="relative justify-center">
+    <View className="flex-row px-5 pb-3 pt-4">
+      <View className="relative flex-1 justify-center">
         <View className="absolute left-4 z-10">
           <Search size={18} color={C.textMuted} />
         </View>
@@ -180,26 +250,39 @@ function SearchField({
           </Pressable>
         )}
       </View>
+      {allowShiny && <ShinyToggle shiny={shiny} onToggle={onToggleShiny} />}
     </View>
   );
 }
 
-function PokedexRow({ entry, added, onPress }: { entry: PokedexEntry; added: boolean; onPress: () => void }) {
+function PokedexRow({
+  entry,
+  shiny,
+  added,
+  onPress,
+}: {
+  entry: PokedexEntry;
+  shiny: boolean;
+  added: boolean;
+  onPress: () => void;
+}) {
   const dex = `#${String(entry.pokemonId).padStart(3, '0')}`;
+  const displayName = creatureDisplayName({ name: entry.name, shiny });
+  const label = `Add ${displayName}, ${dex}, ${entry.type} type`;
   return (
     <Pressable
       onPress={added ? undefined : onPress}
       disabled={added}
       accessibilityRole="button"
-      accessibilityLabel={added ? `${entry.name}, already added` : `Add ${entry.name}, ${dex}, ${entry.type} type`}
+      accessibilityLabel={added ? `${displayName}, already added` : label}
       accessibilityState={{ disabled: added }}
       className={`flex-row items-center gap-3 rounded-[14px] border px-3 py-2.5 ${added ? 'opacity-50' : 'active:opacity-80'}`}
       style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
     >
-      <Chip pokemonId={entry.pokemonId} hue={entry.hue} size={44} />
+      <Chip creature={{ pokemonId: entry.pokemonId, hue: entry.hue, shiny }} size={44} />
       <View className="min-w-0 flex-1">
         <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
-          {entry.name}
+          {displayName}
         </Text>
         <View className="mt-1 flex-row items-center gap-1.5">
           <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.5 }}>

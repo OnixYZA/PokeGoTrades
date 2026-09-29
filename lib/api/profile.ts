@@ -1,8 +1,10 @@
 import { randomUUID } from 'expo-crypto';
 
 import { findPokemon } from '@/constants/pokedex';
-import type { CreatureRef } from '@/data/types';
-import type { Database, Json } from '@/lib/database.types';
+import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
+import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
+import type { Database } from '@/lib/database.types';
+import { formatTradeDate } from '@/lib/format';
 import type { PickedProof } from '@/lib/proof-image';
 import { readProofBytes } from '@/lib/proof-image';
 import { supabase } from '@/lib/supabase';
@@ -102,10 +104,8 @@ async function fetchMyCreatures(list: CreatureList): Promise<CreatureRef[]> {
   if (error) throw new ProfileError('form', error.message);
   const creatures: CreatureRef[] = [];
   for (const { creature } of data) {
-    if (typeof creature !== 'object' || creature === null || Array.isArray(creature)) continue;
-    const { name, pokemonId, hue, shiny, lucky } = creature;
-    if (typeof name !== 'string' || typeof pokemonId !== 'number' || typeof hue !== 'number') continue;
-    creatures.push({ name, pokemonId, hue, ...(shiny === true ? { shiny } : {}), ...(lucky === true ? { lucky } : {}) });
+    const ref = parseCreatureRef(creature);
+    if (ref) creatures.push(ref);
   }
   return creatures;
 }
@@ -118,6 +118,42 @@ export async function fetchMyArsenal(): Promise<CreatureRef[]> {
 /** The signed-in trainer's Wishlist (what they're hunting), in slot order. */
 export async function fetchMyWishlist(): Promise<CreatureRef[]> {
   return fetchMyCreatures('wishlist');
+}
+
+/** How many rows `fetchMyTradeHistory` shows — the live profile's Trade History section has no "load
+ *  more" affordance yet, so this is simply a sane cap on a busy trainer's full history. */
+const TRADE_HISTORY_LIMIT = 20;
+
+/**
+ * The signed-in trainer's most recent completed trades, newest first, from the `my_trade_history` view
+ * (security-invoker, already scoped to `auth.uid()` — see that view's definition). A row's `gave` is
+ * always the signed-in trainer's own side of the trade; when it doesn't parse (the trade's own side was
+ * never formally recorded) the whole row is skipped, since there's nothing to anchor the tile on. `got`
+ * may legitimately be `null` — the *other* side wasn't a formal offer — and that's rendered, not dropped
+ * (see `TradeHistoryEntry.got`'s comment).
+ */
+export async function fetchMyTradeHistory(): Promise<TradeHistoryEntry[]> {
+  const { data, error } = await supabase
+    .from('my_trade_history')
+    .select('id, gave, got, partner_handle, completed_at')
+    .order('completed_at', { ascending: false })
+    .limit(TRADE_HISTORY_LIMIT);
+  if (error) throw new ProfileError('form', error.message);
+
+  const history: TradeHistoryEntry[] = [];
+  for (const row of data) {
+    if (row.id === null || row.completed_at === null) continue;
+    const gave = parseCreatureRef(row.gave);
+    if (!gave) continue;
+    history.push({
+      id: row.id,
+      gave,
+      got: parseCreatureRef(row.got),
+      partner: row.partner_handle ?? 'Unknown trainer',
+      date: formatTradeDate(new Date(row.completed_at)),
+    });
+  }
+  return history;
 }
 
 /** `trainer_creatures_slot_key` caps each list at 50 rows (`sort_order` 0..49). */
@@ -150,16 +186,15 @@ const ADD_CREATURE_ATTEMPTS = 3;
  * Shared by `addToArsenal` / `addToWishlist`. The stored `name` and `hue` are always read back out of
  * the pokedex by `pokemonId` — never taken from the caller — so a trainer's Arsenal/Wishlist entry can
  * never drift from the one source of truth for what a Pokémon is called or how it's colored (AGENTS.md:
- * never hallucinate game data).
+ * never hallucinate game data). `shiny` IS caller-supplied: the picker's own toggle (`PokemonPickerModal`),
+ * not something the dex can look up — a species has no fixed shiny-ness.
  */
-async function addCreature(list: CreatureList, pokemonId: number): Promise<void> {
+async function addCreature(list: CreatureList, pokemonId: number, shiny: boolean): Promise<void> {
   const entry = findPokemon(pokemonId);
   if (!entry) throw new ProfileError('form', "That Pokémon isn't in the dex.");
-  // A fresh object literal, not a `CreatureRef`-typed value: `creature_ref_is_valid` (the DB check
-  // constraint) would reject a `CreatureRef` variable's `shiny`/`lucky` if either were `undefined`
-  // rather than omitted, and `Json` has no room for that key even so — see `creatureRefToJson` in
-  // lib/api/listings.ts for the same shape used to insert `looking`.
-  const creature: Json = { name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue };
+  // `creatureRefToJson` (not a raw object literal): the one place that omits a falsy `shiny` rather
+  // than sending it as `false` — see that function's own comment on why `creature_ref_is_valid` cares.
+  const creature = creatureRefToJson({ name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue, shiny });
   const ownerId = await currentUserId();
 
   for (let attempt = 1; attempt <= ADD_CREATURE_ATTEMPTS; attempt++) {
@@ -176,13 +211,13 @@ async function addCreature(list: CreatureList, pokemonId: number): Promise<void>
 }
 
 /** Adds a Pokémon (by national dex id) to the signed-in trainer's Arsenal, in the lowest free slot. */
-export async function addToArsenal(pokemonId: number): Promise<void> {
-  return addCreature('arsenal', pokemonId);
+export async function addToArsenal(pokemonId: number, shiny = false): Promise<void> {
+  return addCreature('arsenal', pokemonId, shiny);
 }
 
 /** Adds a Pokémon (by national dex id) to the signed-in trainer's Wishlist, in the lowest free slot. */
-export async function addToWishlist(pokemonId: number): Promise<void> {
-  return addCreature('wishlist', pokemonId);
+export async function addToWishlist(pokemonId: number, shiny = false): Promise<void> {
+  return addCreature('wishlist', pokemonId, shiny);
 }
 
 export interface ProfileInput {

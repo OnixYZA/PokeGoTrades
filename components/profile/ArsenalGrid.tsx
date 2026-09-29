@@ -1,16 +1,21 @@
 import { Plus } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
+import { EqualGrid } from '@/components/ui/EqualGrid';
 import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { CreatureRef } from '@/data/types';
+import { creatureDisplayName } from '@/lib/format';
+import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
 interface ArsenalGridProps {
   arsenal: CreatureRef[];
   /** Only passed by the signed-in trainer's own profile screen; a public profile leaves it out. */
   onEdit?: () => void;
 }
+
+const COLUMNS = 3;
 
 export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
   return (
@@ -31,17 +36,24 @@ export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
           </IconButton>
         )}
       </View>
-      <View className="flex-row flex-wrap gap-2">
-        {arsenal.map((p, i) => (
-          <View
-            key={i}
-            className="relative items-center gap-2 overflow-hidden rounded-2xl border border-border bg-bg-card p-2.5"
-            style={{ width: '31.5%' }}
-          >
+      <EqualGrid
+        items={arsenal}
+        columns={COLUMNS}
+        keyExtractor={(p, i) => `${spriteVariantKey(spriteVariantOf(p))}-${i}`}
+        renderItem={(p) => (
+          <View className="relative items-center gap-2 overflow-hidden rounded-2xl border border-border bg-bg-card p-2.5">
             <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(p.hue)]} />
-            <Chip pokemonId={p.pokemonId} hue={p.hue} shiny={p.shiny} size={52} />
-            <Text className="text-center font-display-semi text-text-primary" style={{ fontSize: 11, lineHeight: 13.2 }}>
-              {p.name}
+            {/* A lucky entry shows both the Chip's small gold "L" and this tile's "✦ LUCKY" caption below. */}
+            <Chip creature={p} size={52} />
+            {/* numberOfLines: 3 narrow columns (Task 1) + the "Shiny " prefix means a name like "Shiny
+             *  Crabominable" needs to wrap — capped at 2 lines so a long one still fits its tile instead
+             *  of pushing the row's height around unpredictably. */}
+            <Text
+              numberOfLines={2}
+              className="text-center font-display-semi text-text-primary"
+              style={{ fontSize: 11, lineHeight: 13.2 }}
+            >
+              {creatureDisplayName(p)}
             </Text>
             {p.lucky && (
               <Text className="font-display" style={{ fontSize: 8, letterSpacing: 0.9, color: '#f5c518' }}>
@@ -49,8 +61,8 @@ export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
               </Text>
             )}
           </View>
-        ))}
-      </View>
+        )}
+      />
     </View>
   );
 }

@@ -1,9 +1,10 @@
-import { router } from 'expo-router';
-import { ChevronLeft, LogOut, UserRound } from 'lucide-react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { ChevronLeft, LogOut, Share2, UserRound } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
+import { ShareTradeListModal } from '@/components/modals/ShareTradeListModal';
 import { ArsenalGrid } from '@/components/profile/ArsenalGrid';
 import { LiveIdentityCard } from '@/components/profile/LiveIdentityCard';
 import { ProfileHero } from '@/components/profile/ProfileHero';
@@ -14,17 +15,19 @@ import { WishlistGrid } from '@/components/profile/WishlistGrid';
 import { IconButton } from '@/components/ui/IconButton';
 import { findPokemon } from '@/constants/pokedex';
 import { trainer } from '@/data/trainer';
-import type { CreatureRef } from '@/data/types';
+import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
 import {
   addToArsenal,
   addToWishlist,
   fetchMyArsenal,
   fetchMyProfile,
+  fetchMyTradeHistory,
   fetchMyWishlist,
   isProfileReady,
   type MyProfile,
 } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
@@ -37,10 +40,12 @@ interface MyProfileData {
   profile: MyProfile | null;
   arsenal: CreatureRef[];
   wishlist: CreatureRef[];
+  tradeHistory: TradeHistoryEntry[];
   error: string | null;
   retry: () => void;
-  /** Re-fetches Arsenal + Wishlist in place after an add, leaving `status`/`profile` untouched so the
-   *  screen the trainer is already looking at doesn't flash back to the loading spinner. */
+  /** Re-fetches Arsenal + Wishlist + Trade History in place, leaving `status`/`profile` untouched so
+   *  the screen the trainer is already looking at doesn't flash back to the loading spinner. Called
+   *  both after adding a Pokémon and on tab focus (a trade completed in Chats can add a history row). */
   refresh: () => Promise<void>;
 }
 
@@ -54,6 +59,7 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [arsenal, setArsenal] = useState<CreatureRef[]>([]);
   const [wishlist, setWishlist] = useState<CreatureRef[]>([]);
+  const [tradeHistory, setTradeHistory] = useState<TradeHistoryEntry[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   // Shared by `load` and `refresh` below: whichever fetch resolves last for the *current* permanent
@@ -66,15 +72,17 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
     setStatus('loading');
     setError(null);
     try {
-      const [nextProfile, nextArsenal, nextWishlist] = await Promise.all([
+      const [nextProfile, nextArsenal, nextWishlist, nextTradeHistory] = await Promise.all([
         fetchMyProfile(),
         fetchMyArsenal(),
         fetchMyWishlist(),
+        fetchMyTradeHistory(),
       ]);
       if (request !== latestRequest.current) return; // a newer load started while this one was in flight
       setProfile(nextProfile);
       setArsenal(nextArsenal);
       setWishlist(nextWishlist);
+      setTradeHistory(nextTradeHistory);
       setStatus('ready');
     } catch (reason) {
       if (request !== latestRequest.current) return;
@@ -83,17 +91,23 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
     }
   }, [permanentUserId]);
 
-  // Called after adding a Pokémon: only Arsenal/Wishlist can have changed (the profile identity
-  // fields haven't), so only those two are re-read — and `status`/`profile` are never touched, so the
-  // screen stays exactly as it was instead of dropping back to the loading spinner mid-scroll.
+  // Called after adding a Pokémon, and on tab focus: only Arsenal/Wishlist/Trade History can have
+  // changed (the profile identity fields haven't), so only those three are re-read — and
+  // `status`/`profile` are never touched, so the screen stays exactly as it was instead of dropping
+  // back to the loading spinner mid-scroll.
   const refresh = useCallback(async () => {
     if (!permanentUserId) return;
     const request = ++latestRequest.current;
     try {
-      const [nextArsenal, nextWishlist] = await Promise.all([fetchMyArsenal(), fetchMyWishlist()]);
+      const [nextArsenal, nextWishlist, nextTradeHistory] = await Promise.all([
+        fetchMyArsenal(),
+        fetchMyWishlist(),
+        fetchMyTradeHistory(),
+      ]);
       if (request !== latestRequest.current) return;
       setArsenal(nextArsenal);
       setWishlist(nextWishlist);
+      setTradeHistory(nextTradeHistory);
     } catch (reason) {
       if (request !== latestRequest.current) return;
       toast(reason instanceof Error ? reason.message : 'Could not refresh your profile.');
@@ -110,12 +124,13 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
       setProfile(null);
       setArsenal([]);
       setWishlist([]);
+      setTradeHistory([]);
       setStatus('loading');
       setError(null);
     }
   }, [permanentUserId, load]);
 
-  return { status, profile, arsenal, wishlist, error, retry: load, refresh };
+  return { status, profile, arsenal, wishlist, tradeHistory, error, retry: load, refresh };
 }
 
 export default function ProfileScreen() {
@@ -127,6 +142,9 @@ export default function ProfileScreen() {
   // Blocks a second selection from firing a second insert while the first is still in flight; the
   // picker itself is already closed by then (see `addPokemon`), so this only guards a fast re-open.
   const [addingCreature, setAddingCreature] = useState(false);
+  // "Share trade list" (Task 2B) — gates the modal below; there's nothing else to track here since
+  // Arsenal/Wishlist stay out of the store (AGENTS.md) and the modal reads them straight off `shareData`.
+  const [shareVisible, setShareVisible] = useState(false);
 
   // Same uid through the anonymous -> permanent upgrade, a new uid for a returning-user sign-in —
   // either way this is the one value the live fetch below needs to key off.
@@ -161,17 +179,37 @@ export default function ProfileScreen() {
 
   const showSignOut = USE_SUPABASE && !isAnonymous && !!user;
 
+  // Re-reads the lists + trade history whenever the tab regains focus, so a trade just completed in
+  // Chats shows up here. `useFocusEffect` re-runs whenever its callback's identity changes, so the
+  // callback depends only on `live.refresh` (stable per `permanentUserId`) and reads `status` through
+  // a ref: depending on `live.status` would re-fire a redundant refresh the instant the first load
+  // lands on 'ready'.
+  const statusRef = useRef(live.status);
+  statusRef.current = live.status;
+
+  useFocusEffect(
+    useCallback(() => {
+      // Only once the initial `load()` has actually settled: `refresh()` bumps the same
+      // `latestRequest` counter `load()` uses, so calling it while that first load is still in flight
+      // would make the load's own result look stale and get silently discarded — the screen would then
+      // sit on its loading spinner forever, since nothing else ever flips `status` to 'ready'.
+      if (statusRef.current === 'ready') void live.refresh();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [live.refresh]),
+  );
+
   /** Shared by both grids' pickers: add the chosen Pokémon, refresh in place, then toast. Errors
    *  (an unknown id, a full list, a lost race on the last free slot) surface the same way. */
-  const addPokemon = async (list: CreatureListKind, pokemonId: number) => {
+  const addPokemon = async (list: CreatureListKind, pokemonId: number, shiny: boolean) => {
     if (addingCreature) return;
     const entry = findPokemon(pokemonId);
     const listLabel = list === 'arsenal' ? 'Arsenal' : 'Wishlist';
+    const displayName = entry ? creatureDisplayName({ name: entry.name, shiny }) : 'That Pokémon';
     setAddingCreature(true);
     try {
-      await (list === 'arsenal' ? addToArsenal(pokemonId) : addToWishlist(pokemonId));
+      await (list === 'arsenal' ? addToArsenal(pokemonId, shiny) : addToWishlist(pokemonId, shiny));
       await live.refresh();
-      toast(`${entry?.name ?? 'That Pokémon'} added to your ${listLabel}`, 'success');
+      toast(`${displayName} added to your ${listLabel}`, 'success');
     } catch (reason) {
       toast(reason instanceof Error ? reason.message : `Could not add that Pokémon to your ${listLabel}.`, 'error');
     } finally {
@@ -179,11 +217,21 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleSelectPokemon = (pokemonId: number) => {
+  const handleSelectPokemon = (pokemonId: number, shiny: boolean) => {
     const list = pickerFor;
     setPickerFor(null); // close before the toast — see lib/toast.ts on modals and their own ToastHost
-    if (list) void addPokemon(list, pokemonId);
+    if (list) void addPokemon(list, pokemonId, shiny);
   };
+
+  // What "Share trade list" needs — only ever available in the two branches below that actually have
+  // both lists loaded (the mock trainer, and a live profile that's finished onboarding). `null`
+  // everywhere else, which is also everywhere the button itself is never rendered.
+  const shareData =
+    !USE_SUPABASE
+      ? { handle: trainer.handle, team: trainer.team, level: trainer.lvl, arsenal: trainer.arsenal, wishlist: trainer.wishlist }
+      : live.profile && isProfileReady(live.profile)
+        ? { handle: live.profile.handle, team: live.profile.team, level: undefined, arsenal: live.arsenal, wishlist: live.wishlist }
+        : null;
 
   let body: ReactNode;
   if (!USE_SUPABASE) {
@@ -195,6 +243,7 @@ export default function ProfileScreen() {
         <RepStats trainer={trainer} />
         <ArsenalGrid arsenal={trainer.arsenal} />
         <WishlistGrid wishlist={trainer.wishlist} />
+        <ShareTradeListButton onPress={() => setShareVisible(true)} />
         <TradeHistoryGrid history={trainer.tradeHistory} />
       </>
     );
@@ -245,14 +294,16 @@ export default function ProfileScreen() {
       />
     );
   } else {
-    // Ready: real handle/team, real arsenal, real wishlist. Rep, streak, bio and trade history have
-    // no live source yet, so those sections are left out rather than filled with invented numbers —
-    // see LiveIdentityCard's own comment.
+    // Ready: real handle/team, real arsenal, real wishlist, real trade history (`my_trade_history`).
+    // Rep, streak and bio still have no live source, so those are left out rather than filled with
+    // invented numbers — see LiveIdentityCard's own comment.
     body = (
       <>
         <LiveIdentityCard profile={live.profile} />
         <ArsenalGrid arsenal={live.arsenal} onEdit={() => setPickerFor('arsenal')} />
         <WishlistGrid wishlist={live.wishlist} onEdit={() => setPickerFor('wishlist')} />
+        <ShareTradeListButton onPress={() => setShareVisible(true)} />
+        <TradeHistoryGrid history={live.tradeHistory} />
       </>
     );
   }
@@ -295,8 +346,43 @@ export default function ProfileScreen() {
         title={pickerFor === 'wishlist' ? 'Add to Wishlist' : 'Add to Arsenal'}
         onClose={() => setPickerFor(null)}
         onSelect={handleSelectPokemon}
-        excludeIds={(pickerFor === 'wishlist' ? live.wishlist : live.arsenal).map((c) => c.pokemonId)}
+        exclude={pickerFor === 'wishlist' ? live.wishlist : live.arsenal}
       />
+
+      {/* Only ever mounted with real data: `shareData` is null in every branch that doesn't render the
+       *  button above, so `shareVisible` can never be true without it. */}
+      {shareData && (
+        <Modal visible={shareVisible} animationType="slide" onRequestClose={() => setShareVisible(false)}>
+          <ShareTradeListModal
+            handle={shareData.handle}
+            team={shareData.team}
+            level={shareData.level}
+            arsenal={shareData.arsenal}
+            wishlist={shareData.wishlist}
+            onClose={() => setShareVisible(false)}
+          />
+        </Modal>
+      )}
     </View>
+  );
+}
+
+/** "Share trade list" (Task 2B): exports the Arsenal + Wishlist grids above as a single PNG. Sits right
+ *  under both grids in both branches that render it — see the two call sites above. `mt-3` groups it with
+ *  the Wishlist (which has no bottom margin of its own); no bottom margin here, since `TradeHistoryGrid`
+ *  already brings the 22px section gap — adding one too doubled it to 44px. */
+function ShareTradeListButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Share trade list"
+      className="mt-3 flex-row items-center justify-center gap-2 rounded-2xl border border-border-strong bg-bg-card py-3 active:opacity-80"
+    >
+      <Share2 size={15} color="#4fb3ff" />
+      <Text className="font-display text-accent-blue" style={{ fontSize: 13 }}>
+        Share trade list
+      </Text>
+    </Pressable>
   );
 }

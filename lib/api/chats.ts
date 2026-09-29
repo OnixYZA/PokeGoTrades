@@ -1,4 +1,5 @@
 import type { Chat, ChatMessage, ChatRole, ChatStatus, CreatureRef, FormalOffer, ListingStatus } from '@/data/types';
+import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
 import type { Database, Json } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
 
@@ -48,34 +49,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Parses the shared `CreatureRef` shape via `parseCreatureRef`, then layers on the two fields an offer
+ *  carries that a bare creature-ref doesn't. */
 function toFormalOffer(value: Json | null | undefined): FormalOffer | undefined {
   if (!isRecord(value)) return undefined;
-  const { name, pokemonId, hue, iv, move, shiny, lucky } = value;
-  if (typeof name !== 'string' || typeof pokemonId !== 'number' || typeof hue !== 'number') return undefined;
+  const base = parseCreatureRef(value);
+  if (!base) return undefined;
+  const { iv, move } = value;
   return {
-    name,
-    pokemonId,
-    hue,
+    ...base,
     ...(typeof iv === 'string' ? { iv } : {}),
     ...(typeof move === 'string' ? { move } : {}),
-    ...(shiny === true ? { shiny } : {}),
-    ...(lucky === true ? { lucky } : {}),
   };
 }
 
-/** A creature as the `offer` jsonb `formal_offer_is_valid()` accepts. Only the allowed keys, so nothing else leaks in. */
+/** A creature as the `offer` jsonb `formal_offer_is_valid()` accepts: `creatureRefToJson` (see
+ *  `lib/api/creature-ref.ts`) supplies the shared name/pokemonId/hue/shiny/lucky/formCode/costumeCode
+ *  shape and its omission rules — `formal_offer_is_valid` enforces the same ones `creature_ref_is_valid`
+ *  does — and this just layers `iv`/`move` on top when the offer carries them. */
 export function offerToJson(offer: FormalOffer): Json {
   return {
-    name: offer.name,
-    pokemonId: offer.pokemonId,
-    hue: offer.hue,
-    ...(offer.shiny ? { shiny: true } : {}),
-    ...(offer.lucky ? { lucky: true } : {}),
+    ...creatureRefToJson(offer),
     ...(offer.iv ? { iv: offer.iv } : {}),
     ...(offer.move ? { move: offer.move } : {}),
   };
 }
 
+// Not built from `creatureRefToJson`/`parseCreatureRef`: those parse or serialize the jsonb *wire*
+// shape (`Json`, values widened to `Json | undefined`), while this converts one already-typed client
+// shape (`CreatureRef`) to another (`FormalOffer`) — reusing them here would need an unsafe cast to
+// undo that widening, which is worse than the few duplicated lines.
 export function creatureToOffer(creature: CreatureRef): FormalOffer {
   return {
     name: creature.name,
@@ -83,6 +86,8 @@ export function creatureToOffer(creature: CreatureRef): FormalOffer {
     hue: creature.hue,
     ...(creature.shiny ? { shiny: true } : {}),
     ...(creature.lucky ? { lucky: true } : {}),
+    ...(creature.formCode != null ? { formCode: creature.formCode } : {}),
+    ...(creature.costumeCode != null ? { costumeCode: creature.costumeCode } : {}),
   };
 }
 

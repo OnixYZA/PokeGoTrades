@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { BlurView } from 'expo-blur';
-import { Bolt, Dumbbell, MapPin, Send, Trophy, X } from 'lucide-react-native';
+import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Send, Trophy, X } from 'lucide-react-native';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -24,8 +24,11 @@ import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
+import { demandTier, marketLabel } from '@/constants/market';
+import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
@@ -167,7 +170,7 @@ export default function ListingDetailScreen() {
           </View>
 
           <View className="flex-row items-start gap-4">
-            <Sprite pokemonId={listing.pokemonId} hue={listing.hue} shiny={listing.shiny} size={92} />
+            <Sprite creature={listing} purified={listing.purified} size={92} />
             <View className="min-w-0 flex-1">
               <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 10, letterSpacing: 1.2 }}>
                 {listing.form} · {listing.year} catch
@@ -176,8 +179,15 @@ export default function ListingDetailScreen() {
                 {listing.shiny && (
                   <Text style={{ color: '#ff6bd6', textShadow: '0 0 8px #ff6bd6', fontSize: 22 } as any}>✦</Text>
                 )}
-                <Text className="font-display text-text-primary" style={{ fontSize: 22, letterSpacing: -0.44 }}>
-                  {listing.name}
+                {/* `flexShrink: 1` + `numberOfLines`: "Shiny " (Task 1) makes this ~6 characters longer,
+                 *  and a Text sibling next to a fixed-size glyph in a row doesn't shrink by default in RN
+                 *  (unlike the web), so a long name would overflow past the card edge instead of eliding. */}
+                <Text
+                  numberOfLines={1}
+                  className="font-display text-text-primary"
+                  style={{ fontSize: 22, letterSpacing: -0.44, flexShrink: 1 }}
+                >
+                  {creatureDisplayName(listing)}
                 </Text>
               </View>
               <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
@@ -198,11 +208,43 @@ export default function ListingDetailScreen() {
         <ScrollView contentContainerStyle={{ padding: 22 }} showsVerticalScrollIndicator={false}>
           <View className="mb-[18px] flex-row gap-2">
             <StatTile label="PvP Rank" value={listing.pvp} color="#4fb3ff" icon={<Bolt size={12} color="#4fb3ff" />} radius={12} valueSize={18} />
-            <StatTile label="Top Traded" value={listing.demand} color="#f5c518" icon={<Trophy size={12} color="#f5c518" />} radius={12} valueSize={18} />
+            <StatTile
+              label="Top Traded"
+              value={
+                <>
+                  {marketLabel(demandTier(listing.market))}
+                  {listing.market ? (
+                    <Text style={{ fontSize: 9, color: '#8b93a7' }}>
+                      {`\n${listing.market.wanted}↑ ${listing.market.offered}↓`}
+                    </Text>
+                  ) : null}
+                </>
+              }
+              color="#f5c518"
+              icon={<Trophy size={12} color="#f5c518" />}
+              radius={12}
+              valueSize={18}
+            />
             <StatTile label="IV Spread" value={listing.iv} color="#e8ecf5" icon={<Dumbbell size={12} color="#e8ecf5" />} radius={12} mono valueSize={12} />
           </View>
 
           <StardustCard initialTradeType={listing.tradeType} />
+
+          <View className="mb-[18px]">
+            <View className="mb-3 flex-row items-center gap-2">
+              <Text className="font-display text-text-primary" style={{ fontSize: 15, letterSpacing: -0.15 }}>
+                Logistics
+              </Text>
+              <View className="h-px flex-1" style={SURFACE.divider} />
+            </View>
+            <View className="flex-row flex-wrap gap-2">
+              <LogisticsChip icon={<Car size={12} color="#4fb3ff" />} label={listing.willTravel ? 'Will Travel' : 'Local Only'} />
+              <LogisticsChip icon={<Clock size={12} color="#4fb3ff" />} label={TRADE_TIMELINE_LABELS[listing.tradeTimeline]} />
+              {listing.pokeball && (
+                <LogisticsChip icon={<CircleDot size={12} color="#4fb3ff" />} label={POKEBALL_LABELS[listing.pokeball]} />
+              )}
+            </View>
+          </View>
 
           <View className="mb-[18px]">
             <View className="mb-3 flex-row items-center gap-2">
@@ -250,6 +292,19 @@ export default function ListingDetailScreen() {
         <BuyerOfferModal listing={listing} onCancel={() => setShowOfferModal(false)} onOffered={handleOffered} />
       </Modal>
       <ToastHost />
+    </View>
+  );
+}
+
+/** Small labeled pill for a single logistics fact (will-travel, timeline, caught-in ball) — same
+ *  border/panel treatment as the feed card's old demand pill, just generic over icon + label. */
+function LogisticsChip({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <View className="flex-row items-center gap-1.5 rounded-lg border border-border-strong bg-bg-panel px-2.5 py-1.5">
+      {icon}
+      <Text className="font-mono text-text-body" style={{ fontSize: 11, letterSpacing: 0.3 }}>
+        {label}
+      </Text>
     </View>
   );
 }

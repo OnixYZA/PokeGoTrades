@@ -443,6 +443,12 @@ Object name format: `<auth.uid()>/<listing_id>/<appraisal|movesets|event_badge>`
 | `Listing.screenshots` | `listing_proofs.storage_path[]` | Owner reads them through `createSignedUrl` |
 | `Listing.tags`, `notes` | `tags`, `notes` | |
 | *(new)* `Listing.status` | `status` | Feed hides `completed` / `withdrawn` |
+| *(new, SQL-only — Phase 1B wires the TS)* `Listing.purified`, `costume` | `purified`, `costume` booleans | Seller-observed facts, like `lucky`/`shiny`; frozen by `guard_listing_update` once a chat exists |
+| *(new, SQL-only)* `Listing.pokeball` | `pokeball` enum (`poke`\|`great`\|`ultra`\|`premier`\|`master`\|`beast`\|`safari`) | Same freeze-once-offers-exist rule as `purified`/`costume` |
+| *(new, SQL-only)* `Listing.sizeClass` | `size_class` enum (`XXS`\|`XS`\|`XL`\|`XXL`) | **Service-role only**, like `lucky` (migration `...000200_lock_lucky_to_service_role`) — reserved for a future OCR pass, no client grant, not in the guard tuple |
+| *(new, SQL-only)* `Listing.willTravel` | `will_travel` boolean | Logistics, not a guarded trade-relevant field — can change after offers exist |
+| *(new, SQL-only)* `Listing.tradeTimeline` | `trade_timeline` enum (`asap`\|`this_week`\|`this_month`\|`flexible`), default `'flexible'` | Same as `will_travel`: logistics, not guarded |
+| *(new)* `listing_tag` enum value `'Level 1'` | `public.listing_tag` | Community Day "caught at level 1" tag, added alongside the columns above (migration `...000100_listing_attributes`) |
 | `Chat.id`, `listingId` | `chats.id`, `listing_id` | Server-generated; `open_offer()` returns the id |
 | `Chat.partner` | **derived**: `my_inbox.partner_handle` | Plus `partnerId`, `sellerId`, `buyerId`, `myRole` |
 | `Chat.preview` | `chats.last_message_preview` | Maintained by trigger |
@@ -458,6 +464,7 @@ Object name format: `<auth.uid()>/<listing_id>/<appraisal|movesets|event_badge>`
 | `Trainer.trades`, `rep`, `streak` | `trades_count`, `rep`, `streak_days` | Server-written; `rep`/`streak` stay empty in the MVP |
 | `Trainer.arsenal`, `wishlist` | `trainer_creatures.list` | |
 | `Trainer.tradeHistory` | `my_trade_history` view | Own profile only in the MVP |
+| *(new, SQL-only — no TS field yet)* market demand badge | `pokemon_market_demand` view (migration `...000300_pokemon_market_demand`) | `(pokemon_id, shiny, wanted_count, offered_count, demand_ratio)`; distinct trainers only, counts only, no user ids; tiering the ratio into a label is TS-side, not SQL |
 | `filterLocation`, `friendship` | **client-only** (zustand, optionally persisted) | Friendship is a per-pair game concept; see §5.2 |
 
 ### 1.9 Stardust cost (project rule)

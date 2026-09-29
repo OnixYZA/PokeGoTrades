@@ -6,9 +6,10 @@ import { ActivityIndicator, FlatList, Modal, Pressable, Text, View } from 'react
 import { ListingCard } from '@/components/feed/ListingCard';
 import { LocationDropdown } from '@/components/feed/LocationDropdown';
 import { CreateListingModal } from '@/components/modals/CreateListingModal';
+import { ListingFilterSheet } from '@/components/modals/ListingFilterSheet';
 import { IconButton } from '@/components/ui/IconButton';
 import { StatTile } from '@/components/ui/StatTile';
-import { SURFACE } from '@/constants/theme';
+import { COLORS, SURFACE } from '@/constants/theme';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { useFeed } from '@/lib/use-feed';
@@ -17,10 +18,15 @@ import { useTradeStore } from '@/store/trade-store';
 export default function FeedScreen() {
   const filterLocation = useTradeStore((s) => s.filterLocation);
   const addListing = useTradeStore((s) => s.addListing);
+  const listingFilters = useTradeStore((s) => s.listingFilters);
+  const clearListingFilters = useTradeStore((s) => s.clearListingFilters);
   const feed = useFeed(filterLocation);
   const [showCreateListing, setShowCreateListing] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pulling, setPulling] = useState(false);
+
+  const activeFilterCount = Object.keys(listingFilters).length;
 
   const filtered = feed.listings;
 
@@ -72,12 +78,23 @@ export default function FeedScreen() {
         <View className="flex-row gap-2">
           <LocationDropdown />
           <Pressable
+            onPress={() => setShowFilters(true)}
             accessibilityRole="button"
-            accessibilityLabel="Filter listings"
+            accessibilityLabel={`Filter listings${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
             className="flex-row items-center gap-1.5 rounded-xl border border-border-strong px-3.5 active:opacity-80"
             style={SURFACE.control}
           >
-            <ListFilter size={14} color="#8b93a7" />
+            <View>
+              <ListFilter size={14} color="#8b93a7" />
+              {activeFilterCount > 0 && (
+                <View
+                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full"
+                  style={{ backgroundColor: COLORS.accentGreen }}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no"
+                />
+              )}
+            </View>
             <Text className="font-display-semi text-text-muted" style={{ fontSize: 12 }}>
               Filter
             </Text>
@@ -129,6 +146,13 @@ export default function FeedScreen() {
               actionLabel="Retry"
               onAction={() => void feed.refresh()}
             />
+          ) : activeFilterCount > 0 ? (
+            <FeedMessage
+              title="No listings match these filters"
+              body="Try loosening a chip or two."
+              actionLabel="Clear"
+              onAction={clearListingFilters}
+            />
           ) : (
             <FeedMessage title={`Nothing in ${filterLocation} yet`} body="Post a trade to be the first listing here." />
           )
@@ -161,6 +185,8 @@ export default function FeedScreen() {
           }}
         />
       </Modal>
+
+      <ListingFilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
   );
 }

@@ -1,16 +1,21 @@
 import { Plus } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
+import { EqualGrid } from '@/components/ui/EqualGrid';
 import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
 import { SURFACE } from '@/constants/theme';
 import type { CreatureRef } from '@/data/types';
+import { creatureDisplayName } from '@/lib/format';
+import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
 interface WishlistGridProps {
   wishlist: CreatureRef[];
   /** Only passed by the signed-in trainer's own profile screen; a public profile leaves it out. */
   onEdit?: () => void;
 }
+
+const COLUMNS = 2;
 
 export function WishlistGrid({ wishlist, onEdit }: WishlistGridProps) {
   return (
@@ -31,25 +36,27 @@ export function WishlistGrid({ wishlist, onEdit }: WishlistGridProps) {
           </IconButton>
         )}
       </View>
-      <View className="flex-row flex-wrap gap-2">
-        {wishlist.map((p, i) => (
+      <EqualGrid
+        items={wishlist}
+        columns={COLUMNS}
+        keyExtractor={(p, i) => `${spriteVariantKey(spriteVariantOf(p))}-${i}`}
+        renderItem={(p) => (
           <View
-            key={i}
             className="flex-row items-center gap-2.5 rounded-2xl border border-dashed p-3"
-            style={[SURFACE.card, { width: '48%', borderColor: '#2a3350' }]}
+            style={[SURFACE.card, { borderColor: '#2a3350' }]}
           >
-            <Chip pokemonId={p.pokemonId} hue={p.hue} shiny={p.shiny} size={44} />
+            <Chip creature={p} size={44} />
             <View className="min-w-0 flex-1">
-              <Text className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
-                {p.name}
+              <Text numberOfLines={1} className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
+                {creatureDisplayName(p)}
               </Text>
               <Text className="font-mono text-accent-blue" style={{ fontSize: 9, letterSpacing: 0.72, marginTop: 2 }}>
                 HUNTING
               </Text>
             </View>
           </View>
-        ))}
-      </View>
+        )}
+      />
     </View>
   );
 }

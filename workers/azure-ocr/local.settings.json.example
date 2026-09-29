@@ -5,6 +5,7 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "SUPABASE_URL": "https://<project-ref>.supabase.co",
     "SUPABASE_SERVICE_ROLE_KEY": "",
-    "OCR_SWEEP_ON_STARTUP": "true"
+    "OCR_SWEEP_ON_STARTUP": "true",
+    "PGT_WORKER_SECRET": ""
   }
 }

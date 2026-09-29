@@ -4,6 +4,7 @@ import { Chip } from '@/components/ui/Chip';
 import { formalOffer } from '@/data/chats';
 import type { FormalOffer } from '@/data/types';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 
 export function FormalOfferCard({ offer = formalOffer }: { offer?: FormalOffer }) {
   // Server offers say whether they are lucky/shiny. The mock offers predate those fields and were
@@ -19,10 +20,10 @@ export function FormalOfferCard({ offer = formalOffer }: { offer?: FormalOffer }
         Formal Offer
       </Text>
       <View className="flex-row items-center gap-2.5">
-        <Chip pokemonId={offer.pokemonId} hue={offer.hue} shiny={offer.shiny} lucky={lucky} size={40} />
+        <Chip creature={{ ...offer, lucky }} size={40} />
         <View>
           <Text className="font-display-semi text-text-primary" style={{ fontSize: 13 }}>
-            {offer.name}
+            {creatureDisplayName(offer)}
           </Text>
           <Text className="font-mono" style={{ fontSize: 10, color: '#94a3b8' }}>
             {[offer.move, offer.iv].filter(Boolean).join(' · ') || 'Awaiting details'}
