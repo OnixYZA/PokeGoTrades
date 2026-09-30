@@ -191,8 +191,13 @@ function printPlan(sha: string, flags: Flags, plan: MirrorPlan): void {
   console.log('');
 
   if (plan.invalidCode.length > 0) {
-    console.log(`${plan.invalidCode.length} source file(s) skipped: form/costume code isn't [A-Z0-9_]+ upstream:`);
+    console.log(`${plan.invalidCode.length} source file(s) skipped: form/costume code isn't [A-Z0-9_]+ upstream, even upper-cased:`);
     for (const file of plan.invalidCode) console.log(`  ~ ${file}`);
+    console.log('');
+  }
+  if (plan.caseFixes.length > 0) {
+    console.log(`${plan.caseFixes.length} source file(s) keyed under their upper-cased form/costume code:`);
+    for (const line of plan.caseFixes) console.log(`  ^ ${line}`);
     console.log('');
   }
   if (plan.collisions.length > 0) {

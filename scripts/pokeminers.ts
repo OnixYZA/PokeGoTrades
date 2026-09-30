@@ -23,9 +23,10 @@
  * The parser is deliberately permissive about the form/costume TEXT itself: upstream is not perfectly
  * consistent about casing (a live checkout has `pm133.cMay_2023.icon.png` sitting right next to the
  * correctly-cased `pm133.cMAY_2023.s.icon.png`), so it extracts raw tokens and `planMirror` below
- * decides. `planMirror` REFUSES a file whose code fails `isSpriteCode`. It must not hand that file to
- * `spriteObjectKey`, which would fold the bad code away and upload Eevee's May 2023 costume as Eevee's
- * base sprite.
+ * decides. `planMirror` upper-cases a code when that alone makes it pass `isSpriteCode` (`May_2023` ->
+ * `MAY_2023`, the same costume: checked by eye against its shiny on 2026-09-29), and REFUSES any other bad
+ * code. It must never hand a bad code to `spriteObjectKey`, which would fold it away and upload Eevee's
+ * May 2023 costume as Eevee's base sprite.
  */
 import { findPokemon } from '../constants/pokedex';
 import { BASE_FORM_CODES, isSpriteCode, spriteObjectKey } from '../lib/sprite-url';
@@ -76,10 +77,13 @@ export interface MirrorPlan {
   /** Plain species keys (`pokemon/{id}[.s].png`) that upstream has no plain file for, filled from the
    *  species' default-form file instead (`BASE_FORM_CODES`). They are also in `uploads`. */
   defaultFormFills: string[];
-  /** In-scope source files refused because a form/costume code fails `isSpriteCode` (see header). */
+  /** `key <- file` for each in-scope source file whose code was upper-cased to become valid (the real
+   *  `pm133.cMay_2023.icon.png`). They are also in `uploads`. */
+  caseFixes: string[];
+  /** In-scope source files refused because a form/costume code fails `isSpriteCode` even upper-cased. */
   invalidCode: string[];
-  /** Two distinct source files resolving to one key. With invalid codes refused up front this should
-   *  never happen; it stays as a guard, and neither file is uploaded. */
+  /** Two distinct source files tied for one key. With invalid codes refused up front this should never
+   *  happen; it stays as a guard, and neither file is uploaded. */
   collisions: string[];
   /** In-range Pokédex ids with no base (non-shiny, no form/costume) icon upstream, not even a default-form
    *  one. They render the initial-letter placeholder in the app. */
@@ -90,65 +94,84 @@ function inRange(pokemonId: number, range: [number, number] | null): boolean {
   return range === null || (pokemonId >= range[0] && pokemonId <= range[1]);
 }
 
+/** Upstream's code as-is when valid, else ASCII-upper-cased when that alone makes it valid (`May_2023`),
+ *  else `null`. Case never changes which game enum a code names, so the fix can't pick the wrong art. */
+function canonicalCode(code: string): string | null {
+  if (isSpriteCode(code)) return code;
+  const upper = code.replace(/[a-z]/g, (c) => c.toUpperCase());
+  return isSpriteCode(upper) ? upper : null;
+}
+
+/** How a source file came to be offered for a key. When several files could fill one key, the lowest rank
+ *  wins, so a correctly named file always beats a case-fixed one, which beats a default-form fill. Files
+ *  tied at the winning rank are a collision. */
+type SourceTier = 'exact' | 'caseFixed' | 'defaultForm';
+const TIER_RANK: Record<SourceTier, number> = { exact: 0, caseFixed: 1, defaultForm: 2 };
+
 /**
  * Pure: source listing + scope -> what to upload. Every key comes from `spriteObjectKey` (R4).
  *
  * A species whose default art exists upstream only under a form token (`pm888.fHERO.s.icon.png`, with no
  * `pm888.s.icon.png`) gets its plain key filled from that default-form file, so the bucket always holds
- * `pokemon/{id}[.s].png` wherever upstream has the art at all. A real plain file always wins, so the fill
- * can never collide with it. The fill is a BASE key, so it happens even without `--forms`.
+ * `pokemon/{id}[.s].png` wherever upstream has the art at all. The fill is a BASE key, so it happens even
+ * without `--forms`. See `SourceTier` for which file wins a key.
  */
 export function planMirror(sourceFiles: readonly string[], scope: MirrorScope): MirrorPlan {
-  const sourcesByKey = new Map<string, string[]>();
+  /** Key -> the best tier offered for it so far, and every file offered at that tier. */
+  const offers = new Map<string, { tier: SourceTier; files: string[] }>();
   const invalidCode: string[] = [];
-  const hasBase = new Set<number>();
-  /** Plain key -> the default-form file that could fill it, if upstream turns out to have no plain file. */
-  const defaultFormSources = new Map<string, { pokemonId: number; shiny: boolean; file: string }>();
+
+  function offer(key: string, tier: SourceTier, file: string): void {
+    const current = offers.get(key);
+    if (!current || TIER_RANK[tier] < TIER_RANK[current.tier]) offers.set(key, { tier, files: [file] });
+    else if (tier === current.tier) current.files.push(file);
+  }
 
   for (const file of sourceFiles) {
     const parsed = parsePokeMinersIcon(file);
     if (!parsed || parsed.gender2) continue; // not an icon, or the alternate gender (no gender axis in the key)
-    if (!findPokemon(parsed.pokemonId) || !inRange(parsed.pokemonId, scope.range)) continue;
-    if (!parsed.form && !parsed.costume && !parsed.shiny) hasBase.add(parsed.pokemonId);
-    if (parsed.form && !parsed.costume && parsed.form === BASE_FORM_CODES[parsed.pokemonId]) {
-      const { pokemonId, shiny } = parsed;
-      defaultFormSources.set(spriteObjectKey({ pokemonId, shiny }), { pokemonId, shiny, file });
+    const { pokemonId, shiny } = parsed;
+    if (!findPokemon(pokemonId) || !inRange(pokemonId, scope.range)) continue;
+    const form = parsed.form && canonicalCode(parsed.form);
+    const costume = parsed.costume && canonicalCode(parsed.costume);
+    if (form && !parsed.costume && form === BASE_FORM_CODES[pokemonId]) {
+      offer(spriteObjectKey({ pokemonId, shiny }), 'defaultForm', file);
     }
     if (parsed.form && !scope.forms) continue;
     if (parsed.costume && !scope.costumes) continue;
-    if ((parsed.form && !isSpriteCode(parsed.form)) || (parsed.costume && !isSpriteCode(parsed.costume))) {
+    if ((parsed.form && !form) || (parsed.costume && !costume)) {
       invalidCode.push(file);
       continue;
     }
-    const key = spriteObjectKey(parsed);
-    sourcesByKey.set(key, [...(sourcesByKey.get(key) ?? []), file]);
-  }
-
-  const defaultFormFills: string[] = [];
-  for (const [key, { pokemonId, shiny, file }] of defaultFormSources) {
-    if (sourcesByKey.has(key)) continue;
-    sourcesByKey.set(key, [file]);
-    defaultFormFills.push(key);
-    if (!shiny) hasBase.add(pokemonId);
+    const tier = form === parsed.form && costume === parsed.costume ? 'exact' : 'caseFixed';
+    offer(spriteObjectKey({ pokemonId, shiny, form, costume }), tier, file);
   }
 
   const uploads: PlannedUpload[] = [];
+  const defaultFormFills: string[] = [];
+  const caseFixes: string[] = [];
   const collisions: string[] = [];
-  for (const [key, files] of sourcesByKey) {
-    if (files.length > 1) collisions.push(`${key} <- ${files.sort().join(', ')}`);
-    else uploads.push({ key, sourceFile: files[0] });
+  for (const [key, { tier, files }] of offers) {
+    if (files.length > 1) {
+      collisions.push(`${key} <- ${files.sort().join(', ')}`);
+      continue;
+    }
+    uploads.push({ key, sourceFile: files[0] });
+    if (tier === 'defaultForm') defaultFormFills.push(key);
+    if (tier === 'caseFixed') caseFixes.push(`${key} <- ${files[0]}`);
   }
 
   const [lo, hi] = scope.range ?? [1, Infinity];
   const missingBase: number[] = [];
   for (let id = lo; id <= hi && findPokemon(id); id++) {
-    if (!hasBase.has(id)) missingBase.push(id);
+    if (!offers.has(spriteObjectKey({ pokemonId: id }))) missingBase.push(id);
   }
 
   uploads.sort((a, b) => a.key.localeCompare(b.key));
   return {
     uploads,
     defaultFormFills: defaultFormFills.sort(),
+    caseFixes: caseFixes.sort(),
     invalidCode: invalidCode.sort(),
     collisions: collisions.sort(),
     missingBase,

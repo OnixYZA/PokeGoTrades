@@ -125,8 +125,9 @@ export function spriteVariantKey(v: SpriteVariant): string {
  * so anything that doesn't match is silently dropped rather than smuggled into a key verbatim — it
  * folds back to the plain species (or species+shiny) key instead of producing a broken/unpredictable
  * one. That fold is right for a READ (the app falls back to the base sprite), but wrong for a WRITE:
- * the mirror would upload Eevee's costume art as Eevee's base. So `scripts/pokeminers.ts` checks
- * `isSpriteCode` and refuses such a source file before it is ever keyed.
+ * the mirror would upload Eevee's costume art as Eevee's base. So `scripts/pokeminers.ts` upper-cases
+ * such a code when that alone makes it pass `isSpriteCode`, and refuses the source file otherwise, before
+ * it is ever keyed.
  */
 const CODE_RE = /^[A-Z0-9_]+$/;
 

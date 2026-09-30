@@ -115,15 +115,31 @@ describe('planMirror', () => {
     expect(plan.invalidCode).toEqual([]);
   });
 
-  it('refuses a bad-cased code instead of folding it onto the base key, so the real base still uploads', () => {
+  it('upper-cases a bad-cased code onto its own costume key, never folding it onto the base key', () => {
     const plan = planMirror(EEVEE, { forms: true, costumes: true, range: [133, 133] });
     expect(plan.uploads).toEqual([
+      { key: 'pokemon/133.cMAY_2023.png', sourceFile: 'pm133.cMay_2023.icon.png' },
       { key: 'pokemon/133.cMAY_2023.s.png', sourceFile: 'pm133.cMAY_2023.s.icon.png' },
       { key: 'pokemon/133.png', sourceFile: 'pm133.icon.png' },
       { key: 'pokemon/133.s.png', sourceFile: 'pm133.s.icon.png' },
     ]);
-    expect(plan.invalidCode).toEqual(['pm133.cMay_2023.icon.png']);
+    expect(plan.caseFixes).toEqual(['pokemon/133.cMAY_2023.png <- pm133.cMay_2023.icon.png']);
+    expect(plan.invalidCode).toEqual([]);
     expect(plan.collisions).toEqual([]);
+  });
+
+  // Synthetic names below: upstream has no correctly-cased twin of the Eevee file, nor an unfixable code.
+  it('a correctly-cased file beats a case-fixed one for the same key, with no collision', () => {
+    const plan = planMirror([...EEVEE, 'pm133.cMAY_2023.icon.png'], { forms: false, costumes: true, range: [133, 133] });
+    expect(plan.uploads).toContainEqual({ key: 'pokemon/133.cMAY_2023.png', sourceFile: 'pm133.cMAY_2023.icon.png' });
+    expect(plan.caseFixes).toEqual([]);
+    expect(plan.collisions).toEqual([]);
+  });
+
+  it('still refuses a code that upper-casing cannot make valid', () => {
+    const plan = planMirror(['pm133.icon.png', 'pm133.cMay-2023.icon.png'], { forms: false, costumes: true, range: [133, 133] });
+    expect(plan.uploads.map((u) => u.key)).toEqual(['pokemon/133.png']);
+    expect(plan.invalidCode).toEqual(['pm133.cMay-2023.icon.png']);
   });
 
   it('drops .g2, synthetic ids, out-of-range ids and non-icons', () => {
