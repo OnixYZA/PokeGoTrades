@@ -10,11 +10,12 @@
  *     Every species' English name and DEFAULT typing (both slots, in PokeAPI's slot order), taken from
  *     the pokemon row whose id equals the species id.
  *   PokeMiners/game_masters@8e227be44f288d34463e23bf04e9b564d3c16f79
- *     latest/latest.json (Pokémon GO's own data). Per-form types, for FORM_TYPE_OVERRIDES only, and a
- *     cross-check of every species' default typing against PokeAPI's.
+ *     latest/latest.json (Pokémon GO's own data). Per-form types, for FORM_TYPE_OVERRIDES; a cross-check of
+ *     every species' default typing against PokeAPI's; and each species' list of forms (the FORMS_
+ *     templates), for POKEDEX_FORMS.
  *   PokeMiners/pogo_assets@c2a686eb08ace6e890d8fe3d2134c76988db87b5
  *     "Images/Pokemon - 256x256/Addressable Assets" (file listing only). The form-token spelling the app
- *     stores in `formCode`, so overrides are keyed exactly as listings carry them.
+ *     stores in `formCode`, so overrides and the form catalog are keyed exactly as listings carry them.
  *
  * Coverage when generated:
  *   - 1025 species. The game master has typing for 1024; not for #902 Basculegion, which has PokeAPI typing and no form overrides.
@@ -22,6 +23,8 @@
  *     (The game master's FORMLESS template for #888 Zacian, #889 Zamazenta, #892 Urshifu carries a non-default form's
  *     typing, which is why a default is read from the species' first-listed form.)
  *   - 127 form overrides: 116 from form templates, 11 from Mega/Primal evolutions. 20 are marked "spelling unconfirmed": upstream has no sprite art under that form code yet.
+ *   - 323 selectable forms on 130 species in POKEDEX_FORMS; 73 are marked "spelling unconfirmed" the same way. 52 of those species have a default form with a name of its own (POKEDEX_DEFAULT_FORMS).
+ *   - Left out of POKEDEX_FORMS (see the rules below): 96 event-costume forms (and kept as forms: #150 A), and 7 shadow-marker forms (code S on 7 species).
  *
  * POKEDEX_DATA is species-level: national dex order, ids 1 through 1025, one row per species with its
  * default form's typing. Typing that depends on the form (Alolan, Galarian, Hisuian, Origin, Crowned, Rotom
@@ -29,6 +32,26 @@
  * form-code spelling (`CreatureRef.formCode`). Only forms whose types DIFFER from the species default are
  * listed, so a form that is not listed has the species' typing. Read both through constants/pokedex.ts
  * (`typesOf`, `typeMembership`), never directly.
+ *
+ * POKEDEX_FORMS answers a different question: which forms can a creature be LISTED as (the Create Listing
+ * form picker). FORM_TYPE_OVERRIDES cannot answer it, because Origin Palkia and Armored Mewtwo have their
+ * species' typing and so are not in it. Rows are `[pokemonId, formCodes]` in the same `formCode` spelling,
+ * species in id order and codes in the game master's own order. `formCode: null` means the species' default
+ * form, so the default is NOT listed; POKEDEX_DEFAULT_FORMS names it for the species where it has a name of
+ * its own (Zacian's Hero, Giratina's Altered, Vivillon's Meadow), so a picker can say so instead of "Standard".
+ * What is left out, and why:
+ *   - the default form: the one constants/base-form-codes.ts names for the species when it has an entry (the
+ *     form the sprite pipeline already treats as the base: Unown A, Vivillon Meadow, Toxtricity Amped), else
+ *     the first form the game master lists. Every *_NORMAL form is left out too.
+ *   - Mega, Primal and Gigantamax: not stored forms, and the game master's form lists do not carry them.
+ *   - event costumes: forms the game master flags `isCostume` (Pikachu's outfits, Corsola SPRING_2026, ...).
+ *     Their art sits under `.f` sprite tokens, so the sprite split cannot tell them from forms; the flag can.
+ *     Costume is a listing attribute of its own. The one exception is Armored Mewtwo (`A`), which the app has
+ *     always stored as a form (COSTUME_FORMS_KEPT_AS_FORMS in scripts/pokedex-source.ts).
+ *   - the form-level Shadow marker (`S`) and any code ending _SHADOW or _PURIFIED: shadow is untradable and
+ *     purified is a listing flag (SHADOW_MARKER_CODES in scripts/pokedex-source.ts says why `S` counts).
+ * Tradability is NOT decided here: forms of untradable species are listed, and `isPokemonUntradable`
+ * (constants/pokedex.ts) is the one rule that refuses them. Read this through `formsOf` / `defaultFormOf`.
  */
 import type { PokemonTypes } from './pokemon-types';
 
@@ -1193,4 +1216,223 @@ export const FORM_TYPE_OVERRIDES: readonly (readonly [pokemonId: number, formCod
   [892, 'RAPID_STRIKE', ['Fighting', 'Water']],
   [898, 'ICE_RIDER', ['Psychic', 'Ice']], // spelling unconfirmed: no sprite art upstream
   [898, 'SHADOW_RIDER', ['Psychic', 'Ghost']], // spelling unconfirmed: no sprite art upstream
+];
+
+/**
+ * `[pokemonId, formCodes]` for every species with at least one selectable non-default form: the forms a
+ * creature can be listed as, in the game master's order. `formCode: null` is the default form and is never
+ * listed. See the file header for what is left out. Read through `formsOf` in constants/pokedex.ts.
+ */
+export const POKEDEX_FORMS: readonly (readonly [pokemonId: number, formCodes: readonly string[]])[] = [
+  [3, ['COPY_2019']],
+  [6, ['COPY_2019']],
+  [9, ['COPY_2019']],
+  [19, ['ALOLA']],
+  [20, ['ALOLA']],
+  [25, ['COPY_2019']],
+  [26, ['ALOLA']],
+  [27, ['ALOLA']],
+  [28, ['ALOLA']],
+  [37, ['ALOLA']],
+  [38, ['ALOLA']],
+  [50, ['ALOLA']],
+  [51, ['ALOLA']],
+  [52, ['ALOLA', 'GALARIAN']],
+  [53, ['ALOLA']],
+  [54, ['SWIM_2025']],
+  [58, ['HISUIAN']],
+  [59, ['HISUIAN']],
+  [74, ['ALOLA']],
+  [75, ['ALOLA']],
+  [76, ['ALOLA']],
+  [77, ['GALARIAN']],
+  [78, ['GALARIAN']],
+  [79, ['GALARIAN']],
+  [80, ['GALARIAN']],
+  [83, ['GALARIAN']],
+  [88, ['ALOLA']],
+  [89, ['ALOLA']],
+  [100, ['HISUIAN']],
+  [101, ['HISUIAN']],
+  [103, ['ALOLA']],
+  [105, ['ALOLA']],
+  [110, ['GALARIAN']],
+  [122, ['GALARIAN']],
+  [128, ['PALDEA_COMBAT', 'PALDEA_BLAZE', 'PALDEA_AQUA']],
+  [144, ['GALARIAN']],
+  [145, ['GALARIAN']],
+  [146, ['GALARIAN']],
+  [150, ['A']],
+  [157, ['HISUIAN']],
+  [194, ['PALDEA']],
+  [199, ['GALARIAN']],
+  [201, [
+    'UNOWN_F', 'UNOWN_B', 'UNOWN_C', 'UNOWN_D', 'UNOWN_E', 'UNOWN_G', 'UNOWN_H', 'UNOWN_I', 'UNOWN_J', 'UNOWN_K',
+    'UNOWN_L', 'UNOWN_M', 'UNOWN_N', 'UNOWN_O', 'UNOWN_P', 'UNOWN_Q', 'UNOWN_R', 'UNOWN_S', 'UNOWN_T', 'UNOWN_U',
+    'UNOWN_V', 'UNOWN_W', 'UNOWN_X', 'UNOWN_Y', 'UNOWN_Z', 'UNOWN_EXCLAMATION_POINT', 'UNOWN_QUESTION_MARK',
+  ]],
+  [211, ['HISUIAN']],
+  [215, ['HISUIAN']],
+  [222, ['GALARIAN']],
+  [263, ['GALARIAN']],
+  [264, ['GALARIAN']],
+  [327, [
+    '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19',
+  ]], // spelling unconfirmed: 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+  [351, ['SUNNY', 'RAINY', 'SNOWY']],
+  [386, ['ATTACK', 'DEFENSE', 'SPEED']],
+  [412, ['BURMY_SANDY', 'BURMY_TRASH']],
+  [413, ['WORMADAM_SANDY', 'WORMADAM_TRASH']],
+  [421, ['SUNNY']],
+  [422, ['EAST_SEA']],
+  [423, ['EAST_SEA']],
+  [479, ['HEAT', 'WASH', 'FROST', 'FAN', 'MOW']],
+  [483, ['ORIGIN']],
+  [484, ['ORIGIN']],
+  [487, ['ORIGIN']],
+  [492, ['SKY']],
+  [493, [
+    'FIGHTING', 'FLYING', 'POISON', 'GROUND', 'ROCK', 'BUG', 'GHOST', 'STEEL', 'FIRE', 'WATER', 'GRASS', 'ELECTRIC',
+    'PSYCHIC', 'ICE', 'DRAGON', 'DARK', 'FAIRY',
+  ]],
+  [503, ['HISUIAN']],
+  [549, ['HISUIAN']],
+  [550, ['BLUE_STRIPED', 'WHITE_STRIPED']],
+  [554, ['GALARIAN']],
+  [555, ['ZEN', 'GALARIAN_STANDARD', 'GALARIAN_ZEN']],
+  [562, ['GALARIAN']],
+  [570, ['HISUIAN']],
+  [571, ['HISUIAN']],
+  [585, ['SUMMER', 'AUTUMN', 'WINTER']],
+  [586, ['SUMMER', 'AUTUMN', 'WINTER']],
+  [592, ['FEMALE']],
+  [593, ['FEMALE']],
+  [618, ['GALARIAN']],
+  [628, ['HISUIAN']],
+  [641, ['THERIAN']],
+  [642, ['THERIAN']],
+  [645, ['THERIAN']],
+  [646, ['WHITE', 'BLACK']],
+  [647, ['RESOLUTE']],
+  [648, ['PIROUETTE']],
+  [649, ['DOUSE', 'SHOCK', 'BURN', 'CHILL']],
+  [664, [
+    'CONTINENTAL', 'ELEGANT', 'FANCY', 'GARDEN', 'HIGH_PLAINS', 'ICY_SNOW', 'JUNGLE', 'MARINE', 'MEADOW', 'MODERN',
+    'MONSOON', 'OCEAN', 'POKEBALL', 'POLAR', 'RIVER', 'SANDSTORM', 'SAVANNA', 'SUN', 'TUNDRA',
+  ]], // spelling unconfirmed: all
+  [665, [
+    'CONTINENTAL', 'ELEGANT', 'FANCY', 'GARDEN', 'HIGH_PLAINS', 'ICY_SNOW', 'JUNGLE', 'MARINE', 'MEADOW', 'MODERN',
+    'MONSOON', 'OCEAN', 'POKEBALL', 'POLAR', 'RIVER', 'SANDSTORM', 'SAVANNA', 'SUN', 'TUNDRA',
+  ]], // spelling unconfirmed: all
+  [666, [
+    'ARCHIPELAGO', 'CONTINENTAL', 'ELEGANT', 'FANCY', 'GARDEN', 'HIGH_PLAINS', 'ICY_SNOW', 'JUNGLE', 'MARINE', 'MODERN',
+    'MONSOON', 'OCEAN', 'POKEBALL', 'POLAR', 'RIVER', 'SANDSTORM', 'SAVANNA', 'SUN', 'TUNDRA',
+  ]],
+  [668, ['FEMALE']],
+  [669, ['BLUE', 'ORANGE', 'YELLOW', 'WHITE']],
+  [670, ['BLUE', 'ORANGE', 'YELLOW', 'WHITE']],
+  [671, ['BLUE', 'ORANGE', 'YELLOW', 'WHITE']],
+  [676, ['HEART', 'STAR', 'DIAMOND', 'DEBUTANTE', 'MATRON', 'DANDY', 'LA_REINE', 'KABUKI', 'PHARAOH']],
+  [678, ['FEMALE']],
+  [681, ['BLADE']],
+  [710, ['AVERAGE', 'LARGE', 'SUPER']],
+  [711, ['AVERAGE', 'LARGE', 'SUPER']],
+  [713, ['HISUIAN']],
+  [718, ['TEN_PERCENT', 'COMPLETE', 'COMPLETE_TEN_PERCENT', 'COMPLETE_FIFTY_PERCENT']],
+  [720, ['UNBOUND']],
+  [724, ['HISUIAN']],
+  [741, ['POMPOM', 'PAU', 'SENSU']],
+  [744, ['DUSK']],
+  [745, ['MIDNIGHT', 'DUSK']],
+  [746, ['SCHOOL']],
+  [773, [
+    'FIGHTING', 'FLYING', 'POISON', 'GROUND', 'ROCK', 'BUG', 'GHOST', 'STEEL', 'FIRE', 'WATER', 'GRASS', 'ELECTRIC',
+    'PSYCHIC', 'ICE', 'DRAGON', 'DARK', 'FAIRY',
+  ]], // spelling unconfirmed: all
+  [774, ['GREEN', 'INDIGO', 'ORANGE', 'RED', 'VIOLET', 'YELLOW']],
+  [778, ['BUSTED']],
+  [800, ['DUSK_MANE', 'DAWN_WINGS', 'ULTRA']], // spelling unconfirmed: ULTRA
+  [801, ['ORIGINAL_COLOR']], // spelling unconfirmed: all
+  [845, ['GULPING', 'GORGING']],
+  [849, ['LOW_KEY']],
+  [854, ['ANTIQUE']],
+  [855, ['ANTIQUE']],
+  [875, ['NOICE']], // spelling unconfirmed: all
+  [876, ['FEMALE']],
+  [877, ['HANGRY']],
+  [888, ['CROWNED_SWORD']],
+  [889, ['CROWNED_SHIELD']],
+  [890, ['ETERNAMAX']],
+  [892, ['RAPID_STRIKE']],
+  [898, ['ICE_RIDER', 'SHADOW_RIDER']], // spelling unconfirmed: all
+  [902, ['FEMALE']], // spelling unconfirmed: all
+  [905, ['THERIAN']],
+  [916, ['FEMALE']],
+  [925, ['FAMILY_OF_THREE']],
+  [931, ['BLUE', 'YELLOW', 'WHITE']],
+  [964, ['HERO']], // spelling unconfirmed: all
+  [978, ['DROOPY', 'STRETCHY']],
+  [982, ['THREE']],
+  [1012, ['ARTISAN']],
+  [1013, ['MASTERPIECE']],
+];
+
+/**
+ * `[pokemonId, formCode]` for the species whose default form has a name of its own, i.e. the form
+ * `formCode: null` stands for (Zacian's `HERO`, Vivillon's `MEADOW`). A species whose default is the plain `*_NORMAL`
+ * form is absent. Only species that have a POKEDEX_FORMS row appear. Read through `defaultFormOf`.
+ */
+export const POKEDEX_DEFAULT_FORMS: readonly (readonly [pokemonId: number, formCode: string])[] = [
+  [201, 'UNOWN_A'],
+  [327, '00'],
+  [412, 'BURMY_PLANT'],
+  [413, 'WORMADAM_PLANT'],
+  [421, 'OVERCAST'],
+  [422, 'WEST_SEA'],
+  [423, 'WEST_SEA'],
+  [487, 'ALTERED'],
+  [492, 'LAND'],
+  [550, 'RED_STRIPED'],
+  [555, 'STANDARD'],
+  [585, 'SPRING'],
+  [586, 'SPRING'],
+  [641, 'INCARNATE'],
+  [642, 'INCARNATE'],
+  [645, 'INCARNATE'],
+  [647, 'ORDINARY'],
+  [648, 'ARIA'],
+  [664, 'ARCHIPELAGO'],
+  [665, 'ARCHIPELAGO'],
+  [666, 'MEADOW'],
+  [669, 'RED'],
+  [670, 'RED'],
+  [671, 'RED'],
+  [676, 'NATURAL'],
+  [681, 'SHIELD'],
+  [710, 'SMALL'],
+  [711, 'SMALL'],
+  [718, 'FIFTY_PERCENT'],
+  [720, 'CONFINED'],
+  [741, 'BAILE'],
+  [745, 'MIDDAY'],
+  [746, 'SOLO'],
+  [774, 'BLUE'],
+  [778, 'DISGUISED'],
+  [849, 'AMPED'],
+  [854, 'PHONY'],
+  [855, 'PHONY'],
+  [875, 'ICE'],
+  [876, 'MALE'],
+  [877, 'FULL_BELLY'],
+  [888, 'HERO'],
+  [889, 'HERO'],
+  [892, 'SINGLE_STRIKE'],
+  [905, 'INCARNATE'],
+  [925, 'FAMILY_OF_FOUR'],
+  [931, 'GREEN'],
+  [964, 'ZERO'],
+  [978, 'CURLY'],
+  [982, 'TWO'],
+  [1012, 'COUNTERFEIT'],
+  [1013, 'UNREMARKABLE'],
 ];

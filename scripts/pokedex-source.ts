@@ -3,10 +3,11 @@
  * game master, the PokeMiners sprite listing) into the contents of `constants/pokedex-data.ts`. No network,
  * no filesystem, so vitest drives it with small fixtures (`scripts/pokedex-source.test.ts`).
  *
- * RELATIVE IMPORTS ONLY, and the only app module it may import is the LEAF `constants/pokemon-types.ts`:
- * the generator replaces `constants/pokedex-data.ts`, so it must keep running even when that file is stale,
- * mid-merge or the wrong shape. Do not import `constants/pokedex.ts`, `lib/sprite-url.ts` or
- * `scripts/pokeminers.ts` here (each pulls the dex data in).
+ * RELATIVE IMPORTS ONLY, and the only app modules it may import are LEAVES with no imports of their own
+ * (`constants/pokemon-types.ts`, `constants/base-form-codes.ts`): the generator replaces
+ * `constants/pokedex-data.ts`, so it must keep running even when that file is stale, mid-merge or the wrong
+ * shape. Do not import `constants/pokedex.ts`, `lib/sprite-url.ts` or `scripts/pokeminers.ts` here (each
+ * pulls the dex data in).
  *
  * WHY TWO SOURCES (decision recorded at the time of writing, 2026-10-17):
  *   - The PokeMiners game master is Pokémon GO's own data, with per-FORM types and form ids that line up
@@ -18,6 +19,12 @@
  *   OVERRIDES: a form is recorded only when the game master says its types differ from that default.
  *   `buildPokedexData` cross-checks the two sources on every species they share and reports any
  *   disagreement instead of picking a side; the CLI refuses to write the file while one exists.
+ *
+ * THE FORM CATALOG (added 2026-10-17) answers a different question from the overrides: not "which forms
+ * type differently" but "which forms can a trainer list a creature as". The overrides table cannot answer
+ * it (Origin Palkia and Armored Mewtwo have their species' typing, so they are not in it), and the Create
+ * Listing form picker needs the complete list. It comes from the game master's own `FORMS_V####_POKEMON_*`
+ * lists, in the order the game master gives them, with the exclusions documented on `buildFormCatalog`.
  */
 import { POKEMON_TYPES, isPokemonType, sameTypes, toPokemonTypes, type PokemonType, type PokemonTypes } from '../constants/pokemon-types';
 
@@ -170,7 +177,17 @@ export interface GameMasterTemplate {
       /** Mega/Primal evolutions: only the entries with a `typeOverride1` change typing. */
       tempEvoOverrides?: { tempEvoId?: string; typeOverride1?: string; typeOverride2?: string }[];
     };
-    formSettings?: { forms?: { form?: string }[] };
+    formSettings?: {
+      /** The species enum again, e.g. `ZACIAN`. Present even on species with no `pokemonSettings` (Basculegion). */
+      pokemon?: string;
+      /** In the game master's order. The first entry is the species' default form. */
+      forms?: {
+        form?: string;
+        /** Pokémon GO's own flag for an event-costume form (`PIKACHU_FALL_2019`, `CORSOLA_SPRING_2026`).
+         *  Absent, never `false`, on every other form. Its art still lives under a `.f` token. */
+        isCostume?: boolean;
+      }[];
+    };
   };
 }
 
@@ -275,6 +292,49 @@ export function gameMasterDefaultTypes(entry: GmSpecies): { types: PokemonTypes;
   return formTypes ? { types: formTypes, via: 'form' } : { types: entry.bare, via: 'formless' };
 }
 
+/** One entry of a species' `FORMS_V####_POKEMON_*` list. */
+export interface GmFormEntry {
+  /** The full form enum, e.g. `ZACIAN_CROWNED_SWORD`. */
+  form: string;
+  /** The game master's `isCostume` flag; see `GameMasterTemplate`. */
+  isCostume: boolean;
+}
+
+export interface GmFormList {
+  /** The species enum used in form names, e.g. `ZACIAN`. */
+  enumName: string;
+  /** In the game master's order; `forms[0]` is the species' default form. */
+  forms: GmFormEntry[];
+}
+
+/**
+ * Species id -> its complete `FORMS_` list, for every species that has one (1024 of 1025 at the time of
+ * writing, including #902 Basculegion, whose `pokemonSettings` the game master lacks: this reads the list
+ * itself, not `parseGameMaster`'s per-form typing). A species whose list has no `forms` array gets an empty
+ * list. Throws on a repeated list or a form listed twice, rather than letting the last one win.
+ */
+export function parseGameMasterForms(templates: readonly GameMasterTemplate[]): Map<number, GmFormList> {
+  const lists = new Map<number, GmFormList>();
+  for (const template of templates) {
+    const match = FORMS_TEMPLATE.exec(template.templateId);
+    if (!match) continue;
+    const where = template.templateId;
+    const pokemonId = Number(match[1]);
+    if (lists.has(pokemonId)) throw new Error(`${where}: a second form list for #${pokemonId}`);
+    const settings = template.data?.formSettings;
+    if (!settings?.pokemon) throw new Error(`${where}: no species enum`);
+    const seen = new Set<string>();
+    const forms = (settings.forms ?? []).map((entry) => {
+      if (!entry.form) throw new Error(`${where}: a form entry with no name`);
+      if (seen.has(entry.form)) throw new Error(`${where}: form ${entry.form} is listed twice`);
+      seen.add(entry.form);
+      return { form: entry.form, isCostume: entry.isCostume === true };
+    });
+    lists.set(pokemonId, { enumName: settings.pokemon, forms });
+  }
+  return lists;
+}
+
 // ================================================================================================
 // PokeMiners sprite listing: the app's own spelling of form codes
 // ================================================================================================
@@ -334,6 +394,154 @@ export function resolveFormCode(enumName: string, gmForm: string, tokens: Readon
 }
 
 // ================================================================================================
+// Form catalog: the forms a creature can be listed as
+// ================================================================================================
+
+/**
+ * Costume-flagged forms the app nevertheless stores as a FORM: species id -> the app's form codes.
+ *
+ * The game master flags 97 forms `isCostume` (Pikachu's 70-odd event outfits, `CORSOLA_SPRING_2026`, ...), and
+ * the sprite listing files every one of them under a `.f` token, not the `.c` costume token. So the sprite
+ * pipeline's `.f`/`.c` split cannot tell a costume from a form here, and the game master's own flag is the
+ * only signal: a flagged form is an event outfit. Outfits are not offered as forms, because a costume is a
+ * listing attribute of its own (`Listing.costume`, `costumeCode`), and offering Pikachu 70 extra "forms"
+ * would bury the few real ones.
+ *
+ * The one exception is Armored Mewtwo (`MEWTWO_A`, code `A`). The game master flags it `isCostume` too, but
+ * this app has treated it as a form from the start: `FORM_LABEL_TABLE` names it, the hosted data rewrite
+ * mapped it to 150/`A`, and listings already carry it. It is the only entry, and the builder throws if an
+ * entry stops being a flagged form, so the table cannot go stale unnoticed.
+ */
+export const COSTUME_FORMS_KEPT_AS_FORMS: ReadonlyMap<number, ReadonlySet<string>> = new Map([[150, new Set(['A'])]]);
+
+/**
+ * Form codes that are the game master's form-level Shadow marker rather than a form a trainer can own.
+ *
+ * `S` is a single-letter form on seven legendaries (#243 Raikou, #244 Entei, #245 Suicune, #249 Lugia, #250
+ * Ho-Oh, #380 Latias, #381 Latios; Unown's letter keeps its species prefix, `UNOWN_S`, so it is not this).
+ * What `S` stands for is NOT stated anywhere in the pinned sources, so this is a judgement, not a fact the
+ * data proves: it is treated as Shadow because (a) the app has no shadow concept (shadow Pokémon are untradable
+ * and `listings.bg` refuses 'shadow'), (b) the earlier data rewrite deliberately left Apex Lugia and Ho-Oh
+ * (`249/250.fS`) unmapped, and (c) a bare "S" has no label a trainer could read. If that reading is wrong,
+ * remove the code here and regenerate; nothing else changes.
+ */
+export const SHADOW_MARKER_CODES: ReadonlySet<string> = new Set(['S']);
+
+/** A code that names a status rather than a form: `X_SHADOW`, `X_PURIFIED` or the bare word. Anchored to the
+ *  END on purpose: `CALYREX_SHADOW_RIDER` is a real species form (Shadow Rider) and must not match. */
+const STATUS_SUFFIX = /(?:^|_)(?:SHADOW|PURIFIED)$/;
+
+export interface FormCatalogEntry {
+  pokemonId: number;
+  /** The species' default form, when it has a NAME of its own (Zacian's `HERO`, Giratina's `ALTERED`,
+   *  Vivillon's `MEADOW`). Null when the default is the game master's plain `*_NORMAL`. It is never in
+   *  `forms`: `formCode: null` already means it. */
+  defaultCode: string | null;
+  /** The selectable non-default forms, in the game master's order. Never empty. */
+  forms: ResolvedFormCode[];
+}
+
+export interface FormCatalogReport {
+  /** Species whose game master list names two or more forms. */
+  speciesWithSeveralForms: number;
+  /** `isCostume` forms left out, with the app's spelling of their code. */
+  excludedCostumes: { pokemonId: number; code: string }[];
+  /** `isCostume` forms kept because `COSTUME_FORMS_KEPT_AS_FORMS` says so. */
+  keptCostumes: { pokemonId: number; code: string }[];
+  /** Shadow/purified status codes left out (`SHADOW_MARKER_CODES`, `*_SHADOW`, `*_PURIFIED`). */
+  excludedStatus: { pokemonId: number; code: string }[];
+  /** Species whose default is `BASE_FORM_CODES`' form, where the game master lists a different form first. */
+  defaultsFromBaseTable: { pokemonId: number; code: string; gameMasterFirst: string }[];
+  /** FATAL: `BASE_FORM_CODES` names a form code the species' game master list does not contain, so one of
+   *  the two is stale. Must be empty to write. */
+  baseTableConflicts: { pokemonId: number; code: string }[];
+}
+
+/**
+ * The selectable forms of every species, from the game master's `FORMS_V####_POKEMON_*` lists.
+ *
+ * WHAT IS LEFT OUT (each rule is also stated in the generated file's header):
+ *   1. The DEFAULT form, because `formCode: null` already means it. That is the form `BASE_FORM_CODES`
+ *      names when the species has an entry (the form the sprite pipeline already treats as the species' base:
+ *      Unown A, Vivillon Meadow, Toxtricity Amped, ...), otherwise the first form the game master lists. A
+ *      `*_NORMAL` form is always left out as well: it is the default by definition.
+ *   2. Temporary evolutions (Mega, Primal) and Gigantamax. They are not stored forms, and the game master's
+ *      form lists do not carry them (Mega/Primal live in `tempEvoOverrides`), so nothing needs filtering.
+ *   3. Event costumes: forms the game master flags `isCostume`, except `COSTUME_FORMS_KEPT_AS_FORMS`.
+ *   4. Status variants: `SHADOW_MARKER_CODES` and any code ending `_SHADOW` / `_PURIFIED`.
+ * Everything else is offered, including forms whose spelling has no sprite art yet (`confirmed: false`, the
+ * same convention as the override table) and forms of untradable species. TRADABILITY IS NOT DECIDED HERE:
+ * `isPokemonUntradable` (constants/pokedex.ts), mirrored in the database, is the one rule, and a picker
+ * applies it to whatever this returns.
+ *
+ * Two codes that resolve to the same spelling are offered once. Species are in id order and forms in the
+ * game master's order, so the output is deterministic.
+ */
+export function buildFormCatalog(input: {
+  species: readonly SpeciesRow[];
+  gameMasterForms: ReadonlyMap<number, GmFormList>;
+  assetTokens: ReadonlyMap<number, ReadonlySet<string>>;
+  baseFormCodes: Readonly<Record<number, string>>;
+}): { entries: FormCatalogEntry[]; report: FormCatalogReport } {
+  const { species, gameMasterForms, assetTokens, baseFormCodes } = input;
+  const entries: FormCatalogEntry[] = [];
+  const report: FormCatalogReport = {
+    speciesWithSeveralForms: 0,
+    excludedCostumes: [],
+    keptCostumes: [],
+    excludedStatus: [],
+    defaultsFromBaseTable: [],
+    baseTableConflicts: [],
+  };
+
+  for (const row of species) {
+    const list = gameMasterForms.get(row.id);
+    if (!list || list.forms.length < 2) continue;
+    report.speciesWithSeveralForms++;
+
+    const tokens = assetTokens.get(row.id);
+    const resolved = list.forms.map((entry) => ({ ...entry, ...resolveFormCode(list.enumName, entry.form, tokens) }));
+
+    const kept = COSTUME_FORMS_KEPT_AS_FORMS.get(row.id);
+    for (const code of kept ?? []) {
+      if (!resolved.some((r) => r.code === code && r.isCostume)) {
+        throw new Error(`#${row.id} ${code}: COSTUME_FORMS_KEPT_AS_FORMS keeps it, but the game master no longer lists it as an isCostume form`);
+      }
+    }
+
+    const baseCode = baseFormCodes[row.id];
+    const baseEntry = baseCode === undefined ? undefined : resolved.find((r) => r.code === baseCode);
+    if (baseCode !== undefined && !baseEntry) report.baseTableConflicts.push({ pokemonId: row.id, code: baseCode });
+    const defaultEntry = baseEntry ?? resolved[0];
+    if (baseEntry && baseEntry !== resolved[0]) {
+      report.defaultsFromBaseTable.push({ pokemonId: row.id, code: baseEntry.code, gameMasterFirst: resolved[0].code });
+    }
+
+    const taken = new Set<string>([defaultEntry.code]);
+    const forms: ResolvedFormCode[] = [];
+    for (const r of resolved) {
+      if (r === defaultEntry || r.form.endsWith('_NORMAL') || taken.has(r.code)) continue;
+      taken.add(r.code);
+      if (SHADOW_MARKER_CODES.has(r.code) || STATUS_SUFFIX.test(r.code)) {
+        report.excludedStatus.push({ pokemonId: row.id, code: r.code });
+        continue;
+      }
+      if (r.isCostume) {
+        if (!kept?.has(r.code)) {
+          report.excludedCostumes.push({ pokemonId: row.id, code: r.code });
+          continue;
+        }
+        report.keptCostumes.push({ pokemonId: row.id, code: r.code });
+      }
+      forms.push({ code: r.code, confirmed: r.confirmed });
+    }
+    if (forms.length === 0) continue;
+    entries.push({ pokemonId: row.id, defaultCode: defaultEntry.form.endsWith('_NORMAL') ? null : defaultEntry.code, forms });
+  }
+  return { entries, report };
+}
+
+// ================================================================================================
 // Assembly + cross-checks
 // ================================================================================================
 
@@ -370,20 +578,26 @@ export interface BuildReport {
   /** Sprite art exists for these (species, form token) pairs, but the game master has no typing for them,
    *  so they resolve to the species default. May include cosmetic tokens (costumes) that never change typing. */
   assetFormsWithoutTypes: { pokemonId: number; token: string }[];
+  formCatalog: FormCatalogReport;
 }
 
 export interface PokedexData {
   species: SpeciesRow[];
   overrides: FormOverride[];
+  /** Species with at least one selectable non-default form, in id order. */
+  forms: FormCatalogEntry[];
   report: BuildReport;
 }
 
 export function buildPokedexData(input: {
   species: readonly SpeciesRow[];
   gameMaster: ReadonlyMap<number, GmSpecies>;
+  gameMasterForms: ReadonlyMap<number, GmFormList>;
   assetTokens: ReadonlyMap<number, ReadonlySet<string>>;
+  /** `constants/base-form-codes.ts`: which form `formCode: null` means for the species it names. */
+  baseFormCodes: Readonly<Record<number, string>>;
 }): PokedexData {
-  const { species, gameMaster, assetTokens } = input;
+  const { species, gameMaster, gameMasterForms, assetTokens, baseFormCodes } = input;
   const missingFromGameMaster: BuildReport['missingFromGameMaster'] = [];
   const disagreements: Disagreement[] = [];
   const formlessDisagreements: Disagreement[] = [];
@@ -398,6 +612,11 @@ export function buildPokedexData(input: {
     if (!entry) {
       missingFromGameMaster.push({ pokemonId: row.id, name: row.name });
       continue;
+    }
+
+    const formList = gameMasterForms.get(row.id);
+    if (formList && formList.enumName !== entry.enumName) {
+      throw new Error(`#${row.id}: the form list says ${formList.enumName} but the species template says ${entry.enumName}`);
     }
 
     const asDisagreement = (gm: PokemonTypes): Disagreement => ({ pokemonId: row.id, name: row.name, pokeApi: row.types, gameMaster: gm });
@@ -429,9 +648,11 @@ export function buildPokedexData(input: {
 
   overrides.sort((a, b) => a.pokemonId - b.pokemonId || (a.formCode < b.formCode ? -1 : a.formCode > b.formCode ? 1 : 0));
   assetFormsWithoutTypes.sort((a, b) => a.pokemonId - b.pokemonId || (a.token < b.token ? -1 : 1));
+  const catalog = buildFormCatalog({ species, gameMasterForms, assetTokens, baseFormCodes });
   return {
     species: [...species],
     overrides,
+    forms: catalog.entries,
     report: {
       species: species.length,
       gameMasterSpecies: species.length - missingFromGameMaster.length,
@@ -442,6 +663,7 @@ export function buildPokedexData(input: {
       overridesFromForms,
       overridesFromTempEvolutions,
       assetFormsWithoutTypes,
+      formCatalog: catalog.report,
     },
   };
 }
@@ -457,6 +679,20 @@ export interface Provenance {
   spriteAssets: string;
 }
 
+/**
+ * The three `owner/repo@<sha>` lines of a previously generated data file's header, or `null` when the text
+ * has none (a hand-edited or pre-provenance file). `generate-pokedex.ts --pinned` regenerates from exactly
+ * these commits instead of whatever `master` points at today, so a rerun reproduces the file byte for byte
+ * and a change to the generator is not mixed with unrelated upstream drift.
+ */
+export function parseProvenance(dataFile: string): Provenance | null {
+  const find = (repo: string): string | null => new RegExp(`${repo.replace('/', '\\/')}@([0-9a-f]{40})\\b`).exec(dataFile)?.[0] ?? null;
+  const pokeApi = find('PokeAPI/pokeapi');
+  const gameMaster = find('PokeMiners/game_masters');
+  const spriteAssets = find('PokeMiners/pogo_assets');
+  return pokeApi && gameMaster && spriteAssets ? { pokeApi, gameMaster, spriteAssets } : null;
+}
+
 /** Single-quoted TS string literal. Names are plain text, but escape anyway so a quote can't break the file. */
 const quote = (value: string): string => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 const typesLiteral = (types: PokemonTypes): string => `[${types.map(quote).join(', ')}]`;
@@ -466,6 +702,13 @@ export const REGENERATE_COMMAND = 'npm run pokedex:generate';
 export function renderDataFile(data: PokedexData, provenance: Provenance): string {
   const { report } = data;
   const unconfirmed = data.overrides.filter((o) => !o.confirmed).length;
+  const formCount = data.forms.reduce((sum, entry) => sum + entry.forms.length, 0);
+  const unconfirmedForms = data.forms.reduce((sum, entry) => sum + entry.forms.filter((f) => !f.confirmed).length, 0);
+  const namedDefaults = data.forms.filter((entry) => entry.defaultCode !== null).length;
+  const keptText = report.formCatalog.keptCostumes.map((k) => `#${k.pokemonId} ${k.code}`).join(', ');
+  const statusSpecies = new Set(report.formCatalog.excludedStatus.map((x) => x.pokemonId)).size;
+  const statusCodes = [...new Set(report.formCatalog.excludedStatus.map((x) => x.code))];
+  const statusText = report.formCatalog.excludedStatus.length > 0 ? ` (code ${statusCodes.join(', ')} on ${statusSpecies} species)` : '';
   const lines: string[] = [];
   const missing = report.missingFromGameMaster.map((m) => `#${m.pokemonId} ${m.name}`);
   const quirk = report.formlessDisagreements.map((d) => `#${d.pokemonId} ${d.name}`);
@@ -481,11 +724,12 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  *     Every species' English name and DEFAULT typing (both slots, in PokeAPI's slot order), taken from
  *     the pokemon row whose id equals the species id.
  *   ${provenance.gameMaster}
- *     latest/latest.json (Pokémon GO's own data). Per-form types, for FORM_TYPE_OVERRIDES only, and a
- *     cross-check of every species' default typing against PokeAPI's.
+ *     latest/latest.json (Pokémon GO's own data). Per-form types, for FORM_TYPE_OVERRIDES; a cross-check of
+ *     every species' default typing against PokeAPI's; and each species' list of forms (the FORMS_
+ *     templates), for POKEDEX_FORMS.
  *   ${provenance.spriteAssets}
  *     "Images/Pokemon - 256x256/Addressable Assets" (file listing only). The form-token spelling the app
- *     stores in \`formCode\`, so overrides are keyed exactly as listings carry them.
+ *     stores in \`formCode\`, so overrides and the form catalog are keyed exactly as listings carry them.
  *
  * Coverage when generated:
  *   - ${report.species} species. The game master has typing for ${report.gameMasterSpecies}${
@@ -499,6 +743,12 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  *   - ${data.overrides.length} form overrides: ${report.overridesFromForms} from form templates, ${report.overridesFromTempEvolutions} from Mega/Primal evolutions${
    unconfirmed > 0 ? `. ${unconfirmed} are marked "spelling unconfirmed": upstream has no sprite art under that form code yet` : ''
  }.
+ *   - ${formCount} selectable forms on ${data.forms.length} species in POKEDEX_FORMS${
+   unconfirmedForms > 0 ? `; ${unconfirmedForms} are marked "spelling unconfirmed" the same way` : ''
+ }. ${namedDefaults} of those species have a default form with a name of its own (POKEDEX_DEFAULT_FORMS).
+ *   - Left out of POKEDEX_FORMS (see the rules below): ${report.formCatalog.excludedCostumes.length} event-costume forms${
+   report.formCatalog.keptCostumes.length > 0 ? ` (and kept as forms: ${keptText})` : ''
+ }, and ${report.formCatalog.excludedStatus.length} shadow-marker forms${statusText}.
  *
  * POKEDEX_DATA is species-level: national dex order, ids 1 through ${report.species}, one row per species with its
  * default form's typing. Typing that depends on the form (Alolan, Galarian, Hisuian, Origin, Crowned, Rotom
@@ -506,6 +756,26 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  * form-code spelling (\`CreatureRef.formCode\`). Only forms whose types DIFFER from the species default are
  * listed, so a form that is not listed has the species' typing. Read both through constants/pokedex.ts
  * (\`typesOf\`, \`typeMembership\`), never directly.
+ *
+ * POKEDEX_FORMS answers a different question: which forms can a creature be LISTED as (the Create Listing
+ * form picker). FORM_TYPE_OVERRIDES cannot answer it, because Origin Palkia and Armored Mewtwo have their
+ * species' typing and so are not in it. Rows are \`[pokemonId, formCodes]\` in the same \`formCode\` spelling,
+ * species in id order and codes in the game master's own order. \`formCode: null\` means the species' default
+ * form, so the default is NOT listed; POKEDEX_DEFAULT_FORMS names it for the species where it has a name of
+ * its own (Zacian's Hero, Giratina's Altered, Vivillon's Meadow), so a picker can say so instead of "Standard".
+ * What is left out, and why:
+ *   - the default form: the one constants/base-form-codes.ts names for the species when it has an entry (the
+ *     form the sprite pipeline already treats as the base: Unown A, Vivillon Meadow, Toxtricity Amped), else
+ *     the first form the game master lists. Every *_NORMAL form is left out too.
+ *   - Mega, Primal and Gigantamax: not stored forms, and the game master's form lists do not carry them.
+ *   - event costumes: forms the game master flags \`isCostume\` (Pikachu's outfits, Corsola SPRING_2026, ...).
+ *     Their art sits under \`.f\` sprite tokens, so the sprite split cannot tell them from forms; the flag can.
+ *     Costume is a listing attribute of its own. The one exception is Armored Mewtwo (\`A\`), which the app has
+ *     always stored as a form (COSTUME_FORMS_KEPT_AS_FORMS in scripts/pokedex-source.ts).
+ *   - the form-level Shadow marker (\`S\`) and any code ending _SHADOW or _PURIFIED: shadow is untradable and
+ *     purified is a listing flag (SHADOW_MARKER_CODES in scripts/pokedex-source.ts says why \`S\` counts).
+ * Tradability is NOT decided here: forms of untradable species are listed, and \`isPokemonUntradable\`
+ * (constants/pokedex.ts) is the one rule that refuses them. Read this through \`formsOf\` / \`defaultFormOf\`.
  */
 import type { PokemonTypes } from './pokemon-types';
 
@@ -523,6 +793,51 @@ export const FORM_TYPE_OVERRIDES: readonly (readonly [pokemonId: number, formCod
     const mark = o.confirmed ? '' : ' // spelling unconfirmed: no sprite art upstream';
     lines.push(`  [${o.pokemonId}, ${quote(o.formCode)}, ${typesLiteral(o.types)}],${mark}`);
   }
+  lines.push('];');
+
+  lines.push(`
+/**
+ * \`[pokemonId, formCodes]\` for every species with at least one selectable non-default form: the forms a
+ * creature can be listed as, in the game master's order. \`formCode: null\` is the default form and is never
+ * listed. See the file header for what is left out. Read through \`formsOf\` in constants/pokedex.ts.
+ */
+export const POKEDEX_FORMS: readonly (readonly [pokemonId: number, formCodes: readonly string[]])[] = [`);
+  for (const entry of data.forms) lines.push(...formRow(entry));
+  lines.push('];');
+
+  lines.push(`
+/**
+ * \`[pokemonId, formCode]\` for the species whose default form has a name of its own, i.e. the form
+ * \`formCode: null\` stands for (Zacian's \`HERO\`, Vivillon's \`MEADOW\`). A species whose default is the plain \`*_NORMAL\`
+ * form is absent. Only species that have a POKEDEX_FORMS row appear. Read through \`defaultFormOf\`.
+ */
+export const POKEDEX_DEFAULT_FORMS: readonly (readonly [pokemonId: number, formCode: string])[] = [`);
+  for (const entry of data.forms) if (entry.defaultCode !== null) lines.push(`  [${entry.pokemonId}, ${quote(entry.defaultCode)}],`);
   lines.push('];', '');
   return lines.join('\n');
+}
+
+/** Rows wrap at this width so a species with 27 forms (Unown) stays readable in a diff. */
+const FORM_ROW_WIDTH = 120;
+
+/** One `POKEDEX_FORMS` row: a single line when it fits, else one code per wrapped line group. A trailing
+ *  comment names the codes whose spelling no sprite art confirms (same convention as the override table). */
+function formRow(entry: FormCatalogEntry): string[] {
+  const codes = entry.forms.map((f) => quote(f.code));
+  const unconfirmed = entry.forms.filter((f) => !f.confirmed).map((f) => f.code);
+  const mark = unconfirmed.length === 0 ? '' : unconfirmed.length === entry.forms.length ? ' // spelling unconfirmed: all' : ` // spelling unconfirmed: ${unconfirmed.join(', ')}`;
+  const single = `  [${entry.pokemonId}, [${codes.join(', ')}]],`;
+  if (single.length <= FORM_ROW_WIDTH) return [single + mark];
+
+  const rows: string[] = [];
+  let current = '   ';
+  for (const code of codes) {
+    const next = `${current} ${code},`;
+    if (next.length > FORM_ROW_WIDTH && current.trim().length > 0) {
+      rows.push(current);
+      current = `    ${code},`;
+    } else current = next;
+  }
+  rows.push(current);
+  return [`  [${entry.pokemonId}, [`, ...rows, `  ]],${mark}`];
 }

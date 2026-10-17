@@ -12,8 +12,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   creatureHasType,
+  defaultFormOf,
   findPokemon,
   formatTypes,
+  formsOf,
   isPokemonUntradable,
   POKEDEX,
   POKEMON_TYPES,
@@ -26,7 +28,9 @@ import {
   UNTRADABLE_SPECIES_IDS,
   type TypeMembership,
 } from './pokedex';
-import { FORM_TYPE_OVERRIDES } from './pokedex-data';
+import { creatureFormLabel } from '../lib/format';
+import { BASE_FORM_CODES } from './base-form-codes';
+import { FORM_TYPE_OVERRIDES, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS } from './pokedex-data';
 
 describe('findPokemon', () => {
   it('finds a known dex id', () => {
@@ -362,6 +366,140 @@ describe('FORM_TYPE_OVERRIDES', () => {
     expect(necrozma).toHaveLength(2);
     for (const { pokemonId, formCode } of necrozma) {
       expect(typesOf({ pokemonId, formCode }), formCode).not.toEqual(typesOf({ pokemonId }));
+    }
+  });
+});
+
+// ——— forms ———
+
+describe('formsOf', () => {
+  it('lists the forms that FORM_TYPE_OVERRIDES cannot: Origin Palkia and Armored Mewtwo type like their species', () => {
+    // Neither is in the override table (their typing is the species'), which is why the table could not feed a picker.
+    expect(FORM_TYPE_OVERRIDES.some(([id, code]) => (id === 484 && code === 'ORIGIN') || (id === 150 && code === 'A'))).toBe(false);
+    expect(formsOf(484)).toContain('ORIGIN');
+    expect(formsOf(150)).toContain('A');
+    expect(formsOf(150)).toEqual(['A']);
+  });
+
+  it('lists regional, fused, crowned and appliance forms in the exact formCode spelling listings carry', () => {
+    expect(formsOf(37)).toEqual(['ALOLA']); // Vulpix
+    expect(formsOf(52)).toEqual(['ALOLA', 'GALARIAN']); // Meowth, in the game master's order
+    expect(formsOf(888)).toEqual(['CROWNED_SWORD']); // Zacian: HERO is its default form, so it is not listed
+    expect(formsOf(889)).toEqual(['CROWNED_SHIELD']);
+    expect(formsOf(479)).toEqual(['HEAT', 'WASH', 'FROST', 'FAN', 'MOW']); // Rotom: the appliances, not its plain form
+    expect(formsOf(646)).toEqual(['WHITE', 'BLACK']);
+    expect(formsOf(800)).toEqual(expect.arrayContaining(['DUSK_MANE', 'DAWN_WINGS']));
+    expect(formsOf(412)).toEqual(['BURMY_SANDY', 'BURMY_TRASH']); // codes that keep the species prefix keep it here too
+  });
+
+  it('is empty for a single-form species and for an id outside the dex', () => {
+    expect(formsOf(1)).toEqual([]); // Bulbasaur: its only other "form" is an event costume
+    expect(formsOf(4)).toEqual([]);
+    for (const id of [0, -1, 1026, 10188]) expect(formsOf(id), `#${id}`).toEqual([]);
+  });
+
+  it('never lists the default form: null already means it', () => {
+    for (const [id, code] of POKEDEX_DEFAULT_FORMS) expect(formsOf(id), `#${id}`).not.toContain(code);
+    for (const [id, codes] of POKEDEX_FORMS) {
+      expect(codes, `#${id}`).not.toContain('NORMAL');
+      for (const code of codes) expect(code, `#${id}`).not.toMatch(/_NORMAL$/);
+    }
+  });
+
+  it('agrees with the sprite pipeline about which form is the default (BASE_FORM_CODES)', () => {
+    // Unown A, Vivillon Meadow, Zygarde Fifty Percent and Toxtricity Amped are the base art, although the game
+    // master lists a different form first. The one that is NOT the base must stay selectable.
+    for (const [key, code] of Object.entries(BASE_FORM_CODES)) {
+      const id = Number(key);
+      expect(formsOf(id), `#${id} ${code}`).not.toContain(code);
+      if (formsOf(id).length > 0) expect(defaultFormOf(id), `#${id}`).toBe(code === 'NORMAL' ? undefined : code);
+    }
+    expect(formsOf(201)).toContain('UNOWN_F');
+    expect(formsOf(666)).toContain('ARCHIPELAGO');
+    expect(formsOf(849)).toContain('LOW_KEY');
+    expect(formsOf(718)).toContain('TEN_PERCENT');
+  });
+
+  it('offers no temporary evolution: Mega, Primal and Gigantamax are not stored forms', () => {
+    const temporary = new Set(['MEGA', 'MEGA_X', 'MEGA_Y', 'PRIMAL', 'GIGANTAMAX']);
+    for (const [id, codes] of POKEDEX_FORMS) for (const code of codes) expect(temporary.has(code), `#${id} ${code}`).toBe(false);
+  });
+
+  it('offers no event costume and no shadow marker', () => {
+    expect(formsOf(25)).toEqual(['COPY_2019']); // Pikachu: the game master flags its ~70 outfits as costumes
+    expect(formsOf(222)).toEqual(['GALARIAN']); // Corsola: SPRING_2026 is a flagged costume, GALARIAN is a form
+    for (const id of [243, 244, 245, 249, 250, 380, 381]) expect(formsOf(id), `#${id}`).not.toContain('S');
+    for (const [id, codes] of POKEDEX_FORMS) {
+      for (const code of codes) expect(code, `#${id}`).not.toMatch(/(?:^|_)(?:SHADOW|PURIFIED)$/);
+    }
+    // ...but a form that merely contains the word is a form: Shadow Rider Calyrex.
+    expect(formsOf(898)).toContain('SHADOW_RIDER');
+  });
+
+  it('keeps every typed form selectable, except the temporary evolutions and one event costume', () => {
+    // FORM_TYPE_OVERRIDES is how typesOf reaches a form's typing; a typed form no trainer can pick is dead data.
+    const temporary = new Set(['MEGA', 'MEGA_X', 'MEGA_Y', 'PRIMAL']);
+    // The game master types CORSOLA_SPRING_2026 as Ghost because it is a costume on GALARIAN Corsola. It is
+    // flagged isCostume, so it is not offered: the trainer picks Galarian and turns Costume on, which types the
+    // same. It is the ONLY costume with a typing of its own; a new one failing here needs a decision, not a skip.
+    const costumesOnARegionalForm = new Set(['222:SPRING_2026']);
+    for (const [id, code] of FORM_TYPE_OVERRIDES) {
+      if (temporary.has(code) || costumesOnARegionalForm.has(`${id}:${code}`)) continue;
+      expect(formsOf(id), `#${id} ${code}`).toContain(code);
+    }
+    expect(typesOf({ pokemonId: 222, formCode: 'GALARIAN' })).toEqual(typesOf({ pokemonId: 222, formCode: 'SPRING_2026' }));
+  });
+
+  it('offers the fused forms, so a picker can refuse them rather than hide them', () => {
+    for (const { pokemonId, formCode } of UNTRADABLE_FORM_COMBINATIONS) {
+      expect(formsOf(pokemonId), `#${pokemonId} ${formCode}`).toContain(formCode);
+      expect(isPokemonUntradable(pokemonId, formCode)).toBe(true);
+    }
+  });
+
+  it('is well-formed: dex species in id order, no repeats, a valid form code every time', () => {
+    const ids = POKEDEX_FORMS.map(([id]) => id);
+    expect(ids).toEqual([...ids].sort((a, b) => a - b));
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const [id, codes] of POKEDEX_FORMS) {
+      expect(findPokemon(id), `#${id}`).toBeDefined();
+      expect(codes.length, `#${id}`).toBeGreaterThan(0);
+      expect(new Set(codes).size, `#${id}`).toBe(codes.length);
+      for (const code of codes) expect(code, `#${id}`).toMatch(/^[A-Z0-9_]{1,40}$/);
+    }
+  });
+
+  it('gives every offered form a readable label that is not blank', () => {
+    for (const [id, codes] of POKEDEX_FORMS) {
+      for (const code of codes) expect(creatureFormLabel({ pokemonId: id, formCode: code })?.trim(), `#${id} ${code}`).toBeTruthy();
+    }
+    expect(creatureFormLabel({ pokemonId: 150, formCode: 'A' })).toBe('Armored');
+    expect(creatureFormLabel({ pokemonId: 484, formCode: 'ORIGIN' })).toBe('Origin');
+    expect(creatureFormLabel({ pokemonId: 37, formCode: 'ALOLA' })).toBe('Alolan');
+    expect(creatureFormLabel({ pokemonId: 888, formCode: 'CROWNED_SWORD' })).toBe('Crowned Sword');
+  });
+});
+
+describe('defaultFormOf', () => {
+  it('names the default form where it has a name of its own', () => {
+    expect(defaultFormOf(888)).toBe('HERO');
+    expect(defaultFormOf(487)).toBe('ALTERED');
+    expect(defaultFormOf(666)).toBe('MEADOW');
+    expect(defaultFormOf(201)).toBe('UNOWN_A');
+  });
+
+  it('is undefined where the default is the plain form, for single-form species and for unknown ids', () => {
+    expect(defaultFormOf(484)).toBeUndefined(); // Palkia: plain
+    expect(defaultFormOf(37)).toBeUndefined();
+    expect(defaultFormOf(1)).toBeUndefined();
+    expect(defaultFormOf(10188)).toBeUndefined();
+  });
+
+  it('only names species that have selectable forms, and a form that is not among them', () => {
+    for (const [id, code] of POKEDEX_DEFAULT_FORMS) {
+      expect(formsOf(id).length, `#${id}`).toBeGreaterThan(0);
+      expect(formsOf(id), `#${id}`).not.toContain(code);
+      expect(code, `#${id}`).toMatch(/^[A-Z0-9_]{1,40}$/);
     }
   });
 });

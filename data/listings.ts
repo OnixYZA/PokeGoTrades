@@ -7,18 +7,22 @@ import type { Listing } from './types';
 // sprite. Sprites render from our own Supabase `sprites` bucket, keyed by dex id + formCode
 // (`lib/sprite-url.ts` `spriteObjectKey`), never from PokéAPI or raw.githubusercontent.com.
 //
+// `formCode` is the ONLY statement of a listing's form (there is no free-text `form` beside it any more,
+// see `CreatureRef.formCode`), and the card / detail / trade summary all label it through
+// `creatureFormLabel`. Keep each row's `pokemonId` + `formCode` identical to its row in supabase/seed.sql
+// (`data/listings.test.ts` fails when they drift).
+//
 // Not every named form has a mapped code: "Apex" is a Pokémon GO-only concept, and while a
 // `249/250.fS` sprite exists in the bucket, we can't confirm it maps to "Apex" specifically, so
-// those listings carry no `formCode` and fall back to the base species' sprite until that's
-// verified. Mainline-game forms (crowned/primal/origin/mega/attack-forme) DO have verified codes
-// and are wired up below.
+// those listings carry no `formCode` and are the species' default form until that's verified (the
+// word "Apex" is therefore not stated anywhere on l6). Mainline-game forms
+// (crowned/primal/origin/mega/attack-forme) DO have verified codes and are wired up below.
 export const listings: Listing[] = [
   {
     id: 'l1',
     name: 'Zacian',
     pokemonId: 888,
     formCode: 'CROWNED_SWORD',
-    form: 'Crowned Sword',
     year: 2020,
     lucky: true,
     shiny: true,
@@ -49,7 +53,6 @@ export const listings: Listing[] = [
     name: 'Armored Mewtwo',
     pokemonId: 150,
     formCode: 'A', // Armored is a Pokémon GO-exclusive costume; 'A' is PokeMiners' own code for it
-    form: 'Genesis Armor',
     year: 2019,
     lucky: true,
     shiny: false,
@@ -79,7 +82,6 @@ export const listings: Listing[] = [
     id: 'l3',
     name: 'Rayquaza',
     pokemonId: 384,
-    form: 'Standard',
     year: 2023,
     lucky: false,
     shiny: true,
@@ -109,7 +111,6 @@ export const listings: Listing[] = [
     id: 'l4',
     name: 'Purified Ho-Oh',
     pokemonId: 250,
-    form: 'Standard',
     year: 2022,
     lucky: false,
     shiny: false,
@@ -139,7 +140,6 @@ export const listings: Listing[] = [
     id: 'l5',
     name: 'Metagross',
     pokemonId: 376,
-    form: 'Frostmoves',
     year: 2018,
     lucky: true,
     shiny: true,
@@ -158,6 +158,9 @@ export const listings: Listing[] = [
       { name: 'Bagon', pokemonId: 371, hue: 220, shiny: true, lucky: true },
     ],
     tags: ['Level 1'],
+    // The design prototype put "Frostmoves" in this row's form slot. It is not a form (it has no form code),
+    // so it is the seller's own remark about the listing, and a remark lives in `notes`.
+    notes: 'Frostmoves',
     purified: false,
     costume: false,
     pokeball: 'poke',
@@ -169,7 +172,6 @@ export const listings: Listing[] = [
     id: 'l6',
     name: 'Purified Apex Lugia',
     pokemonId: 249,
-    form: 'Apex',
     year: 2024,
     lucky: false,
     shiny: false,

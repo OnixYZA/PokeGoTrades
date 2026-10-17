@@ -20,6 +20,7 @@ import {
 } from 'lucide-react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
+import { FormPicker } from '@/components/modals/FormPicker';
 import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
 import { Dropdown } from '@/components/ui/Dropdown';
@@ -27,9 +28,9 @@ import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import { findPokemon, formatTypes, isPokemonUntradable, type PokedexEntry } from '@/constants/pokedex';
+import { findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
 import {
   LISTING_TAGS,
   POKEBALLS,
@@ -117,6 +118,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
 
   const [step, setStep] = useState<Step>('form');
   const [selectedCreature, setSelectedCreature] = useState<PokedexEntry | null>(null);
+  // The chosen form of `selectedCreature`, as `CreatureRef.formCode`; null is the species' default form. Written
+  // only by `handlePickPokemon` (a new species starts on its default) and `handlePickForm` (which refuses a form
+  // the species does not have, or one that cannot be traded), so it can never describe a different species.
+  const [formCode, setFormCode] = useState<string | null>(null);
   const [shiny, setShiny] = useState(true);
   const [purified, setPurified] = useState(false);
   const [specialBackground, setSpecialBackground] = useState(true);
@@ -182,9 +187,9 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       name: selectedCreature.name,
       pokemonId: selectedCreature.pokemonId,
       hue: selectedCreature.hue,
-      // `purified` is now its own column (migration …000100_listing_attributes) — `form` no longer
-      // encodes it, so every draft writes the plain form name here.
-      form: 'Standard',
+      // The form is its structured code and nothing else: there is no free-text form beside it to drift, and
+      // `purified` is its own column. Omitted for the default form, like the other optional fields.
+      ...(formCode ? { formCode } : {}),
       // Placeholder until OCR reads the real catch date from the proof (SUPABASE_PLAN.md §5.2 Q9).
       year: new Date().getFullYear(),
       shiny,
@@ -207,6 +212,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   }, [
     draftId,
     selectedCreature,
+    formCode,
     shiny,
     purified,
     specialBackground,
@@ -266,6 +272,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     const entry = findPokemon(pokemonId);
     if (!entry || isPokemonUntradable(entry.pokemonId)) return;
     if (target === 'creature') {
+      // Re-picking the same species keeps its form; a different one starts on its default form.
+      if (entry.pokemonId !== selectedCreature?.pokemonId) setFormCode(null);
       setSelectedCreature(entry);
     } else if (target === 'wanted') {
       const candidate: CreatureRef = { name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue, ...(shiny ? { shiny } : {}) };
@@ -274,6 +282,15 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         prev.length >= 3 || prev.some((w) => spriteVariantKey(spriteVariantOf(w)) === candidateKey) ? prev : [...prev, candidate]
       );
     }
+  };
+
+  /** The only way into `formCode` besides a species change. The form picker already refuses a form the species
+   *  does not have and an untradable one (White Kyurem); checking here too means a draft can never hold either,
+   *  the same belt-and-braces as `handlePickPokemon`, with `listings_tradable_guard` as the database backstop. */
+  const handlePickForm = (next: string | null) => {
+    if (!selectedCreature) return;
+    if (next !== null && (!formsOf(selectedCreature.pokemonId).includes(next) || isPokemonUntradable(selectedCreature.pokemonId, next))) return;
+    setFormCode(next);
   };
 
   const addProof = async () => {
@@ -543,7 +560,11 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24, gap: 24 }}
         showsVerticalScrollIndicator={false}
       >
-        <CreatureSelector selected={selectedCreature} onPress={() => setPickerFor('creature')} />
+        <CreatureSelector selected={selectedCreature} formCode={formCode} onPress={() => setPickerFor('creature')} />
+        {selectedCreature && (
+          // Keyed by species so the picker's refusal notice never outlives the species it was about.
+          <FormPicker key={selectedCreature.pokemonId} pokemonId={selectedCreature.pokemonId} formCode={formCode} onChange={handlePickForm} />
+        )}
         <AttributesCard
           shiny={shiny}
           onToggleShiny={() => setShiny((v) => !v)}
@@ -654,7 +675,19 @@ function ProgressBar({ filled }: { filled: number }) {
 /** dex label as `#<padded id>` — matches PokemonPickerModal's own `PokedexRow` formatting. */
 const dexLabel = (pokemonId: number) => `#${String(pokemonId).padStart(3, '0')}`;
 
-function CreatureSelector({ selected, onPress }: { selected: PokedexEntry | null; onPress: () => void }) {
+function CreatureSelector({
+  selected,
+  formCode,
+  onPress,
+}: {
+  selected: PokedexEntry | null;
+  /** The chosen form, so the sprite, the typing and the label show it (the sprite and `typesOf` both resolve by
+   *  `pokemonId` + `formCode`). */
+  formCode: string | null;
+  onPress: () => void;
+}) {
+  const creature = selected && { pokemonId: selected.pokemonId, hue: selected.hue, formCode };
+  const formLabel = selected ? creatureFormLabel({ pokemonId: selected.pokemonId, formCode }) : undefined;
   return (
     <View>
       <View className="mb-2.5 flex-row items-center justify-between">
@@ -670,15 +703,18 @@ function CreatureSelector({ selected, onPress }: { selected: PokedexEntry | null
         <Pressable
           onPress={onPress}
           accessibilityRole="button"
-          accessibilityLabel={`${selected.name} selected. Change creature`}
+          accessibilityLabel={`${selected.name}${formLabel ? `, ${formLabel} form` : ''} selected. Change creature`}
           className="flex-row items-center gap-3 rounded-[14px] border px-4 py-3 active:opacity-80"
           style={{ backgroundColor: C.bgCard, borderColor: C.gold, boxShadow: '0 0 0 4px rgba(251,191,36,0.08)' }}
         >
-          <Chip creature={selected} size={44} />
+          {creature && <Chip creature={creature} size={44} />}
           <View className="flex-1">
-            <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>{selected.name}</Text>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>
+              {selected.name}
+              {formLabel ? <Text style={{ fontWeight: '500', color: C.textSecondary }}>{` · ${formLabel}`}</Text> : null}
+            </Text>
             <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
-              {dexLabel(selected.pokemonId)} · {formatTypes(selected.types)}
+              {dexLabel(selected.pokemonId)} · {formatTypes(typesOf({ pokemonId: selected.pokemonId, formCode }) ?? selected.types)}
             </Text>
           </View>
           <Text className="font-mono-semi" style={{ fontSize: 11, color: C.gold, letterSpacing: 0.6 }}>

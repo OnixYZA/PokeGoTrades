@@ -274,8 +274,9 @@ function SearchField({
 }
 
 /** Why the row the trainer just tapped did nothing. Sits between the search field and the list, so it stays
- *  in view however far the list has scrolled. */
-function UntradableNotice({ name, onDismiss }: { name: string; onDismiss: () => void }) {
+ *  in view however far the list has scrolled. Exported so `FormPicker` refuses a fused form (White Kyurem) with
+ *  the very same notice instead of a second copy of the wording that could drift. */
+export function UntradableNotice({ name, onDismiss }: { name: string; onDismiss: () => void }) {
   return (
     <View
       accessibilityRole="alert"

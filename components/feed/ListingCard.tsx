@@ -12,7 +12,7 @@ import { TextBadge } from '@/components/ui/TextBadge';
 import { TypeBadge } from '@/components/ui/TypeBadge';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { Listing } from '@/data/types';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
 
 /** At most this many attribute/tag badges render before the row collapses the rest into "+N" — keeps
  *  a listing with every attribute set (and a full 5 tags) from overflowing a 360pt-wide card. */
@@ -74,8 +74,10 @@ export function ListingCard({ listing }: { listing: Listing }) {
          *  elide. Two `sm` pills are well inside the ~170pt text column of a 320pt screen, and they wrap
          *  rather than overflow if large text sizes ever make them too wide. */}
         <TypeBadge creature={listing} size="sm" />
+        {/* The form is the structured `formCode`, labelled by `creatureFormLabel`, and absent for the default form:
+         *  joining only the parts that exist means no form never leaves a dangling "· 2024". */}
         <Text className="font-mono text-text-subtle" style={{ fontSize: 12, pointerEvents: 'none' }}>
-          {listing.form} · {listing.year}
+          {[creatureFormLabel(listing), String(listing.year)].filter(Boolean).join(' · ')}
         </Text>
 
         <View className="mt-0.5 flex-row flex-wrap items-center gap-1.5" style={{ pointerEvents: 'none' }}>

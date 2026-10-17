@@ -50,7 +50,8 @@ function offerPills(offer: FormalOffer): Pill[] {
 function listingPills(listing: Listing): Pill[] {
   const pills: Pill[] = [listing.shiny ? { label: 'Shiny', tone: 'shiny' } : { label: 'Not shiny' }];
   if (listing.lucky) pills.push({ label: 'Lucky', tone: 'lucky' });
-  if (listing.form) pills.push({ label: listing.form });
+  const form = creatureFormLabel(listing);
+  if (form) pills.push({ label: form });
   if (listing.purified) pills.push({ label: 'Purified' });
   if (listing.costume) pills.push({ label: 'Costume' });
   if (listing.iv) pills.push({ label: `IV ${listing.iv}` });

@@ -98,8 +98,7 @@ export async function createListingFixture(admin: SupabaseClient, seller: Traine
     .insert({
       seller_id: seller.id,
       name: 'Mewtwo',
-      pokemon_id: 150,
-      form: 'Standard',
+      pokemon_id: 150, // and no `form_code`: the species' default form (`form_code` is the only statement of a form)
       catch_year: 2024,
       hue: 220,
       accent: '#4fb3ff',

@@ -1,14 +1,19 @@
 /**
- * Regenerates `constants/pokedex-data.ts`: every species' English name and typing (both slots), plus the
- * table of forms whose typing differs from their species'. All the logic lives in `scripts/pokedex-source.ts`
- * (pure, unit-tested); this file only downloads and writes.
+ * Regenerates `constants/pokedex-data.ts`: every species' English name and typing (both slots), the table
+ * of forms whose typing differs from their species', and the catalog of forms a creature can be listed as
+ * (`POKEDEX_FORMS`). All the logic lives in `scripts/pokedex-source.ts` (pure, unit-tested); this file only
+ * downloads and writes.
  *
  * Usage (see package.json's "pokedex:generate" script):
  *   npm run pokedex:generate                # download, cross-check, rewrite constants/pokedex-data.ts
  *   npm run pokedex:generate -- --dry-run   # download, cross-check, print the report, write nothing
+ *   npm run pokedex:generate -- --pinned    # use the commits recorded in the current file's header
  *
  * Sources, each pinned to the commit its `master` pointed at when the run started (and that commit is
- * recorded in the generated file's header, so the output is reproducible and a no-op rerun is byte-identical):
+ * recorded in the generated file's header). A plain run therefore picks up whatever upstream has moved to; to
+ * reproduce the CURRENT file exactly, or to change the generator without mixing in unrelated upstream drift,
+ * pass `--pinned`: it reads those three commits back out of the header and does not resolve `master` at all
+ * (so a `--pinned` rerun of an unchanged generator is byte-identical):
  *   - PokeAPI/pokeapi             data/v2/csv/{pokemon_species,pokemon_species_names,pokemon,pokemon_types,types}.csv
  *   - PokeMiners/game_masters     latest/latest.json            (Pokémon GO's per-form types)
  *   - PokeMiners/pogo_assets      Images/Pokemon - 256x256/Addressable Assets   (listing only, for form spelling)
@@ -18,21 +23,26 @@
  * RELATIVE IMPORTS ONLY, and no `react-native` / `expo-*` (it runs under `tsx`, a plain Node process).
  *
  * The game master is ~19 MB. It is parsed in memory and never written to disk, so nothing downloaded ends
- * up in the repo. GitHub's unauthenticated API allows 60 requests/hour per IP and this makes 7; export
- * GITHUB_TOKEN in your shell (public-repo read, no scopes) to raise that. It deliberately does NOT load
- * `.env.scripts.local`, which holds a service-role key and must not be read by a script that needs neither.
+ * up in the repo. GitHub's unauthenticated API allows 60 requests/hour per IP and this makes 7 (4 with
+ * `--pinned`); export GITHUB_TOKEN in your shell (public-repo read, no scopes) to raise that. It deliberately
+ * does NOT load `.env.scripts.local`, which holds a service-role key and must not be read by a script that
+ * needs neither.
  *
  * Exit code 1, and nothing written, when the game master and PokeAPI disagree about any species' default
- * typing: the run prints each disagreement rather than choosing a side.
+ * typing, or when `constants/base-form-codes.ts` names a default form the game master does not list: the run
+ * prints each one rather than choosing a side.
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { BASE_FORM_CODES } from '../constants/base-form-codes';
 import {
   buildPokedexData,
   parseAssetFormTokens,
   parseGameMaster,
+  parseGameMasterForms,
   parsePokeApiSpecies,
+  parseProvenance,
   renderDataFile,
   type GameMasterTemplate,
   type PokedexData,
@@ -161,9 +171,49 @@ function printReport(data: PokedexData, provenance: Provenance): void {
     console.log(`  ${unconfirmed.length} use the convention's spelling with no sprite art upstream to confirm it:`);
     console.log(`    ${unconfirmed.map((o) => `${o.pokemonId}:${o.formCode}`).join(' ')}`);
   }
+  const catalog = report.formCatalog;
+  const formCount = data.forms.reduce((sum, entry) => sum + entry.forms.length, 0);
+  const unconfirmedForms = data.forms.flatMap((entry) => entry.forms.filter((f) => !f.confirmed).map((f) => `${entry.pokemonId}:${f.code}`));
+  console.log(`Form catalog: ${formCount} selectable forms on ${data.forms.length} species (of ${catalog.speciesWithSeveralForms} species with two or more game master forms).`);
+  console.log(`  default form has a name of its own on ${data.forms.filter((e) => e.defaultCode !== null).length} of them; ${catalog.defaultsFromBaseTable.length} take it from BASE_FORM_CODES instead of the first-listed form:`);
+  console.log(`    ${catalog.defaultsFromBaseTable.map((d) => `${d.pokemonId}:${d.code} (game master lists ${d.gameMasterFirst} first)`).join(' ')}`);
+  console.log(`  left out as event costumes (game master isCostume): ${catalog.excludedCostumes.length}; kept as forms: ${catalog.keptCostumes.map((k) => `${k.pokemonId}:${k.code}`).join(' ') || 'none'}`);
+  console.log(`  left out as shadow/purified status: ${catalog.excludedStatus.length}: ${catalog.excludedStatus.map((x) => `${x.pokemonId}:${x.code}`).join(' ')}`);
+  console.log(`  ${unconfirmedForms.length} use the convention's spelling with no sprite art upstream to confirm it:`);
+  console.log(`    ${unconfirmedForms.join(' ')}`);
+  for (const c of catalog.baseTableConflicts) {
+    console.log(`  CONFLICT #${c.pokemonId}: BASE_FORM_CODES says the default is ${c.code}, but the game master lists no such form`);
+  }
+  console.log('');
+
   const gaps = report.assetFormsWithoutTypes;
   console.log(`Sprite form tokens with no game master typing (they resolve to the species default): ${gaps.length}`);
   console.log(`    ${gaps.map((g) => `${g.pokemonId}:${g.token}`).join(' ')}\n`);
+}
+
+// ================================================================================================
+// Provenance: which commit of each source
+// ================================================================================================
+
+/** What `master` points at right now, for each source. */
+async function resolveProvenance(): Promise<Provenance> {
+  const [pokeApiSha, gameMasterSha, assetsSha] = await Promise.all([
+    resolveCommit(POKEAPI_REPO),
+    resolveCommit(GAME_MASTER_REPO),
+    resolveCommit(ASSETS_REPO),
+  ]);
+  return {
+    pokeApi: `${POKEAPI_REPO}@${pokeApiSha}`,
+    gameMaster: `${GAME_MASTER_REPO}@${gameMasterSha}`,
+    spriteAssets: `${ASSETS_REPO}@${assetsSha}`,
+  };
+}
+
+/** The commits the current output file was generated from (`--pinned`). */
+function pinnedProvenance(): Provenance {
+  const pinned = parseProvenance(readFileSync(OUT_FILE, 'utf8'));
+  if (!pinned) throw new Error(`--pinned: ${path.relative(process.cwd(), OUT_FILE)} has no "owner/repo@<sha>" lines in its header to read the commits from.`);
+  return pinned;
 }
 
 // ================================================================================================
@@ -179,20 +229,13 @@ const POKEAPI_FILES = {
 } as const satisfies Record<keyof PokeApiCsv, string>;
 
 async function main(): Promise<void> {
-  const unknown = process.argv.slice(2).filter((arg) => arg !== '--dry-run');
-  if (unknown.length > 0) throw new Error(`Unknown argument(s): ${unknown.join(' ')}. Only --dry-run is supported.`);
+  const unknown = process.argv.slice(2).filter((arg) => arg !== '--dry-run' && arg !== '--pinned');
+  if (unknown.length > 0) throw new Error(`Unknown argument(s): ${unknown.join(' ')}. Only --dry-run and --pinned are supported.`);
   const dryRun = process.argv.includes('--dry-run');
 
-  const [pokeApiSha, gameMasterSha, assetsSha] = await Promise.all([
-    resolveCommit(POKEAPI_REPO),
-    resolveCommit(GAME_MASTER_REPO),
-    resolveCommit(ASSETS_REPO),
-  ]);
-  const provenance: Provenance = {
-    pokeApi: `${POKEAPI_REPO}@${pokeApiSha}`,
-    gameMaster: `${GAME_MASTER_REPO}@${gameMasterSha}`,
-    spriteAssets: `${ASSETS_REPO}@${assetsSha}`,
-  };
+  const provenance = process.argv.includes('--pinned') ? pinnedProvenance() : await resolveProvenance();
+  const shaOf = (source: string): string => source.slice(source.indexOf('@') + 1);
+  const [pokeApiSha, gameMasterSha, assetsSha] = [shaOf(provenance.pokeApi), shaOf(provenance.gameMaster), shaOf(provenance.spriteAssets)];
 
   console.log('Downloading ...');
   const csvEntries = await Promise.all(
@@ -207,12 +250,18 @@ async function main(): Promise<void> {
   const data = buildPokedexData({
     species: parsePokeApiSpecies(pokeApiCsv),
     gameMaster: parseGameMaster(gameMasterJson),
+    gameMasterForms: parseGameMasterForms(gameMasterJson),
     assetTokens: parseAssetFormTokens(assetFiles),
+    baseFormCodes: BASE_FORM_CODES,
   });
   printReport(data, provenance);
 
   if (data.report.disagreements.length > 0) {
     console.error(`Refusing to write ${path.relative(process.cwd(), OUT_FILE)}: the sources disagree about ${data.report.disagreements.length} species' default typing (listed above).`);
+    process.exit(1);
+  }
+  if (data.report.formCatalog.baseTableConflicts.length > 0) {
+    console.error(`Refusing to write ${path.relative(process.cwd(), OUT_FILE)}: BASE_FORM_CODES (constants/base-form-codes.ts) names ${data.report.formCatalog.baseTableConflicts.length} default form(s) the game master does not list (listed above).`);
     process.exit(1);
   }
   if (dryRun) {

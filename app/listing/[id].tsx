@@ -30,7 +30,7 @@ import { demandTier, marketLabel } from '@/constants/market';
 import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
@@ -174,8 +174,10 @@ export default function ListingDetailScreen() {
           <View className="flex-row items-start gap-4">
             <Sprite creature={listing} purified={listing.purified} size={92} />
             <View className="min-w-0 flex-1">
+              {/* "Armored · 2024 catch", or just "2024 catch" for the default form (`creatureFormLabel` is
+               *  undefined there): only the parts that exist are joined, so there is never a dangling "· ". */}
               <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 10, letterSpacing: 1.2 }}>
-                {listing.form} · {listing.year} catch
+                {[creatureFormLabel(listing), `${listing.year} catch`].filter(Boolean).join(' · ')}
               </Text>
               <View className="mt-1 flex-row items-center gap-1.5">
                 {listing.shiny && <ShinyGlint size={22} glow />}

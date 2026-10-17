@@ -64,8 +64,8 @@ export function speciesName(c: NamedCreature): string {
  *  ad-hoc `{ pokemonId, shiny }` literal — never mutates its argument, and never the thing to reach for
  *  when a stable identity is needed instead (a `key`, an equality check: use `spriteVariantKey`). Anything
  *  the stored name used to carry beyond the species (a form, "Purified", "Legacy") is NOT shown by this:
- *  a form is shown through its structured field (`formCode` via `creatureFormLabel`; a listing's `form`),
- *  and a listing's Purified / Costume / tags are badges of their own. */
+ *  a form is shown through its structured field (`formCode` via `creatureFormLabel`, on a listing as anywhere
+ *  else), and a listing's Purified / Costume / tags are badges of their own. */
 export function creatureDisplayName(c: NamedCreature & { shiny?: boolean | null }): string {
   const species = speciesName(c);
   return c.shiny ? `Shiny ${species}` : species;

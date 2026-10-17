@@ -17,7 +17,6 @@ function makeListing(partial: Partial<Listing> = {}): Listing {
     name: 'Larvitar',
     hue: 0,
     pokemonId: 246,
-    form: 'Normal',
     year: 2026,
     lucky: false,
     shiny: false,

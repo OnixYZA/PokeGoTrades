@@ -72,57 +72,61 @@ update public.profiles set trades_count = 214 where id = 'a0000000-0000-4000-800
 --    year -> catch_year, iv 'a/b/c' -> three smallints, pvp/demand -> rank columns, dist dropped (D3).
 --    l1 seller is DriftCoral (see header). l3 is locked further down, together with its trade_locks row.
 -- ============================================================================================
--- pokemon_id is the true national dex id everywhere below; a form with no PokeMiners sprite code
--- yet (e.g. 'Apex') leaves form_code null and falls back to the base-species sprite (see the
--- ...000500_creature_form_codes migration header for why 'Apex' specifically stays unmapped).
+-- pokemon_id is the true national dex id everywhere below, and form_code (a PokeMiners code, null = the
+-- species' default form) is the ONLY statement of a listing's form. There is deliberately no free-text `form`
+-- column in this INSERT: it would be dropped by ...000300_drop_listings_form, and until then the column's own
+-- default fills it, so this file loads on both sides of that migration. A form with no PokeMiners code yet
+-- (e.g. 'Apex') therefore leaves form_code null and is simply the default form (see the
+-- ...000500_creature_form_codes migration header for why 'Apex' specifically stays unmapped). Keep each
+-- row's pokemon_id + form_code identical to data/listings.ts (data/listings.test.ts fails when they drift).
 --
 -- Every `name` below (the listing's own and each looking[] entry) is the DEX name for its pokemon_id
 -- (constants/pokedex.ts) and nothing else: "Shiny", "Legacy", "Purified", a form or "Apex" are never typed
--- into it. Those live in their own columns/keys (shiny, purified, costume, form, formCode, tags), and the
+-- into it. Those live in their own columns/keys (shiny, purified, costume, form_code, formCode, tags), and the
 -- client derives the displayed name from pokemon_id anyway (lib/format.ts `creatureDisplayName`), so a name
 -- that disagrees with the dex is dead text at best. Where a listing's name used to carry a fact that has a
 -- column, it is set below (`purified`, `costume`); a fact with no home (a looking[] entry's "Purified",
 -- "Legacy" or "Apex") is simply not representable on a wanted creature.
 insert into public.listings (
-  id, seller_id, name, pokemon_id, form, form_code, catch_year, lucky, shiny, hue, accent, bg, loc,
+  id, seller_id, name, pokemon_id, form_code, catch_year, lucky, shiny, hue, accent, bg, loc,
   pvp_rank, demand_rank, trade_type, iv_atk, iv_def, iv_sta, looking) values
   ('b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001',
-   'Zacian', 888, 'Crowned Sword', 'CROWNED_SWORD', 2020, true, true, 260, '#c9a6ff', 'meta', 'Adyar',
+   'Zacian', 888, 'CROWNED_SWORD', 2020, true, true, 260, '#c9a6ff', 'meta', 'Adyar',
    'S+', '#1', 'Unregistered (Shiny/Legendary)', 15, 15, 14,
    '[{"name":"Zamazenta","pokemonId":889,"hue":340,"shiny":true},
      {"name":"Lugia","pokemonId":249,"hue":25},
      {"name":"Mewtwo","pokemonId":150,"hue":220,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000003',
-   'Mewtwo', 150, 'Genesis Armor', 'A', 2019, true, false, 210, '#7fd4ff', 'legacy', 'Adyar',
+   'Mewtwo', 150, 'A', 2019, true, false, 210, '#7fd4ff', 'legacy', 'Adyar',
    'A', '#4', 'Special (Shiny/Legendary) Registered', 14, 15, 15,
    '[{"name":"Dragonite","pokemonId":149,"hue":340},
      {"name":"Ho-Oh","pokemonId":250,"hue":25},
      {"name":"Giratina","pokemonId":487,"formCode":"ORIGIN","hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000004',
-   'Rayquaza', 384, 'Standard', null, 2023, false, true, 145, '#7dffb3', 'shiny', 'Adyar',
+   'Rayquaza', 384, null, 2023, false, true, 145, '#7dffb3', 'shiny', 'Adyar',
    'S', '#2', 'Special (Shiny/Legendary) Registered', 15, 15, 15,
    '[{"name":"Kyogre","pokemonId":382,"hue":340,"shiny":true},
      {"name":"Groudon","pokemonId":383,"hue":25,"shiny":true},
      {"name":"Palkia","pokemonId":484,"formCode":"ORIGIN","hue":220,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000005',
-   'Ho-Oh', 250, 'Standard', null, 2022, false, false, 25, '#ffb37a', 'meta', 'East Tambaram',
+   'Ho-Oh', 250, null, 2022, false, false, 25, '#ffb37a', 'meta', 'East Tambaram',
    'A+', '#7', 'Unregistered (Shiny/Legendary)', 14, 14, 15,
    '[{"name":"Lugia","pokemonId":249,"hue":340},
      {"name":"Rayquaza","pokemonId":384,"formCode":"MEGA","hue":25},
      {"name":"Entei","pokemonId":244,"hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000005', 'a0000000-0000-4000-8000-000000000006',
-   'Metagross', 376, 'Frostmoves', null, 2018, true, true, 195, '#a3e8ff', 'meta', 'East Tambaram',
+   'Metagross', 376, null, 2018, true, true, 195, '#a3e8ff', 'meta', 'East Tambaram',
    'S', '#3', 'Special (Shiny/Legendary) Registered', 15, 13, 15,
    '[{"name":"Beldum","pokemonId":374,"hue":340,"shiny":true},
      {"name":"Larvitar","pokemonId":246,"hue":25,"shiny":true},
      {"name":"Bagon","pokemonId":371,"hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000006', 'a0000000-0000-4000-8000-000000000007',
-   'Lugia', 249, 'Apex', null, 2024, false, false, 285, '#d4b0ff', 'legacy', 'Velachery',
+   'Lugia', 249, null, 2024, false, false, 285, '#d4b0ff', 'legacy', 'Velachery',
    'A', '#5', 'Unregistered (Shiny/Legendary)', 15, 15, 15,
    '[{"name":"Ho-Oh","pokemonId":250,"hue":340},
      {"name":"Groudon","pokemonId":383,"formCode":"PRIMAL","hue":25},
@@ -136,6 +140,9 @@ insert into public.listings (
 update public.listings set costume  = true where id = 'b0000000-0000-4000-8000-000000000002';
 update public.listings set purified = true where id in ('b0000000-0000-4000-8000-000000000004',
                                                          'b0000000-0000-4000-8000-000000000006');
+-- l5's "Frostmoves" was never a form, so it cannot be form_code; it is the seller's own remark (data/listings.ts
+-- carries it as `notes` too). `notes` is outside guard_listing_update's frozen columns, so order does not matter.
+update public.listings set notes = 'Frostmoves' where id = 'b0000000-0000-4000-8000-000000000005';
 
 -- ============================================================================================
 -- 3. Chats  ids: c0000000-0000-4000-8000-00000000000N

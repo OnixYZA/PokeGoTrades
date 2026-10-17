@@ -4,20 +4,29 @@
  * real species and forms (Zacian, Vulpix, Charizard, Wormadam, Silvally) whose typing was checked against
  * the downloaded sources, so the tests pin the generator's rules without a network or a 19 MB download.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
+import { BASE_FORM_CODES } from '../constants/base-form-codes';
 import { POKEMON_TYPES, type PokemonType, type PokemonTypes } from '../constants/pokemon-types';
 import { parsePokeMinersIcon } from './pokeminers';
 import {
+  buildFormCatalog,
   buildPokedexData,
+  COSTUME_FORMS_KEPT_AS_FORMS,
   csvRecords,
   gameMasterDefaultTypes,
   parseAssetFormTokens,
   parseCsv,
   parseGameMaster,
+  parseGameMasterForms,
   parsePokeApiSpecies,
+  parseProvenance,
   renderDataFile,
   resolveFormCode,
+  SHADOW_MARKER_CODES,
   type GameMasterTemplate,
   type Provenance,
   type SpeciesRow,
@@ -172,9 +181,16 @@ function pokemonTemplate(
   };
 }
 
-const formsTemplate = (id: number, enumName: string, forms: string[]): GameMasterTemplate => ({
+/** A form entry is its enum, or `[enum, true]` for one the game master flags `isCostume`. */
+type FormSpec = string | readonly [form: string, isCostume: true];
+const formsTemplate = (id: number, enumName: string, forms: FormSpec[]): GameMasterTemplate => ({
   templateId: `FORMS_V${pad(id)}_POKEMON_${enumName}`,
-  data: { formSettings: { forms: forms.map((form) => ({ form })) } },
+  data: {
+    formSettings: {
+      pokemon: enumName,
+      forms: forms.map((spec) => (typeof spec === 'string' ? { form: spec } : { form: spec[0], isCostume: true })),
+    },
+  },
 });
 
 /** Zacian as the real game master has it: the FORMLESS template carries the Crowned Sword typing. */
@@ -203,6 +219,7 @@ const CHARIZARD: GameMasterTemplate[] = [
 
 const species = (id: number, name: string, types: PokemonTypes): SpeciesRow => ({ id, name, types });
 const ZACIAN_ROW = species(888, 'Zacian', ['Fairy']);
+const PALKIA_ROW = species(484, 'Palkia', ['Water', 'Dragon']);
 const VULPIX_ROW = species(37, 'Vulpix', ['Fire']);
 const CHARIZARD_ROW = species(6, 'Charizard', ['Fire', 'Flying']);
 
@@ -328,7 +345,13 @@ describe('resolveFormCode', () => {
 
 describe('buildPokedexData', () => {
   const build = (rows: SpeciesRow[], templates: GameMasterTemplate[], files: string[] = []) =>
-    buildPokedexData({ species: rows, gameMaster: parseGameMaster(templates), assetTokens: parseAssetFormTokens(files) });
+    buildPokedexData({
+      species: rows,
+      gameMaster: parseGameMaster(templates),
+      gameMasterForms: parseGameMasterForms(templates),
+      assetTokens: parseAssetFormTokens(files),
+      baseFormCodes: {},
+    });
 
   it('records only forms whose typing differs from the species default', () => {
     const { overrides } = build([ZACIAN_ROW], ZACIAN, ['pm888.fHERO.icon.png', 'pm888.fCROWNED_SWORD.icon.png']);
@@ -414,17 +437,227 @@ describe('buildPokedexData', () => {
   });
 });
 
+// ——— form catalog ———
+
+describe('parseGameMasterForms', () => {
+  it('keeps each species list in the game master order, with the isCostume flag', () => {
+    const lists = parseGameMasterForms([formsTemplate(150, 'MEWTWO', ['MEWTWO_NORMAL', ['MEWTWO_A', true]])]);
+    expect(lists.get(150)).toEqual({
+      enumName: 'MEWTWO',
+      forms: [
+        { form: 'MEWTWO_NORMAL', isCostume: false },
+        { form: 'MEWTWO_A', isCostume: true },
+      ],
+    });
+  });
+
+  it('reads a list for a species that has no pokemonSettings (Basculegion) and tolerates a missing forms array', () => {
+    const lists = parseGameMasterForms([
+      formsTemplate(902, 'BASCULEGION', ['BASCULEGION_MALE', 'BASCULEGION_FEMALE']),
+      { templateId: 'FORMS_V0001_POKEMON_BULBASAUR', data: { formSettings: { pokemon: 'BULBASAUR' } } },
+      { templateId: 'V0902_POKEMON_X', data: {} }, // not a form list
+    ]);
+    expect(lists.get(902)?.forms.map((f) => f.form)).toEqual(['BASCULEGION_MALE', 'BASCULEGION_FEMALE']);
+    expect(lists.get(1)).toEqual({ enumName: 'BULBASAUR', forms: [] });
+    expect(lists.size).toBe(2);
+  });
+
+  it('refuses a repeated list, a repeated form, a nameless form and a list with no species', () => {
+    expect(() => parseGameMasterForms([formsTemplate(37, 'VULPIX', ['A']), formsTemplate(37, 'VULPIX', ['A'])])).toThrow(/second form list/);
+    expect(() => parseGameMasterForms([formsTemplate(37, 'VULPIX', ['VULPIX_ALOLA', 'VULPIX_ALOLA'])])).toThrow(/listed twice/);
+    const nameless = formsTemplate(37, 'VULPIX', []);
+    nameless.data!.formSettings!.forms = [{}];
+    expect(() => parseGameMasterForms([nameless])).toThrow(/no name/);
+    expect(() => parseGameMasterForms([{ templateId: 'FORMS_V0037_POKEMON_VULPIX', data: { formSettings: {} } }])).toThrow(/no species enum/);
+  });
+});
+
+describe('buildFormCatalog', () => {
+  /** One species per call, with real-shaped form lists. */
+  const catalog = (
+    rows: SpeciesRow[],
+    lists: GameMasterTemplate[],
+    files: string[] = [],
+    baseFormCodes: Record<number, string> = {},
+  ) =>
+    buildFormCatalog({
+      species: rows,
+      gameMasterForms: parseGameMasterForms(lists),
+      assetTokens: parseAssetFormTokens(files),
+      baseFormCodes,
+    });
+  const codes = (result: ReturnType<typeof catalog>, pokemonId: number) =>
+    result.entries.find((e) => e.pokemonId === pokemonId)?.forms.map((f) => f.code);
+
+  const PALKIA = species(484, 'Palkia', ['Water', 'Dragon']);
+  const MEWTWO = species(150, 'Mewtwo', ['Psychic']);
+
+  it('offers the non-default forms and not the default, which formCode: null already means', () => {
+    const result = catalog([PALKIA], [formsTemplate(484, 'PALKIA', ['PALKIA_NORMAL', 'PALKIA_ORIGIN'])], ['pm484.fORIGIN.icon.png']);
+    expect(result.entries).toEqual([{ pokemonId: 484, defaultCode: null, forms: [{ code: 'ORIGIN', confirmed: true }] }]);
+  });
+
+  it('offers a form whose typing is the species typing (Origin Palkia, Armored Mewtwo): the overrides table cannot', () => {
+    const result = catalog([MEWTWO], [formsTemplate(150, 'MEWTWO', ['MEWTWO_NORMAL', ['MEWTWO_A', true]])]);
+    expect(codes(result, 150)).toEqual(['A']);
+  });
+
+  it('names a default that has a name of its own (Zacian is Hero), and still excludes it from the list', () => {
+    const result = catalog([ZACIAN_ROW], ZACIAN, ['pm888.fHERO.icon.png', 'pm888.fCROWNED_SWORD.icon.png']);
+    expect(result.entries).toEqual([
+      { pokemonId: 888, defaultCode: 'HERO', forms: [{ code: 'CROWNED_SWORD', confirmed: true }] },
+    ]);
+  });
+
+  it('keeps the game master order, which is not alphabetical', () => {
+    const rotom = formsTemplate(479, 'ROTOM', ['ROTOM_NORMAL', 'ROTOM_HEAT', 'ROTOM_WASH', 'ROTOM_FROST', 'ROTOM_FAN', 'ROTOM_MOW']);
+    expect(codes(catalog([species(479, 'Rotom', ['Electric', 'Ghost'])], [rotom]), 479)).toEqual(['HEAT', 'WASH', 'FROST', 'FAN', 'MOW']);
+  });
+
+  it('takes the default from BASE_FORM_CODES over the first-listed form, so the first-listed one stays selectable', () => {
+    // The real game master lists UNOWN_F first; the sprite pipeline's base form is UNOWN_A.
+    const unown = formsTemplate(201, 'UNOWN', ['UNOWN_F', 'UNOWN_A', 'UNOWN_B']);
+    const files = ['pm201.fUNOWN_F.icon.png', 'pm201.fUNOWN_A.icon.png', 'pm201.fUNOWN_B.icon.png'];
+    const result = catalog([species(201, 'Unown', ['Psychic'])], [unown], files, { 201: 'UNOWN_A' });
+    expect(result.entries[0].defaultCode).toBe('UNOWN_A');
+    expect(codes(result, 201)).toEqual(['UNOWN_F', 'UNOWN_B']);
+    expect(result.report.defaultsFromBaseTable).toEqual([{ pokemonId: 201, code: 'UNOWN_A', gameMasterFirst: 'UNOWN_F' }]);
+    // Without the table the first-listed form would be the default.
+    expect(codes(catalog([species(201, 'Unown', ['Psychic'])], [unown], files), 201)).toEqual(['UNOWN_A', 'UNOWN_B']);
+  });
+
+  it('reports, fatally, a BASE_FORM_CODES default the game master does not list', () => {
+    const result = catalog([PALKIA], [formsTemplate(484, 'PALKIA', ['PALKIA_NORMAL', 'PALKIA_ORIGIN'])], [], { 484: 'ALTERED' });
+    expect(result.report.baseTableConflicts).toEqual([{ pokemonId: 484, code: 'ALTERED' }]);
+    expect(codes(result, 484)).toEqual(['ORIGIN']); // falls back to the first-listed default meanwhile
+  });
+
+  it('leaves out event costumes (the isCostume flag) and says which', () => {
+    const pikachu = formsTemplate(25, 'PIKACHU', ['PIKACHU_NORMAL', ['PIKACHU_FALL_2019', true], 'PIKACHU_COPY_2019', ['PIKACHU_VS_2019', true]]);
+    const result = catalog([species(25, 'Pikachu', ['Electric'])], [pikachu]);
+    expect(codes(result, 25)).toEqual(['COPY_2019']); // not flagged by the game master, so it is offered
+    expect(result.report.excludedCostumes).toEqual([
+      { pokemonId: 25, code: 'FALL_2019' },
+      { pokemonId: 25, code: 'VS_2019' },
+    ]);
+  });
+
+  it('keeps Armored Mewtwo although the game master flags it a costume, and says so', () => {
+    expect(COSTUME_FORMS_KEPT_AS_FORMS.get(150)).toEqual(new Set(['A']));
+    const result = catalog([MEWTWO], [formsTemplate(150, 'MEWTWO', ['MEWTWO_NORMAL', ['MEWTWO_A', true]])]);
+    expect(result.report.keptCostumes).toEqual([{ pokemonId: 150, code: 'A' }]);
+    expect(result.report.excludedCostumes).toEqual([]);
+  });
+
+  it('throws when a kept costume is no longer a flagged form, so the table cannot go stale', () => {
+    expect(() => catalog([MEWTWO], [formsTemplate(150, 'MEWTWO', ['MEWTWO_NORMAL', 'MEWTWO_A'])])).toThrow(/COSTUME_FORMS_KEPT_AS_FORMS/);
+    expect(() => catalog([MEWTWO], [formsTemplate(150, 'MEWTWO', ['MEWTWO_NORMAL', 'MEWTWO_B'])])).toThrow(/COSTUME_FORMS_KEPT_AS_FORMS/);
+  });
+
+  it('leaves out the shadow marker and _SHADOW / _PURIFIED codes, but not a form that merely contains the word', () => {
+    expect(SHADOW_MARKER_CODES).toEqual(new Set(['S']));
+    const raikou = formsTemplate(243, 'RAIKOU', ['RAIKOU_NORMAL', 'RAIKOU_S']);
+    const mon = formsTemplate(10, 'CATERPIE', ['CATERPIE_NORMAL', 'CATERPIE_SHADOW', 'CATERPIE_PURIFIED']);
+    const calyrex = formsTemplate(898, 'CALYREX', ['CALYREX_NORMAL', 'CALYREX_ICE_RIDER', 'CALYREX_SHADOW_RIDER']);
+    const unown = formsTemplate(201, 'UNOWN', ['UNOWN_A', 'UNOWN_S']);
+    const result = catalog(
+      [species(10, 'Caterpie', ['Bug']), species(201, 'Unown', ['Psychic']), species(243, 'Raikou', ['Electric']), species(898, 'Calyrex', ['Psychic', 'Grass'])],
+      [raikou, mon, calyrex, unown],
+      ['pm201.fUNOWN_A.icon.png', 'pm201.fUNOWN_S.icon.png'], // the art is what says Unown keeps its prefix
+    );
+    expect(result.entries.map((e) => e.pokemonId)).toEqual([201, 898]); // Caterpie and Raikou have nothing left
+    expect(codes(result, 898)).toEqual(['ICE_RIDER', 'SHADOW_RIDER']);
+    expect(codes(result, 201)).toEqual(['UNOWN_S']); // a letter, with its species prefix: not the marker
+    expect(result.report.excludedStatus).toEqual([
+      { pokemonId: 10, code: 'SHADOW' },
+      { pokemonId: 10, code: 'PURIFIED' },
+      { pokemonId: 243, code: 'S' },
+    ]);
+  });
+
+  it('never offers Mega, Primal or Gigantamax: they are not in the form lists', () => {
+    // Charizard's real list is [NORMAL, COPY_2019]; Mega X/Y exist only as tempEvoOverrides.
+    const result = catalog([CHARIZARD_ROW], CHARIZARD, ['pm6.fMEGA_X.icon.png', 'pm6.fGIGANTAMAX.icon.png']);
+    expect(result.entries).toEqual([]);
+  });
+
+  it('offers a form once when two game master forms collapse to one spelling', () => {
+    const gastrodon = formsTemplate(423, 'GASTRODON', ['GASTRODON_WEST_SEA', 'GASTRODON_EAST_SEA', 'EAST_SEA']);
+    expect(codes(catalog([species(423, 'Gastrodon', ['Water', 'Ground'])], [gastrodon], ['pm423.fEAST_SEA.icon.png']), 423)).toEqual(['EAST_SEA']);
+  });
+
+  it('skips species with no list, one form, or nothing selectable, and counts those with several', () => {
+    const result = catalog(
+      [VULPIX_ROW, CHARIZARD_ROW, species(1, 'Bulbasaur', ['Grass', 'Poison']), species(5, 'Charmeleon', ['Fire'])],
+      [...VULPIX, formsTemplate(1, 'BULBASAUR', ['BULBASAUR_NORMAL'])],
+    );
+    expect(result.entries.map((e) => e.pokemonId)).toEqual([37]);
+    expect(result.report.speciesWithSeveralForms).toBe(1);
+  });
+
+  it('flags a spelling with no sprite art as unconfirmed, and keeps it', () => {
+    const silvally = formsTemplate(773, 'SILVALLY', ['SILVALLY_NORMAL', 'SILVALLY_FIRE']);
+    expect(catalog([species(773, 'Silvally', ['Normal'])], [silvally]).entries[0].forms).toEqual([{ code: 'FIRE', confirmed: false }]);
+  });
+
+  it('puts species in id order whatever order the lists arrive in', () => {
+    const result = catalog([VULPIX_ROW, ZACIAN_ROW], [...ZACIAN, ...VULPIX], ['pm37.fALOLA.icon.png']);
+    expect(result.entries.map((e) => e.pokemonId)).toEqual([37, 888]);
+  });
+});
+
+describe('buildPokedexData and the form catalog', () => {
+  it('refuses a species whose form list and species template disagree about the enum', () => {
+    const templates = [pokemonTemplate(37, 'VULPIX', undefined, ['Fire']), formsTemplate(37, 'NINETALES', ['NINETALES_NORMAL'])];
+    expect(() =>
+      buildPokedexData({
+        species: [VULPIX_ROW],
+        gameMaster: parseGameMaster(templates),
+        gameMasterForms: parseGameMasterForms(templates),
+        assetTokens: new Map(),
+        baseFormCodes: {},
+      }),
+    ).toThrow(/form list says NINETALES but the species template says VULPIX/);
+  });
+
+  it('is consistent with the override table: a typed non-Mega form is offered, so its typing is reachable', () => {
+    const templates = [...VULPIX, ...ZACIAN];
+    const data = buildPokedexData({
+      species: [VULPIX_ROW, ZACIAN_ROW],
+      gameMaster: parseGameMaster(templates),
+      gameMasterForms: parseGameMasterForms(templates),
+      assetTokens: parseAssetFormTokens(['pm37.fALOLA.icon.png', 'pm888.fCROWNED_SWORD.icon.png']),
+      baseFormCodes: {},
+    });
+    for (const o of data.overrides) {
+      expect(data.forms.find((e) => e.pokemonId === o.pokemonId)?.forms.map((f) => f.code), `${o.pokemonId}:${o.formCode}`).toContain(o.formCode);
+    }
+  });
+
+  it('reads BASE_FORM_CODES from a leaf module: the generator must run even when the generated data is stale', () => {
+    const source = readFileSync(path.resolve(__dirname, '..', 'constants', 'base-form-codes.ts'), 'utf8');
+    expect(source).not.toMatch(/^\s*import\b/m);
+    expect(BASE_FORM_CODES[201]).toBe('UNOWN_A');
+  });
+});
+
 // ——— output ———
 
 describe('renderDataFile', () => {
   const provenance: Provenance = {
-    pokeApi: 'PokeAPI/pokeapi@aaa',
-    gameMaster: 'PokeMiners/game_masters@bbb',
-    spriteAssets: 'PokeMiners/pogo_assets@ccc',
+    pokeApi: `PokeAPI/pokeapi@${'a'.repeat(40)}`,
+    gameMaster: `PokeMiners/game_masters@${'b'.repeat(40)}`,
+    spriteAssets: `PokeMiners/pogo_assets@${'c'.repeat(40)}`,
   };
   const text = (rows: SpeciesRow[], templates: GameMasterTemplate[], files: string[] = []) =>
     renderDataFile(
-      buildPokedexData({ species: rows, gameMaster: parseGameMaster(templates), assetTokens: parseAssetFormTokens(files) }),
+      buildPokedexData({
+        species: rows,
+        gameMaster: parseGameMaster(templates),
+        gameMasterForms: parseGameMasterForms(templates),
+        assetTokens: parseAssetFormTokens(files),
+        baseFormCodes: {},
+      }),
       provenance,
     );
 
@@ -459,6 +692,43 @@ describe('renderDataFile', () => {
     expect(out).toContain("[773, 'FIRE', ['Fire']], // spelling unconfirmed");
     expect(out).toContain('The game master has typing for 1; not for #902 Basculegion');
     expect(out).toContain('1 are marked "spelling unconfirmed"');
+  });
+
+  it('writes the form catalog and the named defaults, and documents the rules in the header', () => {
+    const out = text([species(150, 'Mewtwo', ['Psychic']), PALKIA_ROW, ZACIAN_ROW], [
+      ...ZACIAN,
+      formsTemplate(484, 'PALKIA', ['PALKIA_NORMAL', 'PALKIA_ORIGIN']),
+      formsTemplate(150, 'MEWTWO', ['MEWTWO_NORMAL', ['MEWTWO_A', true]]),
+    ], ['pm484.fORIGIN.icon.png', 'pm888.fCROWNED_SWORD.icon.png', 'pm150.fA.icon.png']);
+    expect(out).toContain('export const POKEDEX_FORMS: readonly (readonly [pokemonId: number, formCodes: readonly string[]])[] = [\n');
+    expect(out).toContain("  [150, ['A']],\n  [484, ['ORIGIN']],\n  [888, ['CROWNED_SWORD']],\n];");
+    expect(out).toContain('export const POKEDEX_DEFAULT_FORMS: readonly (readonly [pokemonId: number, formCode: string])[] = [\n  [888, \'HERO\'],\n];');
+    expect(out).toContain('3 selectable forms on 3 species in POKEDEX_FORMS');
+    expect(out).toContain('kept as forms: #150 A');
+    expect(out).toContain('isCostume');
+  });
+
+  it('wraps a long row without losing a code, and says when every spelling is unconfirmed', () => {
+    const types = ['FIGHTING', 'FLYING', 'POISON', 'GROUND', 'ROCK', 'BUG', 'GHOST', 'STEEL', 'FIRE', 'WATER', 'GRASS', 'ELECTRIC', 'PSYCHIC', 'ICE', 'DRAGON', 'DARK', 'FAIRY'];
+    const silvally = formsTemplate(773, 'SILVALLY', ['SILVALLY_NORMAL', ...types.map((t) => `SILVALLY_${t}`)]);
+    const out = text([species(773, 'Silvally', ['Normal'])], [silvally]);
+    const start = out.indexOf('POKEDEX_FORMS: ');
+    const block = out.slice(out.indexOf('= [\n', start), out.indexOf('];', start));
+    expect(block.split('\n').length).toBeGreaterThan(3); // wrapped
+    expect(block.split('\n').every((line) => line.length <= 140)).toBe(true);
+    for (const type of types) expect(block).toContain(`'${type}'`);
+    expect(block).toContain(']], // spelling unconfirmed: all');
+  });
+
+  it('lists only the unconfirmed codes of a row that has some art', () => {
+    const deerling = formsTemplate(585, 'DEERLING', ['DEERLING_SPRING', 'DEERLING_SUMMER', 'DEERLING_AUTUMN', 'DEERLING_WINTER']);
+    const out = text([species(585, 'Deerling', ['Normal', 'Grass'])], [deerling], ['pm585.fSUMMER.icon.png']);
+    expect(out).toContain("  [585, ['SUMMER', 'AUTUMN', 'WINTER']], // spelling unconfirmed: AUTUMN, WINTER\n");
+  });
+
+  it('round-trips its provenance, so --pinned can read the commits back', () => {
+    expect(parseProvenance(text([VULPIX_ROW], VULPIX))).toEqual(provenance);
+    expect(parseProvenance('// no provenance here')).toBeNull();
   });
 
   it('escapes quotes and backslashes in names but leaves a curly apostrophe alone', () => {

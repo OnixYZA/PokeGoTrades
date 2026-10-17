@@ -264,7 +264,6 @@ function listingOf(row: Row): Listing {
     hue: 0,
     pokemonId: row.pokemon_id,
     ...(row.form_code ? { formCode: row.form_code } : {}),
-    form: 'Normal',
     year: 2026,
     lucky: false,
     shiny: false,

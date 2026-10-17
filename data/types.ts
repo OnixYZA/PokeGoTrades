@@ -30,9 +30,14 @@ export interface CreatureRef {
   pokemonId: number;
   shiny?: boolean;
   lucky?: boolean;
-  /** PokeMiners sprite form code (`lib/sprite-url.ts` `spriteObjectKey`'s `.f{FORM}` layer), matching
-   *  `[A-Z0-9_]+` (e.g. `'CROWNED_SWORD'`, `'ALOLA'`). Distinct from `Listing.form`, which is free
-   *  display text like `'Crowned Sword'`. `null`/absent means the base species sprite. */
+  /** The creature's form, as a PokeMiners form code (`lib/sprite-url.ts` `spriteObjectKey`'s `.f{FORM}` layer),
+   *  matching `[A-Z0-9_]+` (e.g. `'CROWNED_SWORD'`, `'ALOLA'`). `null`/absent means the species' default form
+   *  (and the base species sprite).
+   *
+   *  This is the ONLY representation of a form, on a `Listing` as on a looking-for entry or an offer: there is no
+   *  separate display string to drift from it (a listing used to carry free text `form` beside this, and the two
+   *  disagreed). Show it through `creatureFormLabel` (`lib/format.ts`), never by printing the code. A form the
+   *  code table has no code for ("Apex") therefore cannot be stated at all, by design. */
   formCode?: string | null;
   /** PokeMiners sprite costume code (`spriteObjectKey`'s `.c{COSTUME}` layer), same `[A-Z0-9_]+` shape
    *  as `formCode` (e.g. `'JAN_2020_NOEVOLVE'`). Distinct from `Listing.costume`, which is only a
@@ -45,7 +50,6 @@ export type ListingStatus = 'open' | 'locked' | 'completed' | 'withdrawn';
 
 export interface Listing extends CreatureRef {
   id: string;
-  form: string;
   year: number;
   lucky: boolean;
   shiny: boolean;

@@ -124,7 +124,7 @@ export function listingErrorMessage(error: unknown): string {
  * reads 'NEW' live) in favor of the `pokemon_market_demand` view, fetched separately in `lib/use-feed.ts`.
  */
 const LISTING_COLUMNS =
-  'id, seller_id, status, name, pokemon_id, form, form_code, costume_code, catch_year, lucky, shiny, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
+  'id, seller_id, status, name, pokemon_id, form_code, costume_code, catch_year, lucky, shiny, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
 
 function selectListings() {
   return supabase.from('listings').select(LISTING_COLUMNS);
@@ -154,7 +154,6 @@ export function toListing(row: ListingRow): Listing {
     status: row.status,
     name: row.name,
     pokemonId: row.pokemon_id,
-    form: row.form,
     ...(row.form_code ? { formCode: row.form_code } : {}),
     ...(row.costume_code ? { costumeCode: row.costume_code } : {}),
     year: row.catch_year,
@@ -272,6 +271,13 @@ export async function fetchListingsByIds(ids: string[]): Promise<Listing[]> {
  * `sizeClass` is likewise absent on purpose: it is service-role only (migration …000100's comment on
  * `listings.size_class`), so a trainer never supplies it — it is always `null` until a future OCR pass
  * fills it in server-side.
+ *
+ * `formCode` is the listing's form and the ONLY way to state one (`CreatureRef.formCode`: omitted or `null` is
+ * the species' default form). There is no free-text `form` input, and the client never reads or writes the
+ * `listings.form` column, which migration …000300_drop_listings_form removes: a form is a code the sprite
+ * bucket, the type filter and the display label all resolve, so a string only one of them understood could
+ * not be allowed to exist. `formCode` rides in the `Pick` (rather than being re-declared) so it keeps
+ * `CreatureRef`'s exact type and cannot drift from what `toListing` hands back.
  */
 export type NewListingInput = Pick<
   Listing,
@@ -279,7 +285,7 @@ export type NewListingInput = Pick<
   | 'name'
   | 'pokemonId'
   | 'hue'
-  | 'form'
+  | 'formCode'
   | 'year'
   | 'shiny'
   | 'accent'
@@ -301,12 +307,16 @@ export type NewListingInput = Pick<
 /** Every granted column except `id`, so the same object serves both the insert and the retry update.
  *  `name` is the dex's name for `pokemonId` (`speciesName`), not the caller's string, for the same reason
  *  `creatureRefToJson` does it for `looking[]`: the column holds the species and nothing else — "Shiny",
- *  "Purified", a form or a year each have a column of their own (`shiny`, `purified`, `form`, `catch_year`). */
+ *  "Purified", a form or a year each have a column of their own (`shiny`, `purified`, `form_code`, `catch_year`).
+ *
+ *  `form_code` is written as an explicit `null` for the default form rather than left out: the retry update
+ *  re-applies THESE fields to a row an earlier, partly failed attempt already created, so omitting the key
+ *  would leave that attempt's form on the row after the trainer went back to the default. */
 function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
   return {
     name: speciesName(input),
     pokemon_id: input.pokemonId,
-    form: input.form,
+    form_code: input.formCode ?? null,
     catch_year: input.year,
     shiny: input.shiny,
     hue: input.hue,
