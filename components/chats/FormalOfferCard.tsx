@@ -2,14 +2,16 @@ import { ChevronRight } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 
 import { Chip } from '@/components/ui/Chip';
+import { TypeBadge } from '@/components/ui/TypeBadge';
+import { typesOf } from '@/constants/pokedex';
 import { formalOffer } from '@/data/chats';
 import type { FormalOffer } from '@/data/types';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, describeTypes } from '@/lib/format';
 import type { OfferAvailability, OfferBlock } from '@/store/offer-state';
 
 /** The server says whether an offer is lucky/shiny. The mock offers predate those fields and were
- *  always drawn with the lucky sparkle, so the mock keeps doing that. Shared with the Trade Summary. */
+ *  always drawn lucky (the gold "L"), so the mock keeps doing that. Shared with the Trade Summary. */
 export function isOfferLucky(offer: FormalOffer): boolean {
   return USE_SUPABASE ? offer.lucky === true : true;
 }
@@ -37,7 +39,12 @@ export function FormalOfferCard({ offer = formalOffer, availability, onPress }: 
   const block = availability?.block ?? null;
   const tag = ended && block ? ENDED_TAG[block] : undefined;
   const name = creatureDisplayName(offer);
-  const label = interactive ? `Review formal offer: ${name}` : `Formal offer: ${name}${tag ? `, ${tag.toLowerCase()}` : ''}`;
+  const formLabel = creatureFormLabel(offer);
+  const types = typesOf(offer);
+  // The label replaces the card's content for a screen reader, so the form and types have to be in it.
+  const identity = formLabel ? `${name}, ${formLabel}` : name;
+  const described = types ? `${identity}, ${describeTypes(types)}` : identity;
+  const label = interactive ? `Review formal offer: ${described}` : `Formal offer: ${described}${tag ? `, ${tag.toLowerCase()}` : ''}`;
 
   return (
     <Pressable
@@ -80,8 +87,10 @@ export function FormalOfferCard({ offer = formalOffer, availability, onPress }: 
           >
             {name}
           </Text>
+          {/* Inside the card, so a dead offer's dimming (`opacity`) covers the pills along with the rest. */}
+          <TypeBadge types={types} size="sm" style={{ marginVertical: 3 }} />
           <Text className="font-mono" style={{ fontSize: 10, color: '#94a3b8' }}>
-            {[offer.move, offer.iv].filter(Boolean).join(' · ') || 'Awaiting details'}
+            {[formLabel, offer.move, offer.iv].filter(Boolean).join(' · ') || 'Awaiting details'}
           </Text>
         </View>
       </View>

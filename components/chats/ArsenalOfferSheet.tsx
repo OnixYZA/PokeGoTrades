@@ -9,7 +9,7 @@ import { trainer } from '@/data/trainer';
 import type { CreatureRef } from '@/data/types';
 import { fetchMyArsenal } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
 
 interface ArsenalOfferSheetProps {
   onSelect: (creature: CreatureRef) => void;
@@ -83,9 +83,11 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
               {emptyText}
             </Text>
           ) : null}
-          {offerable.map((creature) => (
+          {offerable.map((creature, index) => (
             <Pressable
-              key={creature.name}
+              // Position, not name: the Arsenal may hold the same species twice (a shiny and a regular), and
+              // the name is the dex species either way. The list is fixed while the sheet is open.
+              key={index}
               onPress={() => onSelect(creature)}
               accessibilityRole="button"
               accessibilityLabel={`Offer ${creatureDisplayName(creature)}`}
@@ -97,7 +99,7 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
                   {creatureDisplayName(creature)}
                 </Text>
                 <Text className="font-mono text-text-subtle" style={{ fontSize: 10, letterSpacing: 0.5 }}>
-                  TAP TO OFFER
+                  {[creatureFormLabel(creature)?.toUpperCase(), 'TAP TO OFFER'].filter(Boolean).join(' · ')}
                 </Text>
               </View>
               <Send size={16} color="#4fb3ff" />

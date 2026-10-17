@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { EqualGrid } from '@/components/ui/EqualGrid';
 import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
+import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { RemoveCreatureButton } from '@/components/profile/RemoveCreatureButton';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import { creatureDisplayName } from '@/lib/format';
@@ -49,7 +50,7 @@ export function ArsenalGrid({ arsenal, onEdit, onRemove }: ArsenalGridProps) {
         renderItem={(entry) => (
           <View className="relative items-center gap-2 overflow-hidden rounded-2xl border border-border bg-bg-card p-2.5">
             <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(entry.creature.hue)]} />
-            {/* A lucky entry shows both the Chip's small gold "L" and this tile's "✦ LUCKY" caption below. */}
+            {/* A lucky entry shows both the Chip's small gold "L" and this tile's clover "LUCKY" caption below. */}
             <Chip creature={entry.creature} size={52} />
             {/* numberOfLines: 3 narrow columns (Task 1) + the "Shiny " prefix means a name like "Shiny
              *  Crabominable" needs to wrap — capped at 2 lines so a long one still fits its tile instead
@@ -62,9 +63,12 @@ export function ArsenalGrid({ arsenal, onEdit, onRemove }: ArsenalGridProps) {
               {creatureDisplayName(entry.creature)}
             </Text>
             {entry.creature.lucky && (
-              <Text className="font-display" style={{ fontSize: 8, letterSpacing: 0.9, color: '#f5c518' }}>
-                ✦ LUCKY
-              </Text>
+              <View className="flex-row items-center gap-0.5">
+                <LuckyClover size={9} color="#f5c518" />
+                <Text className="font-display" style={{ fontSize: 8, letterSpacing: 0.9, color: '#f5c518' }}>
+                  LUCKY
+                </Text>
+              </View>
             )}
             {/* Top-right: the Chip is centered and narrower than the tile, so that corner is clear of it
              *  and of the (centered) name below. Last child, so it paints and hit-tests above the rest. */}

@@ -5,7 +5,10 @@
  * compiles the same `FilterSpec` into a PostgREST query. Those two — `matchesFilter` here and
  * `applyFilterSpec` there — implement the same filter semantics on two different engines and MUST be
  * kept in sync; a change to one without the other means the mock feed and the live feed disagree
- * about what a chip means.
+ * about what a chip means. The semantics themselves are written down once, in the FILTER SEMANTICS block
+ * of constants/listing-attributes.ts; the type filter, the one chip family that cannot be a plain column
+ * comparison, has its PostgREST compiler (and the parity test that pins it to `matchesFilter`) in
+ * `lib/api/type-filter.ts`.
  */
 // Relative import, not the `@/` alias: this keeps the module resolvable from `vitest.config.ts`'s
 // minimal config (no bundler-alias plugin — see its own comment), same as every other value this
@@ -17,6 +20,7 @@ import {
   type FilterKey,
   type ListingTag,
 } from '../constants/listing-attributes';
+import { creatureHasType, type PokemonType } from '../constants/pokedex';
 import type { Listing } from '@/data/types';
 
 // Re-exported: everywhere else in the app that needs a filter key (the store, the future filter-chip
@@ -43,6 +47,15 @@ export interface FilterSpec {
   /** column -> values an *excluded* chip rules out. A NULL column value always still matches — an
    *  absent size is not "size XXL", so excluding XXL must not hide it. */
   enumNotIn: Partial<Record<FilterEnumField, string[]>>;
+  /** A listing must have AT LEAST ONE of these types (OR: including Fire and Water shows Fire or Water
+   *  listings, as with an enum group). "Has" = in either the primary or the secondary slot of the
+   *  creature's form-aware typing (`creatureHasType`). Empty = no constraint. The PostgREST side compiles
+   *  it from `typeMembership` (lib/api/type-filter.ts), because `listings` has no types column. */
+  typesAny: PokemonType[];
+  /** A listing must have NONE of these types. Applies together with `typesAny` (AND). A creature with no
+   *  known typing (an id outside the dex) is never dropped: like a NULL enum value, "no type" is not an
+   *  excluded type. */
+  typesNone: PokemonType[];
 }
 
 const CYCLE_NEXT: Record<'none' | FilterMode, FilterMode | 'none'> = {
@@ -60,7 +73,7 @@ export function cycleFilter(state: FilterState, key: FilterKey): FilterState {
 }
 
 function emptySpec(): FilterSpec {
-  return { flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {} };
+  return { flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {}, typesAny: [], typesNone: [] };
 }
 
 /**
@@ -77,6 +90,8 @@ export function compileFilter(state: FilterState): FilterSpec {
       spec.flags[attr.column] = mode === 'include';
     } else if (attr.kind === 'tag') {
       (mode === 'include' ? spec.tagsAll : spec.tagsNone).push(attr.tag);
+    } else if (attr.kind === 'type') {
+      (mode === 'include' ? spec.typesAny : spec.typesNone).push(attr.pokemonType);
     } else {
       const bucket = mode === 'include' ? spec.enumIn : spec.enumNotIn;
       (bucket[attr.column] ??= []).push(attr.value);
@@ -108,6 +123,12 @@ export function matchesFilter(listing: Listing, spec: FilterSpec): boolean {
     if (value !== null && spec.enumNotIn[column]!.includes(value)) return false;
   }
 
+  // Types are per (pokemonId, formCode), so ask the dex rather than a listing column. A creature the dex
+  // doesn't know has no types: `creatureHasType` is false for every type, so it fails any include and
+  // survives any exclude.
+  if (spec.typesAny.length > 0 && !spec.typesAny.some((type) => creatureHasType(listing, type))) return false;
+  for (const type of spec.typesNone) if (creatureHasType(listing, type)) return false;
+
   return true;
 }
 
@@ -128,5 +149,13 @@ export function filterKey(spec: FilterSpec): string {
   const enumNotIn = Object.keys(spec.enumNotIn)
     .sort()
     .map((column) => `${column}:notin:${[...spec.enumNotIn[column as FilterEnumField]!].sort().join(',')}`);
-  return JSON.stringify([flags, [...spec.tagsAll].sort(), [...spec.tagsNone].sort(), enumIn, enumNotIn]);
+  return JSON.stringify([
+    flags,
+    [...spec.tagsAll].sort(),
+    [...spec.tagsNone].sort(),
+    enumIn,
+    enumNotIn,
+    [...spec.typesAny].sort(),
+    [...spec.typesNone].sort(),
+  ]);
 }

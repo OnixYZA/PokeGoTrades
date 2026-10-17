@@ -12,7 +12,9 @@ import {
 import type { FilterSpec } from '@/store/listing-filters';
 import type { BackgroundHint, Listing, TradeType } from '@/data/types';
 import { creatureRefToJson, parseCreatureRefs } from '@/lib/api/creature-ref';
+import { applyTypeFilter } from '@/lib/api/type-filter';
 import type { Database } from '@/lib/database.types';
+import { speciesName } from '@/lib/format';
 import { describeError } from '@/lib/rpc-errors';
 import { supabase } from '@/lib/supabase';
 
@@ -227,6 +229,11 @@ export function applyFilterSpec(query: ListingsQuery, spec: FilterSpec): Listing
     query.or(`${column}.is.null,${column}.not.in.(${spec.enumNotIn[field]!.join(',')})`);
   }
 
+  // Types are not a `listings` column (they derive from pokemon_id + form_code), so they compile to filters
+  // on those two columns; the clause builder is pure and lives in lib/api/type-filter.ts, where a test
+  // proves it agrees with `matchesFilter` for every creature in the dex.
+  applyTypeFilter(query, spec.typesAny, spec.typesNone);
+
   return query;
 }
 
@@ -291,10 +298,13 @@ export type NewListingInput = Pick<
   notes?: string;
 };
 
-/** Every granted column except `id`, so the same object serves both the insert and the retry update. */
+/** Every granted column except `id`, so the same object serves both the insert and the retry update.
+ *  `name` is the dex's name for `pokemonId` (`speciesName`), not the caller's string, for the same reason
+ *  `creatureRefToJson` does it for `looking[]`: the column holds the species and nothing else — "Shiny",
+ *  "Purified", a form or a year each have a column of their own (`shiny`, `purified`, `form`, `catch_year`). */
 function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
   return {
-    name: input.name,
+    name: speciesName(input),
     pokemon_id: input.pokemonId,
     form: input.form,
     catch_year: input.year,

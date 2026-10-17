@@ -6,11 +6,13 @@
  * pair; a drift between the copies (one of them forgetting to carry `formCode` through, say) would
  * silently drop sprite form data on some paths but not others. This is now the one place.
  *
- * Type-only, RELATIVE imports only (no `@/` alias): loaded directly by vitest, the same constraint
- * `lib/sprite-url.ts`'s header comment explains for the mirror script.
+ * RELATIVE imports only (no `@/` alias): loaded directly by vitest, the same constraint
+ * `lib/sprite-url.ts`'s header comment explains for the mirror script. Everything imported at runtime
+ * (`../format` -> `../../constants/pokedex`) is plain TypeScript with relative imports of its own.
  */
 import type { Json } from '../database.types';
 import type { CreatureRef } from '../../data/types';
+import { speciesName } from '../format';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -73,10 +75,17 @@ export function parseCreatureRefs(value: Json | unknown): CreatureRef[] {
  * `formCode`/`costumeCode` omitted — never sent as an explicit JSON `null` — when the ref doesn't carry
  * one, since the check constraint rejects a literal `null` for either key (see `data/types.ts`'s
  * `CreatureRef.formCode` comment).
+ *
+ * The written `name` is `speciesName(ref)` — the dex's name for `pokemonId` — never the caller's string.
+ * This is the one choke point every creature jsonb passes through on its way to Supabase (a listing's
+ * `looking[]`, an Arsenal / Wishlist row, an offer's creature), so no caller, present or future, can write
+ * "Sh. Mewtwo" or "Legacy Dnite" into a row, however it came by the string (e.g. a `CreatureRef` read back
+ * from an older, polluted row and re-sent as an offer). It is the write-side twin of `creatureDisplayName`:
+ * attributes belong in the structured keys (`shiny`, `lucky`, `formCode`, ...), the name is only the species.
  */
 export function creatureRefToJson(ref: CreatureRef): JsonObject {
   return {
-    name: ref.name,
+    name: speciesName(ref),
     pokemonId: ref.pokemonId,
     hue: ref.hue,
     ...(ref.shiny ? { shiny: true } : {}),

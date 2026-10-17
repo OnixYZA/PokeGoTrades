@@ -75,6 +75,14 @@ update public.profiles set trades_count = 214 where id = 'a0000000-0000-4000-800
 -- pokemon_id is the true national dex id everywhere below; a form with no PokeMiners sprite code
 -- yet (e.g. 'Apex') leaves form_code null and falls back to the base-species sprite (see the
 -- ...000500_creature_form_codes migration header for why 'Apex' specifically stays unmapped).
+--
+-- Every `name` below (the listing's own and each looking[] entry) is the DEX name for its pokemon_id
+-- (constants/pokedex.ts) and nothing else: "Shiny", "Legacy", "Purified", a form or "Apex" are never typed
+-- into it. Those live in their own columns/keys (shiny, purified, costume, form, formCode, tags), and the
+-- client derives the displayed name from pokemon_id anyway (lib/format.ts `creatureDisplayName`), so a name
+-- that disagrees with the dex is dead text at best. Where a listing's name used to carry a fact that has a
+-- column, it is set below (`purified`, `costume`); a fact with no home (a looking[] entry's "Purified",
+-- "Legacy" or "Apex") is simply not representable on a wanted creature.
 insert into public.listings (
   id, seller_id, name, pokemon_id, form, form_code, catch_year, lucky, shiny, hue, accent, bg, loc,
   pvp_rank, demand_rank, trade_type, iv_atk, iv_def, iv_sta, looking) values
@@ -82,43 +90,52 @@ insert into public.listings (
    'Zacian', 888, 'Crowned Sword', 'CROWNED_SWORD', 2020, true, true, 260, '#c9a6ff', 'meta', 'Adyar',
    'S+', '#1', 'Unregistered (Shiny/Legendary)', 15, 15, 14,
    '[{"name":"Zamazenta","pokemonId":889,"hue":340,"shiny":true},
-     {"name":"Purified Apex Lugia","pokemonId":249,"hue":25},
-     {"name":"Legacy Mewtwo","pokemonId":150,"hue":220,"lucky":true}]'::jsonb),
+     {"name":"Lugia","pokemonId":249,"hue":25},
+     {"name":"Mewtwo","pokemonId":150,"hue":220,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000003',
-   'Armored Mewtwo', 150, 'Genesis Armor', 'A', 2019, true, false, 210, '#7fd4ff', 'legacy', 'Adyar',
+   'Mewtwo', 150, 'Genesis Armor', 'A', 2019, true, false, 210, '#7fd4ff', 'legacy', 'Adyar',
    'A', '#4', 'Special (Shiny/Legendary) Registered', 14, 15, 15,
-   '[{"name":"Legacy Dragonite","pokemonId":149,"hue":340},
-     {"name":"Purified Ho-Oh","pokemonId":250,"hue":25},
-     {"name":"Giratina O.","pokemonId":487,"formCode":"ORIGIN","hue":220,"shiny":true,"lucky":true}]'::jsonb),
+   '[{"name":"Dragonite","pokemonId":149,"hue":340},
+     {"name":"Ho-Oh","pokemonId":250,"hue":25},
+     {"name":"Giratina","pokemonId":487,"formCode":"ORIGIN","hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000004',
    'Rayquaza', 384, 'Standard', null, 2023, false, true, 145, '#7dffb3', 'shiny', 'Adyar',
    'S', '#2', 'Special (Shiny/Legendary) Registered', 15, 15, 15,
    '[{"name":"Kyogre","pokemonId":382,"hue":340,"shiny":true},
      {"name":"Groudon","pokemonId":383,"hue":25,"shiny":true},
-     {"name":"Origin Palkia","pokemonId":484,"formCode":"ORIGIN","hue":220,"lucky":true}]'::jsonb),
+     {"name":"Palkia","pokemonId":484,"formCode":"ORIGIN","hue":220,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000005',
-   'Purified Ho-Oh', 250, 'Standard', null, 2022, false, false, 25, '#ffb37a', 'meta', 'East Tambaram',
+   'Ho-Oh', 250, 'Standard', null, 2022, false, false, 25, '#ffb37a', 'meta', 'East Tambaram',
    'A+', '#7', 'Unregistered (Shiny/Legendary)', 14, 14, 15,
-   '[{"name":"Purified Lugia","pokemonId":249,"hue":340},
-     {"name":"Mega Rayquaza IV","pokemonId":384,"formCode":"MEGA","hue":25},
+   '[{"name":"Lugia","pokemonId":249,"hue":340},
+     {"name":"Rayquaza","pokemonId":384,"formCode":"MEGA","hue":25},
      {"name":"Entei","pokemonId":244,"hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000005', 'a0000000-0000-4000-8000-000000000006',
    'Metagross', 376, 'Frostmoves', null, 2018, true, true, 195, '#a3e8ff', 'meta', 'East Tambaram',
    'S', '#3', 'Special (Shiny/Legendary) Registered', 15, 13, 15,
-   '[{"name":"Beldum Comm.","pokemonId":374,"hue":340,"shiny":true},
+   '[{"name":"Beldum","pokemonId":374,"hue":340,"shiny":true},
      {"name":"Larvitar","pokemonId":246,"hue":25,"shiny":true},
      {"name":"Bagon","pokemonId":371,"hue":220,"shiny":true,"lucky":true}]'::jsonb),
 
   ('b0000000-0000-4000-8000-000000000006', 'a0000000-0000-4000-8000-000000000007',
-   'Purified Apex Lugia', 249, 'Apex', null, 2024, false, false, 285, '#d4b0ff', 'legacy', 'Velachery',
+   'Lugia', 249, 'Apex', null, 2024, false, false, 285, '#d4b0ff', 'legacy', 'Velachery',
    'A', '#5', 'Unregistered (Shiny/Legendary)', 15, 15, 15,
-   '[{"name":"Purified Apex Ho-Oh","pokemonId":250,"hue":340},
-     {"name":"Primal Groudon","pokemonId":383,"formCode":"PRIMAL","hue":25},
+   '[{"name":"Ho-Oh","pokemonId":250,"hue":340},
+     {"name":"Groudon","pokemonId":383,"formCode":"PRIMAL","hue":25},
      {"name":"Melmetal","pokemonId":809,"hue":220,"shiny":true,"lucky":true}]'::jsonb);
+
+-- The attributes data/listings.ts sets that the INSERT above leaves at their column defaults, and that
+-- the three listing names used to say in prose: l2 "Armored Mewtwo" (a costume), l4 "Purified Ho-Oh" and
+-- l6 "Purified Apex Lugia" (purified). Set here, before any chat exists, because purified / costume freeze
+-- once a chat does (…000100_listing_attributes). The other mock attributes (tags, pokeball, timeline, ...)
+-- are not seeded; that gap predates this.
+update public.listings set costume  = true where id = 'b0000000-0000-4000-8000-000000000002';
+update public.listings set purified = true where id in ('b0000000-0000-4000-8000-000000000004',
+                                                         'b0000000-0000-4000-8000-000000000006');
 
 -- ============================================================================================
 -- 3. Chats  ids: c0000000-0000-4000-8000-00000000000N
@@ -176,7 +193,7 @@ select m.chat_id, case m.role when 'me' then c.seller_id else c.buyer_id end, 't
     ('c0000000-0000-4000-8000-000000000003'::uuid, 'me',   '10:20', 'Interested. Meet at Adyar signal at 5?'),
     ('c0000000-0000-4000-8000-000000000003'::uuid, 'them', '10:35', 'Willing to throw in 3M stardust bonus'),
     -- c5: DriftCoral is the buyer ('them' = buyer = DriftCoral), GraniteFox the seller ('me')
-    ('c0000000-0000-4000-8000-000000000005'::uuid, 'them', '10:12', 'Hey, is your Armored Mewtwo still up?'),
+    ('c0000000-0000-4000-8000-000000000005'::uuid, 'them', '10:12', 'Hey, is your Mewtwo still up?'),
     ('c0000000-0000-4000-8000-000000000005'::uuid, 'me',   '10:14', 'Yep — what are you offering?'),
     ('c0000000-0000-4000-8000-000000000005'::uuid, 'them', '10:17', 'I have a legacy Dragonite with Draco Meteor.'),
     ('c0000000-0000-4000-8000-000000000005'::uuid, 'me',   '10:20', 'Interested. Meet at Adyar signal at 5?')
@@ -212,7 +229,7 @@ begin
     (v_chat, v_buyer,  'text', 'I have a legacy Dragonite with Draco Meteor.',       v_day + interval '10:17');
   insert into public.chat_messages (id, chat_id, sender_id, kind, offer, created_at) values
     (v_offer, v_chat, v_buyer, 'offer',
-     '{"name":"Legacy Dragonite","pokemonId":149,"hue":205,"iv":"96% IV","move":"Draco Meteor"}'::jsonb,
+     '{"name":"Dragonite","pokemonId":149,"hue":205,"iv":"96% IV","move":"Draco Meteor"}'::jsonb,
      v_day + interval '10:18');
   insert into public.chat_messages (chat_id, sender_id, kind, body, created_at) values
     (v_chat, v_seller, 'text', 'Interested. Meet at Adyar signal at 5?',             v_day + interval '10:20');
@@ -234,14 +251,14 @@ end $$;
 -- ============================================================================================
 insert into public.trainer_creatures (owner_id, list, creature, sort_order) values
   ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Rayquaza","pokemonId":384,"hue":145,"shiny":true}', 0),
-  ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Legacy Dnite","pokemonId":149,"hue":205,"lucky":true}', 1),
+  ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Dragonite","pokemonId":149,"hue":205,"lucky":true}', 1),
   ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Metagross","pokemonId":376,"hue":195,"shiny":true}', 2),
-  ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Purified Apex Ho-Oh","pokemonId":250,"hue":25}', 3),
+  ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Ho-Oh","pokemonId":250,"hue":25}', 3),
   ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Mewtwo","pokemonId":150,"hue":275,"shiny":true,"lucky":true}', 4),
   ('a0000000-0000-4000-8000-000000000001', 'arsenal',  '{"name":"Garchomp","pokemonId":445,"hue":220,"shiny":true}', 5),
   ('a0000000-0000-4000-8000-000000000001', 'wishlist', '{"name":"Zamazenta","pokemonId":889,"hue":340,"shiny":true}', 0),
   ('a0000000-0000-4000-8000-000000000001', 'wishlist', '{"name":"Kyogre","pokemonId":382,"hue":210,"shiny":true}', 1),
-  ('a0000000-0000-4000-8000-000000000001', 'wishlist', '{"name":"Purified Apex Lugia","pokemonId":249,"hue":285,"shiny":true}', 2),
+  ('a0000000-0000-4000-8000-000000000001', 'wishlist', '{"name":"Lugia","pokemonId":249,"hue":285,"shiny":true}', 2),
   ('a0000000-0000-4000-8000-000000000001', 'wishlist', '{"name":"Mew","pokemonId":151,"hue":320,"shiny":true}', 3);
 
 -- tradeHistory th1-th4 -> completed_trades with null listing/chat ids. DriftCoral is the seller (seller_gave = `gave`,

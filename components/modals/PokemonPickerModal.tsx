@@ -11,13 +11,14 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ban, Check, Plus, Search, Sparkles, X } from 'lucide-react-native';
+import { Ban, Check, Plus, Search, X } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
+import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { hueBadgeStyle } from '@/constants/theme';
-import { isPokemonUntradable, POKEDEX, searchPokedex, type PokedexEntry } from '@/constants/pokedex';
-import { creatureDisplayName } from '@/lib/format';
+import { formatTypes, isPokemonUntradable, POKEDEX, searchPokedex, type PokedexEntry } from '@/constants/pokedex';
+import { creatureDisplayName, describeTypes } from '@/lib/format';
 import { spriteVariantKey, spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
@@ -186,8 +187,8 @@ function Header({ title, onClose }: { title: string; onClose: () => void }) {
 }
 
 /** Beside the search field, not inside it — the picker's own Shiny toggle (Task 2), independent of the
- *  text query. Pink/✦, the same accent as the shiny badge drawn on `Chip`/`Sprite` (`#ff6bd6`), so a
- *  trainer already reads "pink sparkle = shiny" before ever looking at the label. */
+ *  text query. Its icon is the very `ShinyGlint` drawn on `Chip`/`Sprite`, so a trainer already reads
+ *  "pink sparkle = shiny" before ever looking at the label. */
 function ShinyToggle({ shiny, onToggle }: { shiny: boolean; onToggle: () => void }) {
   return (
     <Pressable
@@ -204,7 +205,7 @@ function ShinyToggle({ shiny, onToggle }: { shiny: boolean; onToggle: () => void
           : { backgroundColor: C.bgCard, borderColor: C.borderDefault }
       }
     >
-      <Sparkles size={15} color={shiny ? '#fff' : C.textMuted} strokeWidth={2.2} />
+      <ShinyGlint size={15} color={shiny ? '#fff' : C.textMuted} />
       <Text
         className="font-display-semi"
         style={{ fontSize: 12, color: shiny ? '#fff' : C.textMuted }}
@@ -309,12 +310,12 @@ function PokedexRow({
   onPress: () => void;
 }) {
   const dex = `#${String(entry.pokemonId).padStart(3, '0')}`;
-  const displayName = creatureDisplayName({ name: entry.name, shiny });
+  const displayName = creatureDisplayName({ pokemonId: entry.pokemonId, shiny });
   const label = untradable
     ? `${displayName}, ${dex}, can’t be traded in Pokémon GO`
     : added
       ? `${displayName}, already added`
-      : `Add ${displayName}, ${dex}, ${entry.type} type`;
+      : `Add ${displayName}, ${dex}, ${describeTypes(entry.types)}`;
   // An untradable row stays pressable (the press explains the refusal), so only an added one is disabled.
   const blocked = added && !untradable;
   const dimmed = untradable || added;
@@ -340,7 +341,7 @@ function PokedexRow({
           </Text>
           <View className="rounded-full border px-2 py-0.5" style={hueBadgeStyle(entry.hue)}>
             <Text className="font-mono" style={{ fontSize: 9, color: C.textSecondary, letterSpacing: 0.6 }}>
-              {entry.type.toUpperCase()}
+              {formatTypes(entry.types).toUpperCase()}
             </Text>
           </View>
         </View>

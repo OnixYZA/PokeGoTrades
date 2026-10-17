@@ -18,11 +18,13 @@ import { StardustCard } from '@/components/listing/StardustCard';
 import { BuyerOfferModal } from '@/components/modals/BuyerOfferModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
+import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Sprite } from '@/components/ui/Sprite';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
 import { ToastHost } from '@/components/ui/ToastHost';
+import { TypeBadge } from '@/components/ui/TypeBadge';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
 import { demandTier, marketLabel } from '@/constants/market';
 import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
@@ -176,9 +178,7 @@ export default function ListingDetailScreen() {
                 {listing.form} · {listing.year} catch
               </Text>
               <View className="mt-1 flex-row items-center gap-1.5">
-                {listing.shiny && (
-                  <Text style={{ color: '#ff6bd6', textShadow: '0 0 8px #ff6bd6', fontSize: 22 } as any}>✦</Text>
-                )}
+                {listing.shiny && <ShinyGlint size={22} glow />}
                 {/* `flexShrink: 1` + `numberOfLines`: "Shiny " (Task 1) makes this ~6 characters longer,
                  *  and a Text sibling next to a fixed-size glyph in a row doesn't shrink by default in RN
                  *  (unlike the web), so a long name would overflow past the card edge instead of eliding. */}
@@ -190,6 +190,7 @@ export default function ListingDetailScreen() {
                   {creatureDisplayName(listing)}
                 </Text>
               </View>
+              <TypeBadge creature={listing} style={{ marginTop: 8 }} />
               <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
                 {listing.lucky && <LuckyBadge />}
                 <BackgroundBadge bg={listing.bg} hue={listing.hue} accent={listing.accent} />
@@ -258,7 +259,10 @@ export default function ListingDetailScreen() {
             </View>
             <View className="gap-2">
               {listing.looking.map((creature, i) => (
-                <LookingForRow key={creature.name} creature={creature} index={i} />
+                // Index, not name: a wanted list can hold two entries of one species (a shiny and a regular,
+                // or two forms), and a name — the dex species now — no longer tells them apart. The list is
+                // static for the life of this screen, so position is a stable identity.
+                <LookingForRow key={i} creature={creature} index={i} />
               ))}
             </View>
           </View>

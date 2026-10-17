@@ -11,12 +11,11 @@ import {
   Check,
   CheckSquare,
   ChevronDown,
+  Droplet,
   Image as ImageIcon,
   Plus,
   Search,
   Shirt,
-  Sparkles,
-  Star,
   X,
 } from 'lucide-react-native';
 
@@ -24,9 +23,11 @@ import { ListingCard } from '@/components/feed/ListingCard';
 import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { LuckyClover } from '@/components/ui/LuckyBadge';
+import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import { findPokemon, isPokemonUntradable, type PokedexEntry } from '@/constants/pokedex';
+import { findPokemon, formatTypes, isPokemonUntradable, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
 import { creatureDisplayName } from '@/lib/format';
 import {
@@ -677,7 +678,7 @@ function CreatureSelector({ selected, onPress }: { selected: PokedexEntry | null
           <View className="flex-1">
             <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>{selected.name}</Text>
             <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
-              {dexLabel(selected.pokemonId)} · {selected.type}
+              {dexLabel(selected.pokemonId)} · {formatTypes(selected.types)}
             </Text>
           </View>
           <Text className="font-mono-semi" style={{ fontSize: 11, color: C.gold, letterSpacing: 0.6 }}>
@@ -800,7 +801,7 @@ function AttributesCard({
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
         <AttributeRow
-          icon={<Star size={18} color={C.gold} strokeWidth={2.2} />}
+          icon={<ShinyGlint size={20} color={C.gold} />}
           tint="rgba(251,191,36,0.12)"
           title="Shiny"
           description="Rare alternate coloration"
@@ -809,7 +810,7 @@ function AttributesCard({
           onPress={onToggleShiny}
         />
         <AttributeRow
-          icon={<Sparkles size={18} color={C.blue} strokeWidth={2.2} />}
+          icon={<Droplet size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
           title="Purified"
           description="Cleansed from Shadow form"
@@ -1392,7 +1393,7 @@ function ProofUploadsSection({
 
           <View className="flex-row items-center gap-3 rounded-xl px-3.5 py-3" style={MODAL_SURFACE.luckyBadge}>
             <View className="h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
-              <Star size={18} color="#0a0a0f" fill="#0a0a0f" />
+              <LuckyClover size={18} color="#0a0a0f" />
             </View>
             <View className="flex-1">
               <Text className="font-display" style={{ fontSize: 16, color: '#0a0a0f', letterSpacing: -0.16 }}>

@@ -1,12 +1,15 @@
 /**
  * Unit tests for the pure tristate filter model in `store/listing-filters.ts`. `matchesFilter` here
  * has a PostgREST twin, `applyFilterSpec` in `lib/api/listings.ts` — every semantic pinned down below
- * (OR within an enum group, a null value surviving an exclude, tags being AND'd) must hold on both.
+ * (OR within an enum group, a null value surviving an exclude, tags being AND'd, OR across included types)
+ * must hold on both. The type filter's twin is proven equal exhaustively in `lib/api/type-filter.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
 import type { Listing } from '@/data/types';
 
-import { compileFilter, cycleFilter, filterKey, matchesFilter, type FilterState } from './listing-filters';
+import { FILTER_ATTRIBUTES, TYPE_CHIP_ORDER } from '../constants/listing-attributes';
+import { POKEMON_TYPES } from '../constants/pokedex';
+import { compileFilter, cycleFilter, filterKey, matchesFilter, type FilterKey, type FilterState } from './listing-filters';
 
 function makeListing(partial: Partial<Listing> = {}): Listing {
   return {
@@ -109,10 +112,115 @@ describe('compileFilter / matchesFilter — tags', () => {
   });
 });
 
+describe('type chips in the registry', () => {
+  const typeChips = FILTER_ATTRIBUTES.filter((attr) => attr.kind === 'type');
+
+  it('has exactly one chip per Pokémon type, keyed type:<Type>, in a "Type" section', () => {
+    expect(typeChips).toHaveLength(POKEMON_TYPES.length);
+    expect(typeChips.map((attr) => attr.key)).toEqual(TYPE_CHIP_ORDER.map((type) => `type:${type}`));
+    expect(new Set(typeChips.map((attr) => attr.section))).toEqual(new Set(['Type']));
+    expect(typeChips.map((attr) => attr.label)).toEqual([...TYPE_CHIP_ORDER]);
+  });
+
+  it('TYPE_CHIP_ORDER is a permutation of POKEMON_TYPES: every type once, nothing extra', () => {
+    expect([...TYPE_CHIP_ORDER].sort()).toEqual([...POKEMON_TYPES].sort());
+    expect(new Set(TYPE_CHIP_ORDER).size).toBe(TYPE_CHIP_ORDER.length);
+  });
+
+  it('shows the conventional Pokédex type order, not the vocabulary order', () => {
+    expect(TYPE_CHIP_ORDER.slice(0, 6)).toEqual(['Normal', 'Fire', 'Water', 'Grass', 'Electric', 'Ice']);
+  });
+
+  it('cycles like every other chip', () => {
+    let state: FilterState = {};
+    state = cycleFilter(state, 'type:Fire');
+    expect(state['type:Fire']).toBe('include');
+    state = cycleFilter(state, 'type:Fire');
+    expect(state['type:Fire']).toBe('exclude');
+    expect(cycleFilter(state, 'type:Fire')).toEqual({});
+  });
+});
+
+describe('compileFilter / matchesFilter — types', () => {
+  // Real dex entries (constants/pokedex-data.ts): Charmander #4 Fire, Charizard #6 Fire/Flying,
+  // Squirtle #7 Water, Vulpix #37 Fire (Alolan Vulpix Ice), Rotom #479 Electric/Ghost (Heat Rotom Electric/Fire).
+  const charmander = makeListing({ pokemonId: 4 });
+  const charizard = makeListing({ pokemonId: 6 });
+  const squirtle = makeListing({ pokemonId: 7 });
+
+  it('compiles included types to typesAny and excluded ones to typesNone, in registry order', () => {
+    const spec = compileFilter({ 'type:Ice': 'exclude', 'type:Water': 'include', 'type:Fire': 'include', 'type:Normal': 'exclude' });
+    expect(spec.typesAny).toEqual(['Fire', 'Water']);
+    expect(spec.typesNone).toEqual(['Normal', 'Ice']);
+  });
+
+  it('including a type matches it in either the primary or the secondary slot', () => {
+    expect(matchesFilter(charizard, compileFilter({ 'type:Fire': 'include' }))).toBe(true); // primary
+    expect(matchesFilter(charizard, compileFilter({ 'type:Flying': 'include' }))).toBe(true); // secondary
+    expect(matchesFilter(charizard, compileFilter({ 'type:Water': 'include' }))).toBe(false);
+  });
+
+  it('including several types ORs them: Fire or Water, not both', () => {
+    const spec = compileFilter({ 'type:Fire': 'include', 'type:Water': 'include' });
+    expect(matchesFilter(charmander, spec)).toBe(true);
+    expect(matchesFilter(squirtle, spec)).toBe(true);
+    expect(matchesFilter(makeListing({ pokemonId: 25 }), spec)).toBe(false); // Pikachu
+  });
+
+  it('excluding a type drops a creature that has it in either slot, and excluding several drops any of them', () => {
+    expect(matchesFilter(charizard, compileFilter({ 'type:Flying': 'exclude' }))).toBe(false);
+    expect(matchesFilter(charmander, compileFilter({ 'type:Flying': 'exclude' }))).toBe(true);
+    const spec = compileFilter({ 'type:Flying': 'exclude', 'type:Water': 'exclude' });
+    expect(matchesFilter(charizard, spec)).toBe(false);
+    expect(matchesFilter(squirtle, spec)).toBe(false);
+    expect(matchesFilter(charmander, spec)).toBe(true);
+  });
+
+  it('include and exclude apply together: Fire but not Flying keeps Charmander and drops Charizard', () => {
+    const spec = compileFilter({ 'type:Fire': 'include', 'type:Flying': 'exclude' });
+    expect(matchesFilter(charmander, spec)).toBe(true);
+    expect(matchesFilter(charizard, spec)).toBe(false);
+    expect(matchesFilter(squirtle, spec)).toBe(false);
+  });
+
+  it('is form-aware: Alolan Vulpix is Ice and not Fire, and a Vulpix with no form code is Fire', () => {
+    const vulpix = makeListing({ pokemonId: 37 });
+    const alolanVulpix = makeListing({ pokemonId: 37, formCode: 'ALOLA' });
+    const fire = compileFilter({ 'type:Fire': 'include' });
+    const ice = compileFilter({ 'type:Ice': 'include' });
+    expect(matchesFilter(vulpix, fire)).toBe(true);
+    expect(matchesFilter(alolanVulpix, fire)).toBe(false);
+    expect(matchesFilter(vulpix, ice)).toBe(false);
+    expect(matchesFilter(alolanVulpix, ice)).toBe(true);
+    expect(matchesFilter(alolanVulpix, compileFilter({ 'type:Fire': 'exclude' }))).toBe(true);
+  });
+
+  it('a form that gains a type needs the form: Heat Rotom is Fire, a plain Rotom is not', () => {
+    const fire = compileFilter({ 'type:Fire': 'include' });
+    expect(matchesFilter(makeListing({ pokemonId: 479, formCode: 'HEAT' }), fire)).toBe(true);
+    expect(matchesFilter(makeListing({ pokemonId: 479 }), fire)).toBe(false);
+  });
+
+  it('a creature with no known typing never matches an include and is never dropped by an exclude', () => {
+    const unknown = makeListing({ pokemonId: 10188, formCode: 'CROWNED_SWORD' }); // not a dex species
+    for (const type of POKEMON_TYPES) {
+      expect(matchesFilter(unknown, compileFilter({ [`type:${type}`]: 'include' } as FilterState))).toBe(false);
+      expect(matchesFilter(unknown, compileFilter({ [`type:${type}`]: 'exclude' } as FilterState))).toBe(true);
+    }
+  });
+
+  it('ANDs with the other chip families', () => {
+    const spec = compileFilter({ 'type:Fire': 'include', shiny: 'include' });
+    expect(matchesFilter(makeListing({ pokemonId: 4, shiny: true }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ pokemonId: 4, shiny: false }), spec)).toBe(false);
+    expect(matchesFilter(makeListing({ pokemonId: 7, shiny: true }), spec)).toBe(false);
+  });
+});
+
 describe('compileFilter — empty state', () => {
   it('compiles to an empty spec that matches everything', () => {
     const spec = compileFilter({});
-    expect(spec).toEqual({ flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {} });
+    expect(spec).toEqual({ flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {}, typesAny: [], typesNone: [] });
     expect(matchesFilter(makeListing(), spec)).toBe(true);
     expect(matchesFilter(makeListing({ shiny: true, lucky: true, tags: ['Level 1'] }), spec)).toBe(true);
   });
@@ -131,6 +239,24 @@ describe('filterKey', () => {
     b = cycleFilter(b, 'lucky');
 
     expect(filterKey(compileFilter(a))).toBe(filterKey(compileFilter(b)));
+  });
+
+  it('is stable regardless of the order type chips were toggled in', () => {
+    const toggle = (keys: FilterKey[]) => keys.reduce((state, key) => cycleFilter(state, key), {} as FilterState);
+    const a = toggle(['type:Water', 'type:Fire', 'type:Ice']);
+    const b = toggle(['type:Ice', 'type:Fire', 'type:Water']);
+    expect(filterKey(compileFilter(a))).toBe(filterKey(compileFilter(b)));
+  });
+
+  it('tells a type include from a type exclude, and one type from another', () => {
+    const keys = [
+      filterKey(compileFilter({ 'type:Fire': 'include' })),
+      filterKey(compileFilter({ 'type:Fire': 'exclude' })),
+      filterKey(compileFilter({ 'type:Water': 'include' })),
+      filterKey(compileFilter({ 'type:Fire': 'include', 'type:Water': 'include' })),
+      filterKey(compileFilter({})),
+    ];
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('differs when the actual filter differs', () => {

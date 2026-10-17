@@ -20,6 +20,7 @@ import { formalOffer } from '@/data/chats';
 import type { ChatMessage, CreatureRef } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { creatureDisplayName } from '@/lib/format';
 import { newestAcceptableOffer, offerAvailability } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
@@ -187,7 +188,7 @@ export default function ActiveChatScreen() {
             {chat.partner}
           </Text>
           <Text className="font-mono text-text-subtle" style={{ fontSize: 10, letterSpacing: 0.6 }}>
-            RE: {listing?.name ?? ''}
+            RE: {listing ? creatureDisplayName(listing) : ''}
           </Text>
         </View>
         {trade.canOpenHandshake && (

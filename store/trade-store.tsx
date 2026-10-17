@@ -548,19 +548,23 @@ export const useTradeStore = create<TradeState>((set, get) => {
       if (!USE_SUPABASE) {
         const listing = get().listings[listingId];
         if (!listing) return { ok: false, error: { code: 'unknown', message: 'That listing is gone.', followUp: 'none' } };
-        const offer: FormalOffer =
+        // A custom offer opens with plain text, exactly as the Supabase branch below sends it. It used to be
+        // faked as a `FormalOffer` named 'Custom Offer' wearing the LISTING's `pokemonId` — but a formal offer is
+        // a creature, and its name is derived from that id (`creatureDisplayName`), so the card would have read
+        // as the listing's own species. There is no creature in a custom offer, so there is no card.
+        const opener: ChatMessage =
           selection.kind === 'creature'
-            ? selection.offer
-            : { name: 'Custom Offer', pokemonId: listing.pokemonId, hue: listing.hue };
+            ? { role: 'me', text: '', time: timeNow(), offer: selection.offer }
+            : { role: 'me', text: CUSTOM_OFFER_BODY, time: timeNow() };
         const chatId = `c-${Date.now()}`;
         get().addChat({
           id: chatId,
           listingId,
           partner: listing.seller,
-          preview: `Formal offer sent · ${creatureDisplayName(offer)}`,
+          preview: selection.kind === 'creature' ? `Formal offer sent · ${creatureDisplayName(selection.offer)}` : CUSTOM_OFFER_BODY,
           unread: 0,
           active: true,
-          offers: [{ role: 'me', text: '', time: timeNow(), offer }],
+          offers: [opener],
         });
         return ok(chatId);
       }

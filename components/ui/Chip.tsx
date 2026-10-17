@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { Text, View } from 'react-native';
 
+import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { findPokemon } from '@/constants/pokedex';
 import { GO_SPRITE_ZOOM, hueChipBg, hueChipGlow } from '@/constants/theme';
 import { spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
@@ -64,16 +65,7 @@ export function Chip({ creature, size = 48 }: ChipProps) {
           />
         )}
       </View>
-      {creature.shiny && (
-        <Text
-          className="absolute"
-          style={{ top: 4, right: 5, fontSize: 10, color: '#fff', textShadow: '0 0 4px #ff6bd6' } as any}
-          accessibilityElementsHidden
-          importantForAccessibility="no"
-        >
-          ✦
-        </Text>
-      )}
+      {creature.shiny && <ShinyGlint size={10} color="#fff" glow style={{ position: 'absolute', top: 4, right: 5 }} />}
       {creature.lucky && (
         <Text
           className="absolute font-display"

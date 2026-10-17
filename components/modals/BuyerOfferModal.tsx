@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, Send, Sparkles } from 'lucide-react-native';
+import { Check, MessageSquareText, Send } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
 import { ToastHost } from '@/components/ui/ToastHost';
@@ -10,7 +10,7 @@ import { isPokemonUntradable } from '@/constants/pokedex';
 import type { CreatureRef, Listing } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
 import { useTradeStore, type OfferSelection } from '@/store/trade-store';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
@@ -92,11 +92,13 @@ export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModa
         </Text>
 
         <View className="mb-5 gap-2.5">
-          {offerable.map((creature) => (
+          {/* Keyed and matched by position/reference, not name: the list can hold a shiny and a regular of
+           *  one species (same name), which used to collide on key and show both rows selected. */}
+          {offerable.map((creature, index) => (
             <CreatureOptionRow
-              key={creature.name}
+              key={index}
               creature={creature}
-              selected={selection?.kind === 'creature' && selection.creature.name === creature.name}
+              selected={selection?.kind === 'creature' && selection.creature === creature}
               onPress={() => setSelection({ kind: 'creature', creature })}
             />
           ))}
@@ -186,7 +188,7 @@ function CreatureOptionRow({
           {creatureDisplayName(creature)}
         </Text>
         <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, marginTop: 2, letterSpacing: 0.5 }}>
-          OFFER THIS
+          {[creatureFormLabel(creature)?.toUpperCase(), 'OFFER THIS'].filter(Boolean).join(' · ')}
         </Text>
       </View>
       <View
@@ -213,7 +215,7 @@ function CustomOfferRow({ selected, onPress }: { selected?: boolean; onPress?: (
       }}
     >
       <View className="h-11 w-11 items-center justify-center rounded-xl border border-dashed" style={{ borderColor: C.borderDefault }}>
-        <Sparkles size={18} color={C.gold} strokeWidth={2.2} />
+        <MessageSquareText size={18} color={C.gold} strokeWidth={2.2} />
       </View>
       <View className="flex-1">
         <Text style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>Custom Offer</Text>

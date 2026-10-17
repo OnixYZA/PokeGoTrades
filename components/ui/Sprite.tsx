@@ -1,8 +1,9 @@
 import { Image } from 'expo-image';
-import { Sparkles } from 'lucide-react-native';
+import { Droplet } from 'lucide-react-native';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { ShinyGlint, SHINY_PINK } from '@/components/ui/ShinyGlint';
 import { findPokemon } from '@/constants/pokedex';
 import { GO_SPRITE_ZOOM, hueDiscBg, hueDiscGlow } from '@/constants/theme';
 import { backgroundObjectKey, spriteVariantOf, storagePublicUrl, type SpriteSubject } from '@/lib/sprite-url';
@@ -90,15 +91,15 @@ export function Sprite({ creature, purified = false, background = null, size = 7
             width: 22,
             height: 22,
             borderRadius: 11,
-            backgroundImage: 'radial-gradient(circle, #fff 0%, #ff6bd6 50%, transparent 70%)',
+            backgroundImage: `radial-gradient(circle, #fff 0%, ${SHINY_PINK} 50%, transparent 70%)`,
           }}
         >
-          <Text style={{ fontSize: 14, color: '#fff' }} accessibilityElementsHidden importantForAccessibility="no">
-            ✦
-          </Text>
+          <ShinyGlint size={14} color="#fff" />
         </View>
       )}
 
+      {/* Purified is a droplet ("cleansed"), never a sparkle: the sparkle is the shiny marker above, and the
+          two badges share this tile. */}
       {purified && (
         <View
           className="absolute items-center justify-center rounded-full"
@@ -106,7 +107,7 @@ export function Sprite({ creature, purified = false, background = null, size = 7
           accessibilityElementsHidden
           importantForAccessibility="no"
         >
-          <Sparkles size={13} color="#7dffb3" />
+          <Droplet size={13} color="#7dffb3" />
         </View>
       )}
     </View>

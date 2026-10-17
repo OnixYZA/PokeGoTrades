@@ -44,6 +44,13 @@ interface ListingFilterSheetProps {
  * registry's own sections. No local copy of the filter state — every chip reads and writes
  * `useTradeStore`'s `listingFilters` directly through `cycleListingFilter`, so this sheet can never
  * drift from what `store/listing-filters.ts#compileFilter` is actually matching the feed against.
+ *
+ * Nothing here knows about a particular chip family. The 18 Pokémon-type chips are just the registry's
+ * last section ("Type"): they are the same tristate `FilterChip`s in the same `flex-wrap` row as every
+ * other section, so they simply wrap (a chip is content-sized, the widest label is about 100pt, the
+ * 335pt-wide row on a 375pt sheet fits three to four per line, and the sheet's `ScrollView` takes the extra
+ * height). `FilterChip` has no per-chip accent, so they are not tinted by `TYPE_HUE`: that would need a new
+ * `FilterChip` prop, and the include/exclude colour (green/red) must stay the chip's only colour signal.
  */
 export function ListingFilterSheet({ visible, onClose }: ListingFilterSheetProps) {
   const insets = useSafeAreaInsets();

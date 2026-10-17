@@ -97,23 +97,23 @@ describe('parseCreatureRefs', () => {
 
 describe('creatureRefToJson', () => {
   it('emits only name/pokemonId/hue for a bare ref — no shiny/lucky/code keys at all', () => {
-    expect(creatureRefToJson({ name: 'X', pokemonId: 1, hue: 1 })).toEqual({ name: 'X', pokemonId: 1, hue: 1 });
+    expect(creatureRefToJson({ name: 'Bulbasaur', pokemonId: 1, hue: 1 })).toEqual({ name: 'Bulbasaur', pokemonId: 1, hue: 1 });
   });
 
   it('omits falsy shiny/lucky rather than sending them as false', () => {
-    const ref: CreatureRef = { name: 'X', pokemonId: 1, hue: 1, shiny: false, lucky: false };
-    expect(creatureRefToJson(ref)).toEqual({ name: 'X', pokemonId: 1, hue: 1 });
+    const ref: CreatureRef = { name: 'Bulbasaur', pokemonId: 1, hue: 1, shiny: false, lucky: false };
+    expect(creatureRefToJson(ref)).toEqual({ name: 'Bulbasaur', pokemonId: 1, hue: 1 });
   });
 
   it('sends shiny/lucky true when set', () => {
-    const ref: CreatureRef = { name: 'X', pokemonId: 1, hue: 1, shiny: true, lucky: true };
-    expect(creatureRefToJson(ref)).toEqual({ name: 'X', pokemonId: 1, hue: 1, shiny: true, lucky: true });
+    const ref: CreatureRef = { name: 'Bulbasaur', pokemonId: 1, hue: 1, shiny: true, lucky: true };
+    expect(creatureRefToJson(ref)).toEqual({ name: 'Bulbasaur', pokemonId: 1, hue: 1, shiny: true, lucky: true });
   });
 
   it('omits formCode/costumeCode rather than sending an explicit null when absent', () => {
-    const ref: CreatureRef = { name: 'X', pokemonId: 1, hue: 1, formCode: null, costumeCode: undefined };
+    const ref: CreatureRef = { name: 'Bulbasaur', pokemonId: 1, hue: 1, formCode: null, costumeCode: undefined };
     const json = creatureRefToJson(ref);
-    expect(json).toEqual({ name: 'X', pokemonId: 1, hue: 1 });
+    expect(json).toEqual({ name: 'Bulbasaur', pokemonId: 1, hue: 1 });
     expect(json).not.toHaveProperty('formCode');
     expect(json).not.toHaveProperty('costumeCode');
   });
@@ -139,5 +139,36 @@ describe('creatureRefToJson', () => {
       formCode: 'CROWNED_SWORD',
     };
     expect(parseCreatureRef(creatureRefToJson(ref))).toEqual(ref);
+  });
+
+  describe('the written name is the dex name for the id, never the caller\'s string', () => {
+    it('strips an attribute typed into the name (the drift that produced "Shiny Shiny Kyogre")', () => {
+      for (const [stored, pokemonId, dexName] of [
+        ['Shiny Kyogre', 382, 'Kyogre'],
+        ['Sh. Mewtwo', 150, 'Mewtwo'],
+        ['Legacy Dnite', 149, 'Dragonite'],
+        ['Purified Apex Ho-Oh', 250, 'Ho-Oh'],
+        ['Mega Rayquaza IV', 384, 'Rayquaza'],
+        ['Armored Mewtwo', 150, 'Mewtwo'],
+      ] as const) {
+        expect(creatureRefToJson({ name: stored, pokemonId, hue: 1 }).name).toBe(dexName);
+      }
+    });
+
+    it('keeps the structured keys that carry what the name used to say', () => {
+      const ref: CreatureRef = { name: 'Shiny Mega Rayquaza', pokemonId: 384, hue: 145, shiny: true, formCode: 'MEGA' };
+      expect(creatureRefToJson(ref)).toEqual({ name: 'Rayquaza', pokemonId: 384, hue: 145, shiny: true, formCode: 'MEGA' });
+    });
+
+    it('re-sending a ref read back from a polluted row repairs it instead of copying the pollution', () => {
+      const polluted = parseCreatureRef({ name: 'Sh. Mewtwo', pokemonId: 150, hue: 275, shiny: true });
+      expect(polluted).not.toBeNull();
+      expect(creatureRefToJson(polluted!)).toEqual({ name: 'Mewtwo', pokemonId: 150, hue: 275, shiny: true });
+    });
+
+    it('for an id outside the dex, keeps the stored name minus any shiny marker', () => {
+      expect(creatureRefToJson({ name: 'Sh. Mystery', pokemonId: 999_999, hue: 1, shiny: true }).name).toBe('Mystery');
+      expect(creatureRefToJson({ name: 'Mystery', pokemonId: 999_999, hue: 1 }).name).toBe('Mystery');
+    });
   });
 });

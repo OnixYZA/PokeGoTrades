@@ -1,12 +1,13 @@
 import { useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowDownUp, ClipboardCheck, Clock, Info, Lock, MapPin, Navigation, Sparkles } from 'lucide-react-native';
+import { ArrowDownUp, ClipboardCheck, Clock, Info, Lock, MapPin, MessageSquareText, Navigation } from 'lucide-react-native';
 import { useShallow } from 'zustand/react/shallow';
 
 import { isOfferLucky } from '@/components/chats/FormalOfferCard';
 import { Chip } from '@/components/ui/Chip';
 import { ToastHost } from '@/components/ui/ToastHost';
+import { TypeBadge } from '@/components/ui/TypeBadge';
 import { TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
 import { FRIENDSHIP_LEVELS } from '@/constants/theme';
 import { TRADE_COST_MATRIX, type ChatMessage, type ChatRole, type CreatureRef, type FormalOffer, type Listing } from '@/data/types';
@@ -150,7 +151,7 @@ export function TradeSummaryModal({ chatId, message, onConfirmed, onDismiss }: T
           <View className="rounded-2xl border border-dashed p-4" style={{ borderColor: C.borderDefault }}>
             <View className="flex-row items-center gap-3">
               <View className="h-11 w-11 items-center justify-center rounded-xl border border-dashed" style={{ borderColor: C.borderDefault }}>
-                <Sparkles size={18} color={C.gold} strokeWidth={2.2} />
+                <MessageSquareText size={18} color={C.gold} strokeWidth={2.2} />
               </View>
               <View className="flex-1">
                 <Text style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>No formal offer</Text>
@@ -380,9 +381,12 @@ function CreatureSummary({
       </Text>
       <View className="flex-row items-center gap-3.5">
         <Chip creature={creature} size={56} />
-        <Text className="font-display flex-1" numberOfLines={2} style={{ fontSize: 17, color: C.textPrimary, letterSpacing: -0.17 }}>
-          {creatureDisplayName(creature)}
-        </Text>
+        <View className="flex-1 gap-1.5">
+          <Text className="font-display" numberOfLines={2} style={{ fontSize: 17, color: C.textPrimary, letterSpacing: -0.17 }}>
+            {creatureDisplayName(creature)}
+          </Text>
+          <TypeBadge creature={creature} />
+        </View>
       </View>
       <View className="mt-3 flex-row flex-wrap gap-1.5">
         {pills.map((pill) => (

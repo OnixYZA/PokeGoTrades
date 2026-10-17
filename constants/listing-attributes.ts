@@ -8,7 +8,24 @@
  *
  * Deliberately no Supabase / React Native import: this is plain data, safe to import from anywhere,
  * including the pure `store/listing-filters.ts` unit tests.
+ *
+ * FILTER SEMANTICS (what a chip means; `store/listing-filters.ts#matchesFilter` and
+ * `lib/api/listings.ts#applyFilterSpec` both implement exactly this, and must keep agreeing). Every chip is
+ * tristate (neutral / include / exclude) and every constraint across chips is ANDed. Within one chip family:
+ *   - flags:  include = the flag is true, exclude = the flag is false.
+ *   - tags:   every included tag must be present (AND); no excluded tag may be present.
+ *   - enums:  the value must be one of the included values (OR); it must not be an excluded value, and a
+ *             NULL column value is never "excluded" (an unrecorded size is not "size XXL").
+ *   - types:  a listing HAS a type when it is in either the primary or the secondary slot of the creature's
+ *             form-aware typing (`creatureHasType`). It must have at least ONE included type (OR, like the
+ *             enum sections: including Fire and Water shows Fire OR Water listings, and a Fire/Water
+ *             creature, not only creatures that are both), and NONE of the excluded types. Include and
+ *             exclude apply together: include Fire + exclude Flying = Fire listings that are not also
+ *             Flying (Charmander yes, Charizard no). A creature with no known typing (a pokemonId outside
+ *             the dex) never matches an include and is never dropped by an exclude, mirroring a NULL enum.
  */
+// Type-only: the registry needs the `PokemonType` vocabulary at compile time but no dex data at runtime.
+import type { PokemonType } from './pokedex';
 
 // ——— enums (mirror the DB enums in lib/database.types.ts exactly — see the assertion in lib/api/listings.ts) ———
 
@@ -90,7 +107,18 @@ interface EnumFilterAttribute<C extends FilterEnumField = FilterEnumField, V ext
   value: V;
 }
 
-export type FilterAttribute = FlagFilterAttribute | TagFilterAttribute | EnumFilterAttribute;
+/** One chip per Pokémon type. `pokemonType` is the `PokemonType` it filters on; matching goes through the
+ *  dex (`creatureHasType` / `typeMembership`), never through a `listings` column: a listing's types are
+ *  derived from its (pokemon_id, form_code), so there is deliberately no `types` column to filter on. */
+interface TypeFilterAttribute<T extends PokemonType = PokemonType> {
+  key: `type:${T}`;
+  label: string;
+  section: string;
+  kind: 'type';
+  pokemonType: T;
+}
+
+export type FilterAttribute = FlagFilterAttribute | TagFilterAttribute | EnumFilterAttribute | TypeFilterAttribute;
 
 function flagAttribute<C extends FilterFlagField>(column: C, label: string): FlagFilterAttribute<C> {
   return { key: column, label, section: 'Attributes', kind: 'flag', column };
@@ -109,10 +137,48 @@ function tagAttribute<T extends ListingTag>(tag: T): TagFilterAttribute<T> {
   return { key: `tag:${tag}`, label: tag, section: 'Tags', kind: 'tag', tag };
 }
 
+function typeAttribute<T extends PokemonType>(pokemonType: T): TypeFilterAttribute<T> {
+  return { key: `type:${pokemonType}`, label: pokemonType, section: 'Type', kind: 'type', pokemonType };
+}
+
+/**
+ * The order the 18 type chips are shown in: the conventional Pokédex type order (Normal, Fire, Water,
+ * Grass, Electric, Ice, ...), NOT `POKEMON_TYPES`' declaration order, which is only the vocabulary.
+ * This is ordering metadata, not a second copy of the type list: it is typed against `PokemonType`
+ * (a misspelled entry does not compile), `_TypeChipOrderIsComplete` below fails the build when a type is
+ * added to `POKEMON_TYPES` without a place here, and `store/listing-filters.test.ts` checks it is a
+ * permutation of `POKEMON_TYPES` (no duplicates, nothing extra).
+ */
+export const TYPE_CHIP_ORDER = [
+  'Normal',
+  'Fire',
+  'Water',
+  'Grass',
+  'Electric',
+  'Ice',
+  'Fighting',
+  'Poison',
+  'Ground',
+  'Flying',
+  'Psychic',
+  'Bug',
+  'Rock',
+  'Ghost',
+  'Dragon',
+  'Dark',
+  'Steel',
+  'Fairy',
+] as const satisfies readonly PokemonType[];
+
+// Same compile-time gate as the DB-enum assertions in lib/api/listings.ts: it must resolve to the
+// literal `false` on a mismatch (not `never`, which would satisfy `extends true` trivially).
+type Expect<T extends true> = T;
+type _TypeChipOrderIsComplete = Expect<[PokemonType] extends [(typeof TYPE_CHIP_ORDER)[number]] ? true : false>;
+
 /**
  * Every filter chip the feed can show, in display order. `size_class` deliberately only surfaces its
  * two extremes (XXS, XXL) — the mid sizes are not interesting to filter on — while `pokeball` and
- * `trade_timeline` surface every value. No Shadow entry exists anywhere in this file: Shadow Pokémon
+ * `trade_timeline` surface every value, and the 18 Pokémon types follow in `TYPE_CHIP_ORDER`. No Shadow entry exists anywhere in this file: Shadow Pokémon
  * are untradable and must never appear as a listing attribute or filter (AGENTS.md).
  */
 export const FILTER_ATTRIBUTES = [
@@ -130,6 +196,8 @@ export const FILTER_ATTRIBUTES = [
   ...TRADE_TIMELINES.map((timeline) => enumAttribute('tradeTimeline', timeline, TRADE_TIMELINE_LABELS[timeline], 'Timeline')),
 
   ...LISTING_TAGS.map(tagAttribute),
+
+  ...TYPE_CHIP_ORDER.map(typeAttribute),
 ] as const satisfies readonly FilterAttribute[];
 
 export type FilterKey = (typeof FILTER_ATTRIBUTES)[number]['key'];

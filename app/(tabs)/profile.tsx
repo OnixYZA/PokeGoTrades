@@ -266,7 +266,7 @@ export default function ProfileScreen() {
     if (addingCreature) return;
     const entry = findPokemon(pokemonId);
     const listLabel = LIST_LABEL[list];
-    const displayName = entry ? creatureDisplayName({ name: entry.name, shiny }) : 'That Pokémon';
+    const displayName = entry ? creatureDisplayName({ pokemonId: entry.pokemonId, shiny }) : 'That Pokémon';
     setAddingCreature(true);
     try {
       await (list === 'arsenal' ? addToArsenal(pokemonId, shiny) : addToWishlist(pokemonId, shiny));
