@@ -286,8 +286,8 @@ export function UntradableNotice({ name, onDismiss }: { name: string; onDismiss:
       <Ban size={16} color={C.danger} strokeWidth={2.5} style={{ marginTop: 1 }} />
       <Text className="flex-1" style={{ fontSize: 12.5, lineHeight: 18, color: C.textSecondary }}>
         <Text style={{ fontWeight: '700', color: C.textPrimary }}>{name}</Text> can’t be traded in Pokémon GO. Mythical
-        Pokémon (except Meltan and Melmetal), Zygarde and fused forms like White Kyurem never change hands, so they
-        can’t be listed, wanted or offered.
+        Pokémon (except Meltan and Melmetal), Zygarde, Eternatus and special forms like White Kyurem, Ultra Necrozma
+        and Crowned Sword Zacian never change hands, so they can’t be listed, wanted or offered.
       </Text>
       <Pressable onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss" hitSlop={8} className="active:opacity-70">
         <X size={14} color={C.textMuted} strokeWidth={2.5} />

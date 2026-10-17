@@ -31,6 +31,7 @@ import {
 import { creatureFormLabel } from '../lib/format';
 import { BASE_FORM_CODES } from './base-form-codes';
 import { FORM_TYPE_OVERRIDES, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS } from './pokedex-data';
+import { isPokemonUntradable as isPokemonUntradableLeaf, UNTRADABLE_FORM_COMBINATIONS as UNTRADABLE_FORM_COMBINATIONS_LEAF } from './untradable';
 
 describe('findPokemon', () => {
   it('finds a known dex id', () => {
@@ -163,10 +164,57 @@ describe('isPokemonUntradable', () => {
     expect(isPokemonUntradable(800, null)).toBe(false);
   });
 
+  // Crowned Sword / Crowned Shield / Ultra are the project's rule (2026-10-18), and each matches the game master:
+  // the pinned file carries `isTradable` on ZACIAN_HERO and NECROZMA but not on their Crowned / Ultra forms (the
+  // generator's tradability cross-check keeps it that way). They used to be tradable; a regression to that
+  // fails here and in the database drift test below.
+  it('is true for Crowned Sword Zacian, Crowned Shield Zamazenta and Ultra Necrozma', () => {
+    expect(isPokemonUntradable(888, 'CROWNED_SWORD')).toBe(true);
+    expect(isPokemonUntradable(889, 'CROWNED_SHIELD')).toBe(true);
+    expect(isPokemonUntradable(800, 'ULTRA')).toBe(true);
+  });
+
+  it('keeps the base forms of Zacian, Zamazenta and Necrozma tradable: only the named form is refused', () => {
+    for (const id of [888, 889]) {
+      expect(isPokemonUntradable(id), `#${id}`).toBe(false);
+      expect(isPokemonUntradable(id, null), `#${id}`).toBe(false);
+      expect(isPokemonUntradable(id, 'HERO'), `#${id}`).toBe(false); // the default form's own code, as the sprite pipeline spells it
+    }
+    expect(isPokemonUntradable(888, 'CROWNED_SHIELD')).toBe(false); // each Crowned code is scoped to its own species
+    expect(isPokemonUntradable(889, 'CROWNED_SWORD')).toBe(false);
+    expect(isPokemonUntradable(800)).toBe(false);
+    expect(isPokemonUntradable(800, null)).toBe(false);
+    expect(isPokemonUntradable(800, 'NORMAL')).toBe(false);
+  });
+
+  it('is true for Eternatus in every form, Eternamax included', () => {
+    expect(isPokemonUntradable(890)).toBe(true);
+    expect(isPokemonUntradable(890, null)).toBe(true);
+    expect(isPokemonUntradable(890, 'ETERNAMAX')).toBe(true);
+    expect(UNTRADABLE_SPECIES_IDS.has(890)).toBe(true); // species-wide, not a form entry: nothing else can be spelled wrong
+  });
+
+  // Pecharunt is the one place the rule departs from the game master, which marks it `isTradable: true`. It stays
+  // untradable as a Mythical (owner decision), recorded as TRADABILITY_OVERRIDES in scripts/pokedex-source.ts.
+  it('keeps Pecharunt untradable, in every form, although the game master calls it tradable', () => {
+    expect(UNTRADABLE_MYTHICAL_IDS.has(1025)).toBe(true);
+    expect(isPokemonUntradable(1025)).toBe(true);
+    expect(isPokemonUntradable(1025, null)).toBe(true);
+    expect(isPokemonUntradable(1025, 'NORMAL')).toBe(true);
+  });
+
   it('is false for ordinary species and legendaries', () => {
     expect(isPokemonUntradable(25)).toBe(false);
     expect(isPokemonUntradable(150, 'A')).toBe(false); // Armored Mewtwo
-    expect(isPokemonUntradable(888, 'CROWNED_SWORD')).toBe(false);
+    expect(isPokemonUntradable(891)).toBe(false); // Kubfu, the neighbouring species of Eternatus
+    expect(isPokemonUntradable(889)).toBe(false);
+  });
+
+  it('is re-exported from the leaf module the generator reads, so there is one rule', () => {
+    expect(isPokemonUntradable).toBe(isPokemonUntradableLeaf);
+    expect(UNTRADABLE_FORM_COMBINATIONS).toBe(UNTRADABLE_FORM_COMBINATIONS_LEAF);
+    const source = readFileSync(path.resolve(__dirname, 'untradable.ts'), 'utf8');
+    expect(source, 'the generator must be able to import it without pulling in the generated dex').not.toMatch(/^\s*import\b/m);
   });
 
   it('only names real dex entries', () => {
@@ -175,27 +223,88 @@ describe('isPokemonUntradable', () => {
   });
 });
 
+/** A migration file and its SQL. */
+interface Migration {
+  file: string;
+  body: string;
+}
+
+/** A statement that DEFINES the function (`create function` or `create or replace function`, at the start of a
+ *  line, so a comment or a call that merely names it is not a definition). */
+const UNTRADABLE_FUNCTION_DEFINITION = /^[ \t]*create[ \t]+(?:or[ \t]+replace[ \t]+)?function[ \t]+public\.is_creature_untradable[ \t]*\(/gim;
+
+/**
+ * The CURRENT definition of `public.is_creature_untradable`: the last definition in the last migration, by
+ * filename order (the timestamp prefix), that defines it, cut to that one function (its `create` to the closing
+ * `$$;`). The function has been redefined with `create or replace` before and will be again, and each
+ * redefinition replaces the last one in the database, so only the newest is the rule the database enforces.
+ * Reading any other would compare the client lists with a rule the database no longer has. Input order does
+ * not matter, and a migration that only calls or mentions the function is not a definition.
+ */
+function currentUntradableFunction(migrations: readonly Migration[]): { file: string; sql: string } | undefined {
+  const newestFirst = [...migrations].sort((a, b) => (a.file < b.file ? 1 : a.file > b.file ? -1 : 0));
+  for (const { file, body } of newestFirst) {
+    const last = [...body.matchAll(UNTRADABLE_FUNCTION_DEFINITION)].at(-1);
+    if (!last) continue;
+    const close = body.indexOf('$$;', last.index);
+    return { file, sql: body.slice(last.index, close === -1 ? undefined : close + 3) };
+  }
+  return undefined;
+}
+
+describe('currentUntradableFunction', () => {
+  const original = 'create function public.is_creature_untradable(p_pokemon_id integer)\nreturns boolean as $$\n  select 1 -- ORIGINAL\n$$;\n';
+  const redefinition = 'create or replace function public.is_creature_untradable(p_pokemon_id integer)\nreturns boolean as $$\n  select 1 -- REDEFINED\n$$;\n';
+
+  it('takes the newest definition by filename, whatever order the files arrive in', () => {
+    const migrations = [
+      { file: '20261018000100_redefine.sql', body: redefinition },
+      { file: '20260929000100_original.sql', body: original },
+    ];
+    expect(currentUntradableFunction(migrations)?.file).toBe('20261018000100_redefine.sql');
+    expect(currentUntradableFunction([...migrations].reverse())?.sql).toContain('-- REDEFINED');
+    expect(currentUntradableFunction(migrations)?.sql).not.toContain('-- ORIGINAL');
+  });
+
+  it('does not take a newer migration that only calls or mentions the function', () => {
+    const migrations = [
+      { file: '20260929000100_original.sql', body: original },
+      { file: '20270101000100_caller.sql', body: '-- create or replace function public.is_creature_untradable is redefined elsewhere\nselect public.is_creature_untradable(1);\n' },
+    ];
+    expect(currentUntradableFunction(migrations)?.file).toBe('20260929000100_original.sql');
+  });
+
+  it('keeps to the function: a tag after its closing $$; is not part of it', () => {
+    const migrations = [{ file: '20260929000100_original.sql', body: `${original}-- UNTRADABLE_SPECIES_IDS\n` }];
+    expect(currentUntradableFunction(migrations)?.sql).not.toContain('UNTRADABLE_SPECIES_IDS');
+  });
+
+  it('uses the last definition when one migration defines it twice, and finds none when nothing does', () => {
+    expect(currentUntradableFunction([{ file: '20260929000100_twice.sql', body: original + redefinition }])?.sql).toContain('-- REDEFINED');
+    expect(currentUntradableFunction([{ file: '20260929000100_other.sql', body: 'select 1;' }])).toBeUndefined();
+  });
+});
+
 describe('untradable lists match public.is_creature_untradable', () => {
-  // The database enforces the same rule. Read the NEWEST migration that defines the function, so a later
-  // `create or replace` is what gets compared, not the original.
+  // The database enforces the same rule. Compare with the CURRENT definition: the newest migration that
+  // defines the function, so a later `create or replace` is what gets compared, never the original.
   const migrationsDir = path.resolve(__dirname, '..', 'supabase', 'migrations');
-  const sql = readdirSync(migrationsDir)
+  const migrations = readdirSync(migrationsDir)
     .filter((file) => file.endsWith('.sql'))
-    .sort()
-    .map((file) => readFileSync(path.join(migrationsDir, file), 'utf8'))
-    .filter((body) => /function public\.is_creature_untradable\b/.test(body))
-    .at(-1);
+    .map((file) => ({ file, body: readFileSync(path.join(migrationsDir, file), 'utf8') }));
+  const current = currentUntradableFunction(migrations);
+  const sql = current?.sql;
 
   /** The line tagged `-- <marker>` inside the function body. */
   const taggedLine = (marker: string): string => {
     const line = sql?.split('\n').find((l) => l.trimEnd().endsWith(`-- ${marker}`));
-    if (!line) throw new Error(`No line tagged "-- ${marker}" in the is_creature_untradable migration`);
+    if (!line) throw new Error(`No line tagged "-- ${marker}" in ${current?.file ?? 'any migration (none defines the function)'}`);
     return line.slice(0, line.lastIndexOf('--'));
   };
   const ids = (marker: string) => (taggedLine(marker).match(/\d+/g) ?? []).map(Number).sort((a, b) => a - b);
 
   it('finds the migration', () => {
-    expect(sql).toBeDefined();
+    expect(current?.file).toMatch(/^\d{14}_.+\.sql$/);
   });
 
   it('has the same Mythical ids', () => {
@@ -358,13 +467,19 @@ describe('FORM_TYPE_OVERRIDES', () => {
     }
   });
 
-  it('spells the fused Necrozma forms exactly as the untradable list does', () => {
+  it('spells the untradable Necrozma, Zacian and Zamazenta forms exactly as the typing table does', () => {
     // These codes also key UNTRADABLE_FORM_COMBINATIONS and the is_creature_untradable migration, so a typing
     // under a different spelling would mean one of the two lists is wrong. (Kyurem has no override: the game
     // master types White and Black Kyurem Dragon/Ice, the same as Kyurem.)
-    const necrozma = UNTRADABLE_FORM_COMBINATIONS.filter((c) => c.pokemonId === 800);
-    expect(necrozma).toHaveLength(2);
-    for (const { pokemonId, formCode } of necrozma) {
+    const typed = UNTRADABLE_FORM_COMBINATIONS.filter((c) => c.pokemonId !== 646);
+    expect(typed.map((c) => `${c.pokemonId}:${c.formCode}`).sort()).toEqual([
+      '800:DAWN_WINGS',
+      '800:DUSK_MANE',
+      '800:ULTRA',
+      '888:CROWNED_SWORD',
+      '889:CROWNED_SHIELD',
+    ]);
+    for (const { pokemonId, formCode } of typed) {
       expect(typesOf({ pokemonId, formCode }), formCode).not.toEqual(typesOf({ pokemonId }));
     }
   });
@@ -426,7 +541,7 @@ describe('formsOf', () => {
   });
 
   it('offers no event costume and no shadow marker', () => {
-    expect(formsOf(25)).toEqual(['COPY_2019']); // Pikachu: the game master flags its ~70 outfits as costumes
+    expect(formsOf(25)).toEqual([]); // Pikachu: the game master flags its ~70 outfits, and COPY_2019 is excluded by name
     expect(formsOf(222)).toEqual(['GALARIAN']); // Corsola: SPRING_2026 is a flagged costume, GALARIAN is a form
     for (const id of [243, 244, 245, 249, 250, 380, 381]) expect(formsOf(id), `#${id}`).not.toContain('S');
     for (const [id, codes] of POKEDEX_FORMS) {
@@ -434,6 +549,20 @@ describe('formsOf', () => {
     }
     // ...but a form that merely contains the word is a form: Shadow Rider Calyrex.
     expect(formsOf(898)).toContain('SHADOW_RIDER');
+  });
+
+  // The game master does not flag these `isCostume`, so they are excluded by name (UNFLAGGED_COSTUME_FORMS_EXCLUDED
+  // in scripts/pokedex-source.ts, species-scoped). All five species have no other form, so they have none left.
+  it('offers no unflagged event form: Copy 2019 on the three starters and Pikachu, Swim 2025 on Psyduck', () => {
+    for (const [id, code] of [[3, 'COPY_2019'], [6, 'COPY_2019'], [9, 'COPY_2019'], [25, 'COPY_2019'], [54, 'SWIM_2025']] as const) {
+      expect(formsOf(id), `#${id}`).not.toContain(code);
+      expect(formsOf(id), `#${id}`).toEqual([]);
+    }
+    // The cheapest tripwire for the next unflagged one: an event-year suffix on any selectable form. A species a
+    // future game master adds one to fails here, which needs a decision (exclude it by name, or it is a form).
+    for (const [id, codes] of POKEDEX_FORMS) {
+      for (const code of codes) expect(code, `#${id}`).not.toMatch(/(?:^|_)(?:19|20)\d{2}$/);
+    }
   });
 
   it('keeps every typed form selectable, except the temporary evolutions and one event costume', () => {
@@ -450,11 +579,18 @@ describe('formsOf', () => {
     expect(typesOf({ pokemonId: 222, formCode: 'GALARIAN' })).toEqual(typesOf({ pokemonId: 222, formCode: 'SPRING_2026' }));
   });
 
-  it('offers the fused forms, so a picker can refuse them rather than hide them', () => {
+  it('offers every untradable form, so a picker can refuse them rather than hide them', () => {
+    // The fused Kyurem / Necrozma forms, Crowned Sword / Shield Zacian and Zamazenta, and Ultra Necrozma.
     for (const { pokemonId, formCode } of UNTRADABLE_FORM_COMBINATIONS) {
       expect(formsOf(pokemonId), `#${pokemonId} ${formCode}`).toContain(formCode);
       expect(isPokemonUntradable(pokemonId, formCode)).toBe(true);
     }
+    // ...and the forms of a species that is untradable whole are offered too: Eternamax Eternatus.
+    expect(formsOf(890)).toContain('ETERNAMAX');
+    expect(isPokemonUntradable(890, 'ETERNAMAX')).toBe(true);
+    // The default forms of the species that have one untradable form are NOT among them, and stay tradable.
+    expect(formsOf(888)).not.toContain('HERO');
+    expect(isPokemonUntradable(888, 'HERO')).toBe(false);
   });
 
   it('is well-formed: dex species in id order, no repeats, a valid form code every time', () => {

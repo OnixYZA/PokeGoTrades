@@ -11,10 +11,13 @@ import { describe, expect, it } from 'vitest';
 
 import { BASE_FORM_CODES } from '../constants/base-form-codes';
 import { POKEMON_TYPES, type PokemonType, type PokemonTypes } from '../constants/pokemon-types';
+import { isPokemonUntradable, UNTRADABLE_FORM_COMBINATIONS } from '../constants/untradable';
 import { parsePokeMinersIcon } from './pokeminers';
 import {
+  blockingProblems,
   buildFormCatalog,
   buildPokedexData,
+  checkTradability,
   COSTUME_FORMS_KEPT_AS_FORMS,
   csvRecords,
   gameMasterDefaultTypes,
@@ -27,9 +30,12 @@ import {
   renderDataFile,
   resolveFormCode,
   SHADOW_MARKER_CODES,
+  TRADABILITY_OVERRIDES,
+  UNFLAGGED_COSTUME_FORMS_EXCLUDED,
   type GameMasterTemplate,
   type Provenance,
   type SpeciesRow,
+  type TradabilityRules,
 } from './pokedex-source';
 
 // ——— CSV ———
@@ -160,12 +166,15 @@ describe('parsePokeApiSpecies', () => {
 const typeEnum = (type: string) => `POKEMON_TYPE_${type.toUpperCase()}`;
 const pad = (id: number) => String(id).padStart(4, '0');
 
+/** `tradable` mirrors the real file: the flag is written as `true` on a tradable template and left OUT, never
+ *  `false`, on an untradable one. Most fixtures are ordinary tradable species. */
 function pokemonTemplate(
   id: number,
   enumName: string,
   form: string | undefined,
   types: string[],
   tempEvoOverrides?: { tempEvoId?: string; typeOverride1?: string; typeOverride2?: string }[],
+  tradable = true,
 ): GameMasterTemplate {
   return {
     templateId: `V${pad(id)}_POKEMON_${form ?? enumName}`,
@@ -175,6 +184,7 @@ function pokemonTemplate(
         ...(form ? { form } : {}),
         type: typeEnum(types[0]),
         ...(types[1] ? { type2: typeEnum(types[1]) } : {}),
+        ...(tradable ? { isTradable: true } : {}),
         ...(tempEvoOverrides ? { tempEvoOverrides } : {}),
       },
     },
@@ -197,7 +207,7 @@ const formsTemplate = (id: number, enumName: string, forms: FormSpec[]): GameMas
 const ZACIAN: GameMasterTemplate[] = [
   pokemonTemplate(888, 'ZACIAN', undefined, ['Fairy', 'Steel']),
   pokemonTemplate(888, 'ZACIAN', 'ZACIAN_HERO', ['Fairy']),
-  pokemonTemplate(888, 'ZACIAN', 'ZACIAN_CROWNED_SWORD', ['Fairy', 'Steel']),
+  pokemonTemplate(888, 'ZACIAN', 'ZACIAN_CROWNED_SWORD', ['Fairy', 'Steel'], undefined, false), // no isTradable, as in the real file
   formsTemplate(888, 'ZACIAN', ['ZACIAN_HERO', 'ZACIAN_CROWNED_SWORD']),
 ];
 const VULPIX: GameMasterTemplate[] = [
@@ -214,7 +224,7 @@ const CHARIZARD_EVOS = [
 const CHARIZARD: GameMasterTemplate[] = [
   pokemonTemplate(6, 'CHARIZARD', undefined, ['Fire', 'Flying'], CHARIZARD_EVOS),
   pokemonTemplate(6, 'CHARIZARD', 'CHARIZARD_NORMAL', ['Fire', 'Flying'], CHARIZARD_EVOS),
-  formsTemplate(6, 'CHARIZARD', ['CHARIZARD_NORMAL']),
+  formsTemplate(6, 'CHARIZARD', ['CHARIZARD_NORMAL', 'CHARIZARD_COPY_2019']), // as the real file: the game master does not flag COPY_2019
 ];
 
 const species = (id: number, name: string, types: PokemonTypes): SpeciesRow => ({ id, name, types });
@@ -222,6 +232,9 @@ const ZACIAN_ROW = species(888, 'Zacian', ['Fairy']);
 const PALKIA_ROW = species(484, 'Palkia', ['Water', 'Dragon']);
 const VULPIX_ROW = species(37, 'Vulpix', ['Fire']);
 const CHARIZARD_ROW = species(6, 'Charizard', ['Fire', 'Flying']);
+
+/** The app's real untradable rules, as the CLI passes them. */
+const RULES: TradabilityRules = { isUntradable: isPokemonUntradable, formCombinations: UNTRADABLE_FORM_COMBINATIONS };
 
 describe('parseGameMaster', () => {
   it('collects formless, form and temp-evolution typing per species', () => {
@@ -237,6 +250,16 @@ describe('parseGameMaster', () => {
       ['MEGA_X', ['Fire', 'Dragon']],
       ['MEGA_Y', ['Fire', 'Flying']],
     ]);
+  });
+
+  it('reads isTradable per template, and treats an absent flag as untradable', () => {
+    const zacian = parseGameMaster(ZACIAN).get(888)!;
+    expect(zacian.bareTradable).toBe(true);
+    expect(zacian.formTradable.get('ZACIAN_HERO')).toBe(true);
+    expect(zacian.formTradable.get('ZACIAN_CROWNED_SWORD')).toBe(false); // the template has no flag
+    expect([...zacian.formTradable.keys()]).toEqual([...zacian.forms.keys()]); // one verdict per form template
+    const mew = parseGameMaster([pokemonTemplate(151, 'MEW', undefined, ['Psychic'], undefined, false)]).get(151)!;
+    expect(mew.bareTradable).toBe(false);
   });
 
   it('ignores everything that is not a Pokémon template', () => {
@@ -351,6 +374,7 @@ describe('buildPokedexData', () => {
       gameMasterForms: parseGameMasterForms(templates),
       assetTokens: parseAssetFormTokens(files),
       baseFormCodes: {},
+      tradabilityRules: RULES,
     });
 
   it('records only forms whose typing differs from the species default', () => {
@@ -535,11 +559,73 @@ describe('buildFormCatalog', () => {
   it('leaves out event costumes (the isCostume flag) and says which', () => {
     const pikachu = formsTemplate(25, 'PIKACHU', ['PIKACHU_NORMAL', ['PIKACHU_FALL_2019', true], 'PIKACHU_COPY_2019', ['PIKACHU_VS_2019', true]]);
     const result = catalog([species(25, 'Pikachu', ['Electric'])], [pikachu]);
-    expect(codes(result, 25)).toEqual(['COPY_2019']); // not flagged by the game master, so it is offered
+    expect(codes(result, 25)).toBeUndefined(); // COPY_2019 is not flagged, but UNFLAGGED_COSTUME_FORMS_EXCLUDED names it
     expect(result.report.excludedCostumes).toEqual([
       { pokemonId: 25, code: 'FALL_2019' },
       { pokemonId: 25, code: 'VS_2019' },
     ]);
+    expect(result.report.excludedUnflaggedCostumes).toEqual([{ pokemonId: 25, code: 'COPY_2019' }]);
+  });
+
+  describe('event forms the game master does not flag (UNFLAGGED_COSTUME_FORMS_EXCLUDED)', () => {
+    const PSYDUCK = species(54, 'Psyduck', ['Water']);
+    const BULBASAUR = species(1, 'Bulbasaur', ['Grass', 'Poison']);
+
+    it('names COPY_2019 on the three starters and Pikachu, and SWIM_2025 on Psyduck, species by species', () => {
+      expect([...UNFLAGGED_COSTUME_FORMS_EXCLUDED].map(([id, set]) => [id, [...set]])).toEqual([
+        [3, ['COPY_2019']],
+        [6, ['COPY_2019']],
+        [9, ['COPY_2019']],
+        [25, ['COPY_2019']],
+        [54, ['SWIM_2025']],
+      ]);
+    });
+
+    it('leaves each one out and reports it, as the species had no other selectable form', () => {
+      const result = catalog(
+        [CHARIZARD_ROW, PSYDUCK],
+        [...CHARIZARD, formsTemplate(54, 'PSYDUCK', ['PSYDUCK_NORMAL', 'PSYDUCK_SWIM_2025'])],
+      );
+      expect(result.entries).toEqual([]);
+      expect(result.report.excludedUnflaggedCostumes).toEqual([
+        { pokemonId: 6, code: 'COPY_2019' },
+        { pokemonId: 54, code: 'SWIM_2025' },
+      ]);
+      expect(result.report.speciesWithSeveralForms).toBe(2); // they have two forms in the game master, so they are counted
+    });
+
+    it('leaves out only the named form: the species keeps its other forms', () => {
+      // Not a real list (Psyduck has no other form); it shows the exclusion removes one code, not the species.
+      const result = catalog([PSYDUCK], [formsTemplate(54, 'PSYDUCK', ['PSYDUCK_NORMAL', 'PSYDUCK_SWIM_2025', 'PSYDUCK_ALOLA'])]);
+      expect(codes(result, 54)).toEqual(['ALOLA']);
+    });
+
+    it('is scoped to the species: the same code on a species not listed is still a form', () => {
+      // Hypothetical (no such Bulbasaur form exists upstream). A global code set would swallow it silently; the
+      // species-scoped table leaves it in the output, where the generated diff shows it for review.
+      const result = catalog([BULBASAUR], [formsTemplate(1, 'BULBASAUR', ['BULBASAUR_NORMAL', 'BULBASAUR_COPY_2019'])]);
+      expect(codes(result, 1)).toEqual(['COPY_2019']);
+      expect(result.report.excludedUnflaggedCostumes).toEqual([]);
+    });
+
+    it('throws when an entry no longer matches a form, so the table cannot go stale', () => {
+      const stale = /UNFLAGGED_COSTUME_FORMS_EXCLUDED/;
+      // The form was renamed or removed from the species' list...
+      expect(() => catalog([CHARIZARD_ROW], [formsTemplate(6, 'CHARIZARD', ['CHARIZARD_NORMAL', 'CHARIZARD_GOGGLES_2026'])])).toThrow(stale);
+      // ...the list shrank to one form, or the species lost its list altogether...
+      expect(() => catalog([CHARIZARD_ROW], [formsTemplate(6, 'CHARIZARD', ['CHARIZARD_NORMAL'])])).toThrow(stale);
+      expect(() => catalog([CHARIZARD_ROW], [])).toThrow(stale);
+      // ...or the entry names the species' DEFAULT form, which is never listed anyway.
+      expect(() => catalog([CHARIZARD_ROW], [formsTemplate(6, 'CHARIZARD', ['CHARIZARD_COPY_2019', 'CHARIZARD_NORMAL'])])).toThrow(stale);
+    });
+
+    it('throws once the game master flags the form isCostume: the entry is then redundant', () => {
+      expect(() => catalog([CHARIZARD_ROW], [formsTemplate(6, 'CHARIZARD', ['CHARIZARD_NORMAL', ['CHARIZARD_COPY_2019', true]])])).toThrow(/remove the entry/);
+    });
+
+    it('does not complain about a species that is not in the input (a fixture with a few species)', () => {
+      expect(() => catalog([VULPIX_ROW], VULPIX)).not.toThrow();
+    });
   });
 
   it('keeps Armored Mewtwo although the game master flags it a costume, and says so', () => {
@@ -589,10 +675,11 @@ describe('buildFormCatalog', () => {
   it('skips species with no list, one form, or nothing selectable, and counts those with several', () => {
     const result = catalog(
       [VULPIX_ROW, CHARIZARD_ROW, species(1, 'Bulbasaur', ['Grass', 'Poison']), species(5, 'Charmeleon', ['Fire'])],
-      [...VULPIX, formsTemplate(1, 'BULBASAUR', ['BULBASAUR_NORMAL'])],
+      [...VULPIX, ...CHARIZARD, formsTemplate(1, 'BULBASAUR', ['BULBASAUR_NORMAL'])],
     );
+    // Charmeleon has no list, Bulbasaur one form, Charizard two of which the only non-default is excluded.
     expect(result.entries.map((e) => e.pokemonId)).toEqual([37]);
-    expect(result.report.speciesWithSeveralForms).toBe(1);
+    expect(result.report.speciesWithSeveralForms).toBe(2); // Vulpix and Charizard
   });
 
   it('flags a spelling with no sprite art as unconfirmed, and keeps it', () => {
@@ -616,6 +703,7 @@ describe('buildPokedexData and the form catalog', () => {
         gameMasterForms: parseGameMasterForms(templates),
         assetTokens: new Map(),
         baseFormCodes: {},
+        tradabilityRules: RULES,
       }),
     ).toThrow(/form list says NINETALES but the species template says VULPIX/);
   });
@@ -628,6 +716,7 @@ describe('buildPokedexData and the form catalog', () => {
       gameMasterForms: parseGameMasterForms(templates),
       assetTokens: parseAssetFormTokens(['pm37.fALOLA.icon.png', 'pm888.fCROWNED_SWORD.icon.png']),
       baseFormCodes: {},
+      tradabilityRules: RULES,
     });
     for (const o of data.overrides) {
       expect(data.forms.find((e) => e.pokemonId === o.pokemonId)?.forms.map((f) => f.code), `${o.pokemonId}:${o.formCode}`).toContain(o.formCode);
@@ -638,6 +727,231 @@ describe('buildPokedexData and the form catalog', () => {
     const source = readFileSync(path.resolve(__dirname, '..', 'constants', 'base-form-codes.ts'), 'utf8');
     expect(source).not.toMatch(/^\s*import\b/m);
     expect(BASE_FORM_CODES[201]).toBe('UNOWN_A');
+  });
+});
+
+// ——— tradability cross-check ———
+
+describe('checkTradability', () => {
+  const check = (rows: SpeciesRow[], templates: GameMasterTemplate[], files: string[] = [], rules: TradabilityRules = RULES) =>
+    checkTradability({ species: rows, gameMaster: parseGameMaster(templates), assetTokens: parseAssetFormTokens(files), rules });
+
+  const MEW = species(151, 'Mew', ['Psychic']);
+  const PECHARUNT = species(1025, 'Pecharunt', ['Poison', 'Ghost']);
+  const NECROZMA = species(800, 'Necrozma', ['Psychic']);
+  const ETERNATUS = species(890, 'Eternatus', ['Poison', 'Dragon']);
+  const mew = (tradable: boolean) => [
+    pokemonTemplate(151, 'MEW', undefined, ['Psychic'], undefined, tradable),
+    pokemonTemplate(151, 'MEW', 'MEW_NORMAL', ['Psychic'], undefined, tradable),
+  ];
+  const pecharunt = (tradable: boolean) => [
+    pokemonTemplate(1025, 'PECHARUNT', undefined, ['Poison', 'Ghost'], undefined, tradable),
+    pokemonTemplate(1025, 'PECHARUNT', 'PECHARUNT_NORMAL', ['Poison', 'Ghost'], undefined, tradable),
+  ];
+  /** Necrozma as the real file has it: the base and Normal tradable, the fused and Ultra forms not. */
+  const necrozma = (ultraTradable = false) => [
+    pokemonTemplate(800, 'NECROZMA', undefined, ['Psychic']),
+    pokemonTemplate(800, 'NECROZMA', 'NECROZMA_NORMAL', ['Psychic']),
+    pokemonTemplate(800, 'NECROZMA', 'NECROZMA_DUSK_MANE', ['Psychic', 'Steel'], undefined, false),
+    pokemonTemplate(800, 'NECROZMA', 'NECROZMA_DAWN_WINGS', ['Psychic', 'Ghost'], undefined, false),
+    pokemonTemplate(800, 'NECROZMA', 'NECROZMA_ULTRA', ['Psychic', 'Dragon'], undefined, ultraTradable),
+  ];
+
+  it('agrees on Zacian: Hero is tradable and Crowned Sword is not, each checked on its own template', () => {
+    const report = check([ZACIAN_ROW], ZACIAN, ['pm888.fHERO.icon.png', 'pm888.fCROWNED_SWORD.icon.png']);
+    expect(report.disagreements).toEqual([]);
+    expect(report.overridden).toEqual([]);
+    expect(report.checked).toBe(3); // the default form (formless), HERO, CROWNED_SWORD
+  });
+
+  it('agrees on a species untradable whole (Mew, Eternatus) and on Necrozma: base tradable, three forms not', () => {
+    expect(check([MEW], mew(false)).disagreements).toEqual([]);
+    const eternatus = [
+      pokemonTemplate(890, 'ETERNATUS', undefined, ['Poison', 'Dragon'], undefined, false),
+      pokemonTemplate(890, 'ETERNATUS', 'ETERNATUS_NORMAL', ['Poison', 'Dragon'], undefined, false),
+      pokemonTemplate(890, 'ETERNATUS', 'ETERNATUS_ETERNAMAX', ['Poison', 'Dragon'], undefined, false),
+    ];
+    expect(check([ETERNATUS], eternatus, ['pm890.fETERNAMAX.icon.png']).disagreements).toEqual([]);
+    const result = check([NECROZMA], necrozma());
+    expect(result.disagreements).toEqual([]);
+    expect(result.checked).toBe(4); // the default form, Dusk Mane, Dawn Wings, Ultra (NORMAL IS the default form)
+  });
+
+  it('REPORTS a form the game master calls tradable and the app refuses, per form (Ultra Necrozma)', () => {
+    expect(check([NECROZMA], necrozma(true)).disagreements).toEqual([
+      { pokemonId: 800, name: 'Necrozma', formCode: 'ULTRA', gameMasterTradable: true },
+    ]);
+  });
+
+  it('REPORTS a form the game master calls tradable though the rule is silent about it (Crowned Sword)', () => {
+    const templates = [
+      pokemonTemplate(888, 'ZACIAN', undefined, ['Fairy', 'Steel']),
+      pokemonTemplate(888, 'ZACIAN', 'ZACIAN_HERO', ['Fairy']),
+      pokemonTemplate(888, 'ZACIAN', 'ZACIAN_CROWNED_SWORD', ['Fairy', 'Steel']), // tradable here
+    ];
+    const rulesWithoutCrowned: TradabilityRules = {
+      isUntradable: (id, code) => isPokemonUntradable(id, code) && !(id === 888 && code === 'CROWNED_SWORD'),
+      formCombinations: [],
+    };
+    expect(check([ZACIAN_ROW], templates, [], rulesWithoutCrowned).disagreements).toEqual([]); // the rule says tradable, the file says tradable
+    // ...and with the real rule the same file is a disagreement.
+    expect(check([ZACIAN_ROW], templates).disagreements).toEqual([
+      { pokemonId: 888, name: 'Zacian', formCode: 'CROWNED_SWORD', gameMasterTradable: true },
+    ]);
+  });
+
+  it('REPORTS a species the game master calls untradable and the app lets trade', () => {
+    expect(check([VULPIX_ROW], [pokemonTemplate(37, 'VULPIX', undefined, ['Fire'], undefined, false)]).disagreements).toEqual([
+      { pokemonId: 37, name: 'Vulpix', formCode: null, gameMasterTradable: false },
+    ]);
+  });
+
+  it('REPORTS the opposite for a Mythical: the game master calls Mew tradable', () => {
+    expect(check([MEW], mew(true)).disagreements).toEqual([{ pokemonId: 151, name: 'Mew', formCode: null, gameMasterTradable: true }]);
+  });
+
+  it('holds the game master to the rules it is GIVEN, not to a copy of its own', () => {
+    const lenient: TradabilityRules = { isUntradable: () => false, formCombinations: [] };
+    expect(check([MEW], mew(false), [], lenient).disagreements).toEqual([{ pokemonId: 151, name: 'Mew', formCode: null, gameMasterTradable: false }]);
+  });
+
+  describe('the override list', () => {
+    it('lists exactly Pecharunt: the game master says tradable, the app says untradable', () => {
+      expect(TRADABILITY_OVERRIDES).toEqual([
+        { pokemonId: 1025, formCode: null, gameMasterTradable: true, reason: expect.stringContaining('Mythical') },
+      ]);
+      expect(isPokemonUntradable(1025)).toBe(true);
+    });
+
+    it('accepts the listed difference and reports it as overridden, not as a disagreement', () => {
+      const report = check([PECHARUNT], pecharunt(true));
+      expect(report.disagreements).toEqual([]);
+      expect(report.overridden).toEqual([
+        { pokemonId: 1025, name: 'Pecharunt', formCode: null, gameMasterTradable: true, reason: TRADABILITY_OVERRIDES[0].reason },
+      ]);
+      expect(report.checked).toBe(1); // the formless template and PECHARUNT_NORMAL are one entry: the default form
+    });
+
+    it('covers only the entry it names: another Pecharunt form the game master calls tradable is a disagreement', () => {
+      // Hypothetical form (the pinned file has only PECHARUNT_NORMAL), to show an override is not species-wide.
+      const templates = [...pecharunt(true), pokemonTemplate(1025, 'PECHARUNT', 'PECHARUNT_FOO', ['Poison', 'Ghost'])];
+      expect(check([PECHARUNT], templates).disagreements).toEqual([
+        { pokemonId: 1025, name: 'Pecharunt', formCode: 'FOO', gameMasterTradable: true },
+      ]);
+    });
+
+    it('THROWS once the game master agrees with the app, so the entry cannot outlive the difference', () => {
+      expect(() => check([PECHARUNT], pecharunt(false))).toThrow(/TRADABILITY_OVERRIDES entry #1025/);
+      // ...and when the species lost its template altogether.
+      expect(() => check([PECHARUNT], [])).toThrow(/TRADABILITY_OVERRIDES entry #1025/);
+    });
+
+    it('THROWS when the app stops refusing the creature the entry is about', () => {
+      const rules: TradabilityRules = { isUntradable: (id, code) => id !== 1025 && isPokemonUntradable(id, code), formCombinations: [] };
+      expect(() => check([PECHARUNT], pecharunt(true), [], rules)).toThrow(/TRADABILITY_OVERRIDES entry #1025/);
+    });
+
+    it('is not checked for a species outside the input (a fixture with a few species)', () => {
+      expect(() => check([VULPIX_ROW], VULPIX)).not.toThrow();
+    });
+  });
+
+  it('collapses the formless template and the NORMAL form into the default form, and throws when they contradict', () => {
+    const contradiction = [
+      pokemonTemplate(37, 'VULPIX', undefined, ['Fire']),
+      pokemonTemplate(37, 'VULPIX', 'VULPIX_NORMAL', ['Fire'], undefined, false),
+    ];
+    expect(() => check([VULPIX_ROW], contradiction)).toThrow(/contradicts itself about the default form/);
+  });
+
+  it('names species the game master has no template for, without failing them (Basculegion)', () => {
+    const report = check([species(902, 'Basculegion', ['Water', 'Ghost']), VULPIX_ROW], VULPIX);
+    expect(report.unchecked).toEqual([{ pokemonId: 902, name: 'Basculegion' }]);
+    expect(report.disagreements).toEqual([]);
+  });
+
+  describe('forms the rules name', () => {
+    it('reports a rule whose form the game master has no template for (renamed or removed upstream)', () => {
+      const withoutUltra = necrozma().filter((t) => !t.templateId.endsWith('_ULTRA'));
+      expect(check([NECROZMA], withoutUltra).unmatchedFormRules).toEqual([{ pokemonId: 800, formCode: 'ULTRA' }]);
+    });
+
+    it('finds every rule when the templates are there, and ignores rules for species outside the input', () => {
+      expect(check([NECROZMA], necrozma()).unmatchedFormRules).toEqual([]);
+      expect(check([VULPIX_ROW], VULPIX).unmatchedFormRules).toEqual([]); // Kyurem, Zacian, ... are not in this fixture
+    });
+
+    it('matches the app spelling: a template named like the species prefix resolves through the sprite art', () => {
+      // Zacian's rule is CROWNED_SWORD; the template is ZACIAN_CROWNED_SWORD.
+      expect(check([ZACIAN_ROW], ZACIAN).unmatchedFormRules).toEqual([]);
+    });
+  });
+});
+
+describe('blockingProblems', () => {
+  const build = (rows: SpeciesRow[], templates: GameMasterTemplate[], rules: TradabilityRules = RULES) =>
+    buildPokedexData({
+      species: rows,
+      gameMaster: parseGameMaster(templates),
+      gameMasterForms: parseGameMasterForms(templates),
+      assetTokens: parseAssetFormTokens([]),
+      baseFormCodes: {},
+      tradabilityRules: rules,
+    }).report;
+
+  it('is empty for sources that agree, so the generator may write', () => {
+    expect(blockingProblems(build([VULPIX_ROW, ZACIAN_ROW], [...VULPIX, ...ZACIAN]))).toEqual([]);
+  });
+
+  it('refuses a tradability disagreement the override list does not cover', () => {
+    const problems = blockingProblems(build([species(151, 'Mew', ['Psychic'])], [pokemonTemplate(151, 'MEW', undefined, ['Psychic'])]));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/isTradable disagrees with the app's untradable rules .* 1 entry not listed in TRADABILITY_OVERRIDES/);
+  });
+
+  it('does NOT refuse the documented override', () => {
+    const report = build([species(1025, 'Pecharunt', ['Poison', 'Ghost'])], [pokemonTemplate(1025, 'PECHARUNT', undefined, ['Poison', 'Ghost'])]);
+    expect(report.tradability.overridden).toHaveLength(1);
+    expect(blockingProblems(report)).toEqual([]);
+  });
+
+  it('refuses a rule for a form the game master does not have', () => {
+    const rules: TradabilityRules = { ...RULES, formCombinations: [{ pokemonId: 37, formCode: 'GONE' }] };
+    expect(blockingProblems(build([VULPIX_ROW], VULPIX, rules))).toEqual([expect.stringMatching(/names 1 form\(s\) the game master has no template for/)]);
+  });
+
+  it('refuses the typing and default-form problems it always did', () => {
+    expect(blockingProblems(build([species(37, 'Vulpix', ['Water'])], VULPIX))).toEqual([expect.stringMatching(/disagree about 1 species' default typing/)]);
+    const base = buildPokedexData({
+      species: [species(484, 'Palkia', ['Water', 'Dragon'])],
+      gameMaster: new Map(),
+      gameMasterForms: parseGameMasterForms([formsTemplate(484, 'PALKIA', ['PALKIA_NORMAL', 'PALKIA_ORIGIN'])]),
+      assetTokens: new Map(),
+      baseFormCodes: { 484: 'ALTERED' },
+      tradabilityRules: RULES,
+    }).report;
+    expect(blockingProblems(base)).toEqual([expect.stringMatching(/BASE_FORM_CODES .* names 1 default form\(s\)/)]);
+  });
+});
+
+describe('the generator import graph', () => {
+  /** Every module specifier the file imports from. */
+  const importsOf = (file: string): string[] =>
+    [...readFileSync(path.resolve(__dirname, file), 'utf8').matchAll(/^\s*(?:import|export)\b[^'"\n]*from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+
+  it('never reaches the dex or the generated data it replaces, only leaf modules', () => {
+    for (const file of ['pokedex-source.ts', 'generate-pokedex.ts']) {
+      for (const specifier of importsOf(file)) {
+        expect(specifier, `${file} imports ${specifier}`).not.toMatch(/(?:^|\/)(?:pokedex|pokedex-data|sprite-url|pokeminers)$/);
+      }
+    }
+    expect(importsOf('generate-pokedex.ts')).toContain('../constants/untradable');
+  });
+
+  it('reads the untradable rules from a leaf module, like BASE_FORM_CODES', () => {
+    const source = readFileSync(path.resolve(__dirname, '..', 'constants', 'untradable.ts'), 'utf8');
+    expect(source).not.toMatch(/^\s*import\b/m);
+    expect(isPokemonUntradable(890, 'ETERNAMAX')).toBe(true);
   });
 });
 
@@ -657,6 +971,7 @@ describe('renderDataFile', () => {
         gameMasterForms: parseGameMasterForms(templates),
         assetTokens: parseAssetFormTokens(files),
         baseFormCodes: {},
+        tradabilityRules: RULES,
       }),
       provenance,
     );
@@ -724,6 +1039,21 @@ describe('renderDataFile', () => {
     const deerling = formsTemplate(585, 'DEERLING', ['DEERLING_SPRING', 'DEERLING_SUMMER', 'DEERLING_AUTUMN', 'DEERLING_WINTER']);
     const out = text([species(585, 'Deerling', ['Normal', 'Grass'])], [deerling], ['pm585.fSUMMER.icon.png']);
     expect(out).toContain("  [585, ['SUMMER', 'AUTUMN', 'WINTER']], // spelling unconfirmed: AUTUMN, WINTER\n");
+  });
+
+  it('states the tradability check and its documented override in the header', () => {
+    const out = text([species(1025, 'Pecharunt', ['Poison', 'Ghost']), VULPIX_ROW], [pokemonTemplate(1025, 'PECHARUNT', undefined, ['Poison', 'Ghost']), ...VULPIX]);
+    expect(out).toContain('Tradability, game master isTradable vs the app\'s untradable rules (constants/untradable.ts): 3 species and form entries compared');
+    expect(out).toContain('all agree except 1 documented override: #1025 Pecharunt: game master tradable, app untradable on purpose');
+    expect(out).toContain('The generator refuses to write while any other differ (TRADABILITY_OVERRIDES).');
+    expect(text([VULPIX_ROW], VULPIX)).toContain('all agree. The generator refuses');
+  });
+
+  it('says which unflagged event forms it left out, and names the table in the rules', () => {
+    const out = text([CHARIZARD_ROW], CHARIZARD);
+    expect(out).toContain('1 event forms the game master does not flag (#6 COPY_2019)');
+    expect(out).toContain('UNFLAGGED_COSTUME_FORMS_EXCLUDED');
+    expect(out).not.toContain("[6, ['COPY_2019']]"); // and it is not in POKEDEX_FORMS
   });
 
   it('round-trips its provenance, so --pinned can read the commits back', () => {

@@ -5,9 +5,10 @@
 -- dependency, so a guard left behind would fail every update on `listings` with 42703, not just edits to the
 -- form); and it still freezes `form_code` once a chat exists while leaving the column editable before one.
 --
--- Fixture (supabase/seed.sql): listing b…001 belongs to DriftCoral (a…001) with form_code CROWNED_SWORD and
--- already has chat c…001 on it, so it is the guard case. Listing b…002 is Armored Mewtwo (form_code A). Listing
--- b…004 belongs to EmberVale (a…005), is `open` and has zero chats, so nothing can trip the guard on it.
+-- Fixture (supabase/seed.sql): listing b…001 belongs to DriftCoral (a…001), is the default-form Zacian (form_code
+-- null: Crowned Sword Zacian is untradable, so the seed cannot insert one) and already has chat c…001 on it, so
+-- it is the guard case. Listing b…002 is Armored Mewtwo (form_code A). Listing b…004 belongs to EmberVale
+-- (a…005), is `open` and has zero chats, so nothing can trip the guard on it.
 begin;
 select plan(7);
 
@@ -23,7 +24,7 @@ select has_column('public', 'listings', 'form_code', 'and form_code is the only 
 -- ——— fixture sanity: the seeded forms are stated as codes alone ———
 select is(
   (select form_code from public.listings where id = 'b0000000-0000-4000-8000-000000000001'),
-  'CROWNED_SWORD', 'fixture: DriftCoral''s Zacian is Crowned Sword');
+  null::text, 'fixture: DriftCoral''s Zacian is the default form (form_code null)');
 select is(
   (select form_code from public.listings where id = 'b0000000-0000-4000-8000-000000000002'),
   'A', 'fixture: GraniteFox''s Mewtwo is Armored (code A)');

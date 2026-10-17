@@ -28,15 +28,22 @@
  * does NOT load `.env.scripts.local`, which holds a service-role key and must not be read by a script that
  * needs neither.
  *
- * Exit code 1, and nothing written, when the game master and PokeAPI disagree about any species' default
- * typing, or when `constants/base-form-codes.ts` names a default form the game master does not list: the run
- * prints each one rather than choosing a side.
+ * Exit code 1, and nothing written, when (`blockingProblems` in scripts/pokedex-source.ts is the list):
+ *   - the game master and PokeAPI disagree about any species' default typing;
+ *   - `constants/base-form-codes.ts` names a default form the game master does not list;
+ *   - the game master's `isTradable` flag disagrees with the app's untradable rules
+ *     (`constants/untradable.ts`) for any species or form that `TRADABILITY_OVERRIDES` does not list, or
+ *     `UNTRADABLE_FORM_COMBINATIONS` names a form the game master has no template for.
+ * The run prints each one rather than choosing a side. A stale `TRADABILITY_OVERRIDES` or
+ * `UNFLAGGED_COSTUME_FORMS_EXCLUDED` entry stops the run with an error naming the entry, nothing written.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { BASE_FORM_CODES } from '../constants/base-form-codes';
+import { isPokemonUntradable, UNTRADABLE_FORM_COMBINATIONS } from '../constants/untradable';
 import {
+  blockingProblems,
   buildPokedexData,
   parseAssetFormTokens,
   parseGameMaster,
@@ -178,11 +185,30 @@ function printReport(data: PokedexData, provenance: Provenance): void {
   console.log(`  default form has a name of its own on ${data.forms.filter((e) => e.defaultCode !== null).length} of them; ${catalog.defaultsFromBaseTable.length} take it from BASE_FORM_CODES instead of the first-listed form:`);
   console.log(`    ${catalog.defaultsFromBaseTable.map((d) => `${d.pokemonId}:${d.code} (game master lists ${d.gameMasterFirst} first)`).join(' ')}`);
   console.log(`  left out as event costumes (game master isCostume): ${catalog.excludedCostumes.length}; kept as forms: ${catalog.keptCostumes.map((k) => `${k.pokemonId}:${k.code}`).join(' ') || 'none'}`);
+  console.log(`  left out as unflagged event forms (UNFLAGGED_COSTUME_FORMS_EXCLUDED): ${catalog.excludedUnflaggedCostumes.length}: ${catalog.excludedUnflaggedCostumes.map((x) => `${x.pokemonId}:${x.code}`).join(' ')}`);
   console.log(`  left out as shadow/purified status: ${catalog.excludedStatus.length}: ${catalog.excludedStatus.map((x) => `${x.pokemonId}:${x.code}`).join(' ')}`);
   console.log(`  ${unconfirmedForms.length} use the convention's spelling with no sprite art upstream to confirm it:`);
   console.log(`    ${unconfirmedForms.join(' ')}`);
   for (const c of catalog.baseTableConflicts) {
     console.log(`  CONFLICT #${c.pokemonId}: BASE_FORM_CODES says the default is ${c.code}, but the game master lists no such form`);
+  }
+  console.log('');
+
+  const tradability = report.tradability;
+  const formText = (formCode: string | null): string => formCode ?? 'default form';
+  const tradableText = (tradable: boolean): string => (tradable ? 'tradable' : 'untradable');
+  console.log(`Tradability, game master isTradable vs the app's untradable rules: ${tradability.checked} species and form entries compared.`);
+  for (const o of tradability.overridden) {
+    console.log(`  override #${o.pokemonId} ${o.name} (${formText(o.formCode)}): game master ${tradableText(o.gameMasterTradable)}, app ${tradableText(!o.gameMasterTradable)}; ${o.reason}`);
+  }
+  for (const d of tradability.disagreements) {
+    console.log(`  DISAGREE #${d.pokemonId} ${d.name} (${formText(d.formCode)}): game master ${tradableText(d.gameMasterTradable)}, app ${tradableText(!d.gameMasterTradable)}`);
+  }
+  for (const u of tradability.unmatchedFormRules) {
+    console.log(`  CONFLICT #${u.pokemonId}: UNTRADABLE_FORM_COMBINATIONS names ${u.formCode}, but the game master has no such form template`);
+  }
+  if (tradability.unchecked.length > 0) {
+    console.log(`  not compared (no game master template): ${tradability.unchecked.map((u) => `#${u.pokemonId} ${u.name}`).join(', ')}`);
   }
   console.log('');
 
@@ -253,15 +279,13 @@ async function main(): Promise<void> {
     gameMasterForms: parseGameMasterForms(gameMasterJson),
     assetTokens: parseAssetFormTokens(assetFiles),
     baseFormCodes: BASE_FORM_CODES,
+    tradabilityRules: { isUntradable: isPokemonUntradable, formCombinations: UNTRADABLE_FORM_COMBINATIONS },
   });
   printReport(data, provenance);
 
-  if (data.report.disagreements.length > 0) {
-    console.error(`Refusing to write ${path.relative(process.cwd(), OUT_FILE)}: the sources disagree about ${data.report.disagreements.length} species' default typing (listed above).`);
-    process.exit(1);
-  }
-  if (data.report.formCatalog.baseTableConflicts.length > 0) {
-    console.error(`Refusing to write ${path.relative(process.cwd(), OUT_FILE)}: BASE_FORM_CODES (constants/base-form-codes.ts) names ${data.report.formCatalog.baseTableConflicts.length} default form(s) the game master does not list (listed above).`);
+  const problems = blockingProblems(data.report);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`Refusing to write ${path.relative(process.cwd(), OUT_FILE)}: ${problem}`);
     process.exit(1);
   }
   if (dryRun) {

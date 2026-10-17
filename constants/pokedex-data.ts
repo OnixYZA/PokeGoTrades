@@ -11,8 +11,9 @@
  *     the pokemon row whose id equals the species id.
  *   PokeMiners/game_masters@8e227be44f288d34463e23bf04e9b564d3c16f79
  *     latest/latest.json (Pokémon GO's own data). Per-form types, for FORM_TYPE_OVERRIDES; a cross-check of
- *     every species' default typing against PokeAPI's; and each species' list of forms (the FORMS_
- *     templates), for POKEDEX_FORMS.
+ *     every species' default typing against PokeAPI's; each species' list of forms (the FORMS_
+ *     templates), for POKEDEX_FORMS; and a cross-check of every species' and form's isTradable flag
+ *     against the app's untradable rules (nothing from it is written to this file).
  *   PokeMiners/pogo_assets@c2a686eb08ace6e890d8fe3d2134c76988db87b5
  *     "Images/Pokemon - 256x256/Addressable Assets" (file listing only). The form-token spelling the app
  *     stores in `formCode`, so overrides and the form catalog are keyed exactly as listings carry them.
@@ -23,8 +24,9 @@
  *     (The game master's FORMLESS template for #888 Zacian, #889 Zamazenta, #892 Urshifu carries a non-default form's
  *     typing, which is why a default is read from the species' first-listed form.)
  *   - 127 form overrides: 116 from form templates, 11 from Mega/Primal evolutions. 20 are marked "spelling unconfirmed": upstream has no sprite art under that form code yet.
- *   - 323 selectable forms on 130 species in POKEDEX_FORMS; 73 are marked "spelling unconfirmed" the same way. 52 of those species have a default form with a name of its own (POKEDEX_DEFAULT_FORMS).
- *   - Left out of POKEDEX_FORMS (see the rules below): 96 event-costume forms (and kept as forms: #150 A), and 7 shadow-marker forms (code S on 7 species).
+ *   - 318 selectable forms on 125 species in POKEDEX_FORMS; 73 are marked "spelling unconfirmed" the same way. 52 of those species have a default form with a name of its own (POKEDEX_DEFAULT_FORMS).
+ *   - Left out of POKEDEX_FORMS (see the rules below): 96 event-costume forms (and kept as forms: #150 A), 5 event forms the game master does not flag (#3 COPY_2019, #6 COPY_2019, #9 COPY_2019, #25 COPY_2019, #54 SWIM_2025), and 7 shadow-marker forms (code S on 7 species).
+ *   - Tradability, game master isTradable vs the app's untradable rules (constants/untradable.ts): 1503 species and form entries compared; all agree except 1 documented override: #1025 Pecharunt: game master tradable, app untradable on purpose (the project treats it as a Mythical, like every Mythical but Meltan and Melmetal; owner decision, 2026-10-18). The generator refuses to write while any other differ (TRADABILITY_OVERRIDES).
  *
  * POKEDEX_DATA is species-level: national dex order, ids 1 through 1025, one row per species with its
  * default form's typing. Typing that depends on the form (Alolan, Galarian, Hisuian, Origin, Crowned, Rotom
@@ -47,11 +49,13 @@
  *   - event costumes: forms the game master flags `isCostume` (Pikachu's outfits, Corsola SPRING_2026, ...).
  *     Their art sits under `.f` sprite tokens, so the sprite split cannot tell them from forms; the flag can.
  *     Costume is a listing attribute of its own. The one exception is Armored Mewtwo (`A`), which the app has
- *     always stored as a form (COSTUME_FORMS_KEPT_AS_FORMS in scripts/pokedex-source.ts).
+ *     always stored as a form (COSTUME_FORMS_KEPT_AS_FORMS in scripts/pokedex-source.ts). A few event forms
+ *     carry no flag and are named one by one instead (UNFLAGGED_COSTUME_FORMS_EXCLUDED in the same file).
  *   - the form-level Shadow marker (`S`) and any code ending _SHADOW or _PURIFIED: shadow is untradable and
  *     purified is a listing flag (SHADOW_MARKER_CODES in scripts/pokedex-source.ts says why `S` counts).
  * Tradability is NOT decided here: forms of untradable species are listed, and `isPokemonUntradable`
- * (constants/pokedex.ts) is the one rule that refuses them. Read this through `formsOf` / `defaultFormOf`.
+ * (constants/untradable.ts, re-exported by constants/pokedex.ts) is the one rule that refuses them. Read this
+ * through `formsOf` / `defaultFormOf`.
  */
 import type { PokemonTypes } from './pokemon-types';
 
@@ -1224,12 +1228,8 @@ export const FORM_TYPE_OVERRIDES: readonly (readonly [pokemonId: number, formCod
  * listed. See the file header for what is left out. Read through `formsOf` in constants/pokedex.ts.
  */
 export const POKEDEX_FORMS: readonly (readonly [pokemonId: number, formCodes: readonly string[]])[] = [
-  [3, ['COPY_2019']],
-  [6, ['COPY_2019']],
-  [9, ['COPY_2019']],
   [19, ['ALOLA']],
   [20, ['ALOLA']],
-  [25, ['COPY_2019']],
   [26, ['ALOLA']],
   [27, ['ALOLA']],
   [28, ['ALOLA']],
@@ -1239,7 +1239,6 @@ export const POKEDEX_FORMS: readonly (readonly [pokemonId: number, formCodes: re
   [51, ['ALOLA']],
   [52, ['ALOLA', 'GALARIAN']],
   [53, ['ALOLA']],
-  [54, ['SWIM_2025']],
   [58, ['HISUIAN']],
   [59, ['HISUIAN']],
   [74, ['ALOLA']],

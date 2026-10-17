@@ -80,6 +80,12 @@ update public.profiles set trades_count = 214 where id = 'a0000000-0000-4000-800
 -- ...000500_creature_form_codes migration header for why 'Apex' specifically stays unmapped). Keep each
 -- row's pokemon_id + form_code identical to data/listings.ts (data/listings.test.ts fails when they drift).
 --
+-- Every row here, and every looking[] entry, must be TRADABLE. Migrations run before this seed on a
+-- `supabase db reset`, so `listings_tradable_guard` (…20260929000100, widened by …20261018000100) refuses an
+-- untradable listing or wanted creature at load time and aborts the whole seed. That is why l1 is the default
+-- (Hero) form Zacian, `form_code` null: Crowned Sword Zacian, Crowned Shield Zamazenta, Ultra Necrozma and every
+-- Eternatus are untradable. data/listings.test.ts fails when this statement names one.
+--
 -- Every `name` below (the listing's own and each looking[] entry) is the DEX name for its pokemon_id
 -- (constants/pokedex.ts) and nothing else: "Shiny", "Legacy", "Purified", a form or "Apex" are never typed
 -- into it. Those live in their own columns/keys (shiny, purified, costume, form_code, formCode, tags), and the
@@ -91,7 +97,7 @@ insert into public.listings (
   id, seller_id, name, pokemon_id, form_code, catch_year, lucky, shiny, hue, accent, bg, loc,
   pvp_rank, demand_rank, trade_type, iv_atk, iv_def, iv_sta, looking) values
   ('b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001',
-   'Zacian', 888, 'CROWNED_SWORD', 2020, true, true, 260, '#c9a6ff', 'meta', 'Adyar',
+   'Zacian', 888, null, 2020, true, true, 260, '#c9a6ff', 'meta', 'Adyar',
    'S+', '#1', 'Unregistered (Shiny/Legendary)', 15, 15, 14,
    '[{"name":"Zamazenta","pokemonId":889,"hue":340,"shiny":true},
      {"name":"Lugia","pokemonId":249,"hue":25},

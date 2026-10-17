@@ -16,14 +16,19 @@ import type { Listing } from './types';
 // `249/250.fS` sprite exists in the bucket, we can't confirm it maps to "Apex" specifically, so
 // those listings carry no `formCode` and are the species' default form until that's verified (the
 // word "Apex" is therefore not stated anywhere on l6). Mainline-game forms
-// (crowned/primal/origin/mega/attack-forme) DO have verified codes and are wired up below.
+// (primal/origin/mega) DO have verified codes and are wired up below.
+//
+// Every listing and every `looking` entry here must be TRADABLE (`isPokemonUntradable`, which mirrors
+// `public.is_creature_untradable`). supabase/seed.sql holds these same six listings, and the database refuses
+// an untradable one at load time. That is why l1 is the default-form Zacian: Crowned Sword Zacian, Crowned
+// Shield Zamazenta, Ultra Necrozma and every Eternatus are untradable. `data/listings.test.ts` fails if either
+// this file or the seed names one.
 export const listings: Listing[] = [
   {
     id: 'l1',
     name: 'Zacian',
     pokemonId: 888,
-    formCode: 'CROWNED_SWORD',
-    year: 2020,
+    year: 2020, // no formCode: the default (Hero) form. Crowned Sword Zacian is untradable, so it cannot be listed
     lucky: true,
     shiny: true,
     hue: 260,

@@ -213,8 +213,9 @@ const DEFAULT_FORM_BY_SPECIES = new Map<number, string>(POKEDEX_DEFAULT_FORMS);
  * why is documented in the header of `constants/pokedex-data.ts`, where the list is generated.
  *
  * It does NOT say whether a form can be traded: ask `isPokemonUntradable(pokemonId, formCode)` for each, since
- * the Deoxys forms are listed here although every Deoxys is untradable, and White Kyurem is listed although
- * Kyurem is not.
+ * the Deoxys forms are listed here although every Deoxys is untradable (and Eternamax Eternatus although every
+ * Eternatus is), and White Kyurem, Crowned Sword Zacian and Ultra Necrozma are listed although Kyurem, Zacian
+ * and Necrozma are not untradable.
  */
 export function formsOf(pokemonId: number): readonly string[] {
   return FORMS_BY_SPECIES.get(pokemonId) ?? NO_FORMS;
@@ -232,57 +233,16 @@ export function defaultFormOf(pokemonId: number): string | undefined {
 }
 
 // ——— trade eligibility ———
-// The client half of a rule the database enforces too: `public.is_creature_untradable` in
-// supabase/migrations/20260929000100_enforce_untradable_pokemon.sql holds the SAME three lists, and
-// `pokedex.test.ts` fails if the two drift apart. Shadow Pokémon are untradable as well, but that rule has no
-// entry here because no creature shape in the app can carry "shadow" at all (`listings.bg <> 'shadow'`,
-// and `CreatureRef`/`FormalOffer` have no shadow flag).
-
-/** Mythicals can't be traded in Pokémon GO. Meltan (808) and Melmetal (809) are the one exception and are
- *  deliberately absent. */
-export const UNTRADABLE_MYTHICAL_IDS: ReadonlySet<number> = new Set([
-  151, // Mew
-  251, // Celebi
-  385, // Jirachi
-  386, // Deoxys (all forms)
-  489, // Phione
-  490, // Manaphy
-  491, // Darkrai
-  492, // Shaymin
-  493, // Arceus
-  494, // Victini
-  647, // Keldeo
-  648, // Meloetta
-  649, // Genesect
-  719, // Diancie
-  720, // Hoopa
-  721, // Volcanion
-  801, // Magearna
-  802, // Marshadow
-  807, // Zeraora
-  893, // Zarude
-  1025, // Pecharunt
-]);
-
-/** Non-mythical species that are untradable in every form. */
-export const UNTRADABLE_SPECIES_IDS: ReadonlySet<number> = new Set([
-  718, // Zygarde
-]);
-
-/** Fused forms, keyed by PokeMiners form code (`CreatureRef.formCode`). The unfused species stays tradable. */
-export const UNTRADABLE_FORM_COMBINATIONS: readonly { pokemonId: number; formCode: string }[] = [
-  { pokemonId: 646, formCode: 'WHITE' }, // White Kyurem
-  { pokemonId: 646, formCode: 'BLACK' }, // Black Kyurem
-  { pokemonId: 800, formCode: 'DUSK_MANE' }, // Dusk Mane Necrozma
-  { pokemonId: 800, formCode: 'DAWN_WINGS' }, // Dawn Wings Necrozma
-];
-
-/** Whether this species (and form) can never change hands in Pokémon GO, so it must never be listed,
- *  wanted in return, or formally offered. */
-export function isPokemonUntradable(pokemonId: number, formCode?: string | null): boolean {
-  if (UNTRADABLE_MYTHICAL_IDS.has(pokemonId) || UNTRADABLE_SPECIES_IDS.has(pokemonId)) return true;
-  return formCode != null && UNTRADABLE_FORM_COMBINATIONS.some((c) => c.pokemonId === pokemonId && c.formCode === formCode);
-}
+// The rule and its three lists live in a leaf module, `constants/untradable.ts`, so that the Pokédex generator
+// can cross-check them against the game master without importing this file (and with it the generated data the
+// generator replaces). They are re-exported here so app code has one import site for everything about a
+// creature: ask `isPokemonUntradable(pokemonId, formCode)`. The database enforces the same rule
+// (`public.is_creature_untradable`), and `pokedex.test.ts` fails if the two drift apart.
+//
+// The lists agree with the pinned game master's `isTradable` for every species and form, except Pecharunt: the
+// game master calls it tradable and the project deliberately keeps it untradable (see `untradable.ts` and
+// `TRADABILITY_OVERRIDES` in scripts/pokedex-source.ts). The generator fails on any other difference.
+export { isPokemonUntradable, UNTRADABLE_FORM_COMBINATIONS, UNTRADABLE_MYTHICAL_IDS, UNTRADABLE_SPECIES_IDS } from './untradable';
 
 /**
  * Case- and diacritic-insensitive, punctuation-stripping search key: "Flabébé" -> "flabebe",

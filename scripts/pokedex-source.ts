@@ -4,7 +4,8 @@
  * no filesystem, so vitest drives it with small fixtures (`scripts/pokedex-source.test.ts`).
  *
  * RELATIVE IMPORTS ONLY, and the only app modules it may import are LEAVES with no imports of their own
- * (`constants/pokemon-types.ts`, `constants/base-form-codes.ts`): the generator replaces
+ * (`constants/pokemon-types.ts`; `constants/base-form-codes.ts` and `constants/untradable.ts` are leaves too and
+ * reach this module as INPUTS from the CLI, so tests can substitute fixtures): the generator replaces
  * `constants/pokedex-data.ts`, so it must keep running even when that file is stale, mid-merge or the wrong
  * shape. Do not import `constants/pokedex.ts`, `lib/sprite-url.ts` or `scripts/pokeminers.ts` here (each
  * pulls the dex data in).
@@ -25,6 +26,13 @@
  * it (Origin Palkia and Armored Mewtwo have their species' typing, so they are not in it), and the Create
  * Listing form picker needs the complete list. It comes from the game master's own `FORMS_V####_POKEMON_*`
  * lists, in the order the game master gives them, with the exclusions documented on `buildFormCatalog`.
+ *
+ * THE TRADABILITY CROSS-CHECK (added 2026-10-18) writes nothing into the data file. It compares the game
+ * master's per-template `isTradable` flag (absent means untradable) with the app's own untradable rules
+ * (`constants/untradable.ts`, mirrored by `public.is_creature_untradable`) and refuses to write while any
+ * species or form disagrees, except the entries listed, with a reason, in `TRADABILITY_OVERRIDES`. The rules are
+ * hand-maintained in two languages, so this is what turns a game master update that changes a creature's
+ * tradability into a failed run instead of silent drift. See `checkTradability`.
  */
 import { POKEMON_TYPES, isPokemonType, sameTypes, toPokemonTypes, type PokemonType, type PokemonTypes } from '../constants/pokemon-types';
 
@@ -174,6 +182,10 @@ export interface GameMasterTemplate {
       form?: string;
       type?: string;
       type2?: string;
+      /** Whether the creature can be traded. Present (`true`) on tradable creatures and ABSENT, never `false`,
+       *  on untradable ones: in the pinned file 2387 of the 2472 species/form templates carry it, none with any
+       *  other value. It is per TEMPLATE, so per form: `ZACIAN_HERO` has it and `ZACIAN_CROWNED_SWORD` does not. */
+      isTradable?: boolean;
       /** Mega/Primal evolutions: only the entries with a `typeOverride1` change typing. */
       tempEvoOverrides?: { tempEvoId?: string; typeOverride1?: string; typeOverride2?: string }[];
     };
@@ -204,6 +216,10 @@ export interface GmSpecies {
   defaultForm: string | null;
   /** `MEGA`, `MEGA_X`, `MEGA_Y`, `PRIMAL`, ... (without the `TEMP_EVOLUTION_` prefix) -> types. */
   tempEvos: Map<string, PokemonTypes>;
+  /** Whether the formless template is flagged `isTradable`. */
+  bareTradable: boolean;
+  /** Full form enum -> whether that form's template is flagged `isTradable` (same keys as `forms`). */
+  formTradable: Map<string, boolean>;
 }
 
 const POKEMON_TEMPLATE = /^V(\d{4})_POKEMON_/;
@@ -231,7 +247,7 @@ function gmTypes(type: string | undefined, type2: string | undefined, where: str
  */
 export function parseGameMaster(templates: readonly GameMasterTemplate[]): Map<number, GmSpecies> {
   const defaultForms = new Map<number, string | null>();
-  const building = new Map<number, Omit<GmSpecies, 'bare' | 'defaultForm'> & { bare: PokemonTypes | undefined }>();
+  const building = new Map<number, Omit<GmSpecies, 'bare' | 'bareTradable' | 'defaultForm'> & { bare: PokemonTypes | undefined; bareTradable: boolean }>();
 
   for (const template of templates) {
     const formsMatch = FORMS_TEMPLATE.exec(template.templateId);
@@ -250,7 +266,7 @@ export function parseGameMaster(templates: readonly GameMasterTemplate[]): Map<n
 
     let entry = building.get(pokemonId);
     if (!entry) {
-      entry = { pokemonId, enumName: settings.pokemonId, bare: undefined, forms: new Map(), tempEvos: new Map() };
+      entry = { pokemonId, enumName: settings.pokemonId, bare: undefined, bareTradable: false, forms: new Map(), formTradable: new Map(), tempEvos: new Map() };
       building.set(pokemonId, entry);
     } else if (entry.enumName !== settings.pokemonId) {
       throw new Error(`${where}: species enum ${settings.pokemonId} contradicts ${entry.enumName} on #${pokemonId}`);
@@ -259,9 +275,11 @@ export function parseGameMaster(templates: readonly GameMasterTemplate[]): Map<n
     if (settings.form) {
       if (entry.forms.has(settings.form)) throw new Error(`${where}: form ${settings.form} is defined twice`);
       entry.forms.set(settings.form, types);
+      entry.formTradable.set(settings.form, settings.isTradable === true);
     } else {
       if (entry.bare) throw new Error(`${where}: a second formless template for #${pokemonId}`);
       entry.bare = types;
+      entry.bareTradable = settings.isTradable === true;
     }
 
     for (const override of settings.tempEvoOverrides ?? []) {
@@ -415,6 +433,41 @@ export function resolveFormCode(enumName: string, gmForm: string, tokens: Readon
 export const COSTUME_FORMS_KEPT_AS_FORMS: ReadonlyMap<number, ReadonlySet<string>> = new Map([[150, new Set(['A'])]]);
 
 /**
+ * Event outfits the game master does NOT flag `isCostume`, so the flag alone would offer them as forms: species
+ * id -> the app's form codes. The mirror image of `COSTUME_FORMS_KEPT_AS_FORMS` (a flagged form that IS a form),
+ * keyed the same way, and for the same reason: the flag is the only machine-readable signal, so every place the
+ * flag is wrong needs an explicit, reviewed entry.
+ *
+ *   - `COPY_2019` on #3 Venusaur, #6 Charizard, #9 Blastoise and #25 Pikachu: a 2019 event form. Its game
+ *     master entry carries an `assetBundleSuffix` of `pm00NN_00_pgo_copy2019` and no `isCostume`, while
+ *     Pikachu's other 2019 outfits (`FALL_2019`, `VS_2019`) ARE flagged.
+ *   - `SWIM_2025` on #54 Psyduck: a 2025 event form, likewise unflagged.
+ * That these behave as costumes is the project's judgement (2026-10-18), not something the data states; the
+ * data only shows that they are event-year forms with no flag. With them out, none of the five species has any
+ * other selectable form, so all five drop out of POKEDEX_FORMS.
+ *
+ * SPECIES-SCOPED, like the table above, and not a global set of codes like `SHADOW_MARKER_CODES`. The shadow
+ * marker is one game master convention that means the same on every species, so one code is right for all of
+ * them. An event outfit is a judgement about a specific form, made by reading it, so the entry names exactly the
+ * forms that were read. That keeps the generated diff the review of any new form (an unflagged outfit on a
+ * species not listed here shows up as a new selectable form, instead of being swallowed by a rule written for
+ * other species), and it lets the staleness guard name the precise entry that stopped matching, where a global
+ * code would stay satisfied while any one species still had it.
+ *
+ * The builder THROWS when an entry no longer matches a non-default form in the game master's list for that
+ * species (renamed, removed, or the species has no form list), and when the game master has since flagged it
+ * `isCostume` (the entry is then redundant: delete it). So the table can neither go stale unnoticed nor outlive
+ * the data fix that makes it unnecessary.
+ */
+export const UNFLAGGED_COSTUME_FORMS_EXCLUDED: ReadonlyMap<number, ReadonlySet<string>> = new Map([
+  [3, new Set(['COPY_2019'])], // Venusaur
+  [6, new Set(['COPY_2019'])], // Charizard
+  [9, new Set(['COPY_2019'])], // Blastoise
+  [25, new Set(['COPY_2019'])], // Pikachu
+  [54, new Set(['SWIM_2025'])], // Psyduck
+]);
+
+/**
  * Form codes that are the game master's form-level Shadow marker rather than a form a trainer can own.
  *
  * `S` is a single-letter form on seven legendaries (#243 Raikou, #244 Entei, #245 Suicune, #249 Lugia, #250
@@ -448,6 +501,8 @@ export interface FormCatalogReport {
   excludedCostumes: { pokemonId: number; code: string }[];
   /** `isCostume` forms kept because `COSTUME_FORMS_KEPT_AS_FORMS` says so. */
   keptCostumes: { pokemonId: number; code: string }[];
+  /** Event forms left out because `UNFLAGGED_COSTUME_FORMS_EXCLUDED` says so (the game master does not flag them). */
+  excludedUnflaggedCostumes: { pokemonId: number; code: string }[];
   /** Shadow/purified status codes left out (`SHADOW_MARKER_CODES`, `*_SHADOW`, `*_PURIFIED`). */
   excludedStatus: { pokemonId: number; code: string }[];
   /** Species whose default is `BASE_FORM_CODES`' form, where the game master lists a different form first. */
@@ -467,7 +522,8 @@ export interface FormCatalogReport {
  *      `*_NORMAL` form is always left out as well: it is the default by definition.
  *   2. Temporary evolutions (Mega, Primal) and Gigantamax. They are not stored forms, and the game master's
  *      form lists do not carry them (Mega/Primal live in `tempEvoOverrides`), so nothing needs filtering.
- *   3. Event costumes: forms the game master flags `isCostume`, except `COSTUME_FORMS_KEPT_AS_FORMS`.
+ *   3. Event costumes: forms the game master flags `isCostume`, except `COSTUME_FORMS_KEPT_AS_FORMS`, and the
+ *      event forms it does not flag that `UNFLAGGED_COSTUME_FORMS_EXCLUDED` names.
  *   4. Status variants: `SHADOW_MARKER_CODES` and any code ending `_SHADOW` / `_PURIFIED`.
  * Everything else is offered, including forms whose spelling has no sprite art yet (`confirmed: false`, the
  * same convention as the override table) and forms of untradable species. TRADABILITY IS NOT DECIDED HERE:
@@ -489,6 +545,7 @@ export function buildFormCatalog(input: {
     speciesWithSeveralForms: 0,
     excludedCostumes: [],
     keptCostumes: [],
+    excludedUnflaggedCostumes: [],
     excludedStatus: [],
     defaultsFromBaseTable: [],
     baseTableConflicts: [],
@@ -496,7 +553,12 @@ export function buildFormCatalog(input: {
 
   for (const row of species) {
     const list = gameMasterForms.get(row.id);
-    if (!list || list.forms.length < 2) continue;
+    const unflagged = UNFLAGGED_COSTUME_FORMS_EXCLUDED.get(row.id);
+    if (!list || list.forms.length < 2) {
+      // Checked before skipping, so an entry for a species whose form list shrank or vanished cannot go stale.
+      if (unflagged) throw new Error(`#${row.id} ${[...unflagged].join(', ')}: UNFLAGGED_COSTUME_FORMS_EXCLUDED excludes it, but the game master lists no such form`);
+      continue;
+    }
     report.speciesWithSeveralForms++;
 
     const tokens = assetTokens.get(row.id);
@@ -517,6 +579,16 @@ export function buildFormCatalog(input: {
       report.defaultsFromBaseTable.push({ pokemonId: row.id, code: baseEntry.code, gameMasterFirst: resolved[0].code });
     }
 
+    for (const code of unflagged ?? []) {
+      const entry = resolved.find((r) => r.code === code);
+      if (!entry || entry === defaultEntry) {
+        throw new Error(`#${row.id} ${code}: UNFLAGGED_COSTUME_FORMS_EXCLUDED excludes it, but it is not a non-default form in the game master's list`);
+      }
+      if (entry.isCostume) {
+        throw new Error(`#${row.id} ${code}: the game master now flags it isCostume, so UNFLAGGED_COSTUME_FORMS_EXCLUDED no longer needs it; remove the entry`);
+      }
+    }
+
     const taken = new Set<string>([defaultEntry.code]);
     const forms: ResolvedFormCode[] = [];
     for (const r of resolved) {
@@ -533,12 +605,173 @@ export function buildFormCatalog(input: {
         }
         report.keptCostumes.push({ pokemonId: row.id, code: r.code });
       }
+      if (unflagged?.has(r.code)) {
+        report.excludedUnflaggedCostumes.push({ pokemonId: row.id, code: r.code });
+        continue;
+      }
       forms.push({ code: r.code, confirmed: r.confirmed });
     }
     if (forms.length === 0) continue;
     entries.push({ pokemonId: row.id, defaultCode: defaultEntry.form.endsWith('_NORMAL') ? null : defaultEntry.code, forms });
   }
   return { entries, report };
+}
+
+// ================================================================================================
+// Tradability cross-check
+// ================================================================================================
+
+/**
+ * The app's untradable rules as the generator sees them. Both halves come from `constants/untradable.ts` (a leaf
+ * module, so importing it cannot pull in the data file this run replaces) and arrive as INPUT, like
+ * `baseFormCodes`, so tests can substitute fixtures.
+ */
+export interface TradabilityRules {
+  /** `isPokemonUntradable`. `formCode: null` is the species' default form. */
+  isUntradable: (pokemonId: number, formCode: string | null) => boolean;
+  /** `UNTRADABLE_FORM_COMBINATIONS`: the forms the rules name one by one. */
+  formCombinations: readonly { pokemonId: number; formCode: string }[];
+}
+
+/** One deliberate difference between the app's untradable rules and the game master's `isTradable`. */
+export interface TradabilityOverride {
+  pokemonId: number;
+  /** The app's form code for the game master entry; `null` is the species' default form (its formless
+   *  template, and its `*_NORMAL` form template, which are the same creature to the app). */
+  formCode: string | null;
+  /** What the game master says. The app says the opposite: that is what makes this an override. */
+  gameMasterTradable: boolean;
+  /** Why the app departs from the source. Printed by the generator and written into the data file's header. */
+  reason: string;
+}
+
+/**
+ * The ONLY places the app's untradable rules (`constants/untradable.ts`, mirrored by
+ * `public.is_creature_untradable`) are allowed to differ from the game master's `isTradable`. Every other
+ * species and form must agree, or `checkTradability` reports it and the generator refuses to write.
+ *
+ * Add an entry only for a decision the project has made on purpose, with its reason. An entry is also a promise
+ * that the game master still says what it says: `checkTradability` THROWS when an entry no longer matches a real
+ * disagreement (the game master changed its mind, or the app's rule did), so the list shrinks to what is true.
+ *
+ * Pecharunt (#1025): the pinned game master marks it `isTradable: true`, on its formless template and on
+ * `PECHARUNT_NORMAL`. The project keeps it untradable, like every Mythical except Meltan and Melmetal
+ * (`UNTRADABLE_MYTHICAL_IDS`). That is the project owner's decision (2026-10-18), not a reading of the source.
+ */
+export const TRADABILITY_OVERRIDES: readonly TradabilityOverride[] = [
+  {
+    pokemonId: 1025,
+    formCode: null,
+    gameMasterTradable: true,
+    reason: 'the project treats it as a Mythical, like every Mythical but Meltan and Melmetal; owner decision, 2026-10-18',
+  },
+];
+
+export interface TradabilityDisagreement {
+  pokemonId: number;
+  name: string;
+  /** The app's form code; `null` is the species' default form. */
+  formCode: string | null;
+  /** What the game master says; the app's rules say the opposite. */
+  gameMasterTradable: boolean;
+}
+
+export interface TradabilityReport {
+  /** (species, form) entries compared: per species its default form plus every form with a template of its own. */
+  checked: number;
+  /** Species the game master has no `pokemonSettings` for (Basculegion), so nothing was compared whatever the rules say. */
+  unchecked: { pokemonId: number; name: string }[];
+  /** Differences accepted because `TRADABILITY_OVERRIDES` lists them. */
+  overridden: (TradabilityDisagreement & { reason: string })[];
+  /** FATAL: differences nothing lists. Must be empty to write. */
+  disagreements: TradabilityDisagreement[];
+  /** FATAL: `UNTRADABLE_FORM_COMBINATIONS` names a form the game master has no template for, so the rule can
+   *  never be compared (the form was renamed or removed upstream). Must be empty to write. */
+  unmatchedFormRules: { pokemonId: number; formCode: string }[];
+}
+
+/**
+ * Compares the game master's `isTradable` with the app's untradable rules, for every species and form the game
+ * master has a template for. The flag is per TEMPLATE, so it is checked per form: `ZACIAN_HERO` is tradable and
+ * `ZACIAN_CROWNED_SWORD` is not, and the rules must say so for each. A flag that is absent counts as untradable
+ * (the pinned file never writes `false`).
+ *
+ * WHAT IS COMPARED. For each species, one entry per app form code: the formless template and the `*_NORMAL`
+ * form are the species' default form (`formCode: null`, since `NORMAL` is never stored), and every other form
+ * template is its resolved code (`resolveFormCode`), so a rule keyed `CROWNED_SWORD` meets the template named
+ * `ZACIAN_CROWNED_SWORD`. Two templates that land on one entry must agree, or this throws: a game master that
+ * contradicts itself about one creature has no answer to compare against.
+ *
+ * WHAT HAPPENS ON A DIFFERENCE. It is reported in `disagreements` (the caller refuses to write; see
+ * `blockingProblems`) unless `TRADABILITY_OVERRIDES` lists exactly it. An override that matches nothing throws,
+ * so the list cannot go stale. Species the game master has no template for cannot be compared; they are named
+ * in `unchecked`, not failed.
+ *
+ * The comparison also runs backwards for forms: a form the rules name (`formCombinations`) must exist in the game
+ * master, or the rule is dead (`unmatchedFormRules`). Only species in the `species` input are considered, so a
+ * fixture with a handful of species is not failed for the rest of the dex.
+ */
+export function checkTradability(input: {
+  species: readonly SpeciesRow[];
+  gameMaster: ReadonlyMap<number, GmSpecies>;
+  assetTokens: ReadonlyMap<number, ReadonlySet<string>>;
+  rules: TradabilityRules;
+}): TradabilityReport {
+  const { species, gameMaster, assetTokens, rules } = input;
+  const report: TradabilityReport = { checked: 0, unchecked: [], overridden: [], disagreements: [], unmatchedFormRules: [] };
+  const compared = new Set<string>();
+  const usedOverrides = new Set<TradabilityOverride>();
+  const key = (pokemonId: number, formCode: string | null) => `${pokemonId}:${formCode ?? ''}`;
+
+  for (const row of species) {
+    const entry = gameMaster.get(row.id);
+    if (!entry) {
+      report.unchecked.push({ pokemonId: row.id, name: row.name });
+      continue;
+    }
+
+    const tokens = assetTokens.get(row.id);
+    const tradableByForm = new Map<string | null, boolean>();
+    const note = (formCode: string | null, tradable: boolean, source: string) => {
+      const earlier = tradableByForm.get(formCode);
+      if (earlier !== undefined && earlier !== tradable) {
+        throw new Error(`#${row.id} ${row.name}: the game master contradicts itself about ${formCode ?? 'the default form'}: ${source} says ${tradable ? 'tradable' : 'untradable'}, an earlier template says the opposite`);
+      }
+      tradableByForm.set(formCode, tradable);
+    };
+    note(null, entry.bareTradable, 'the formless template');
+    for (const [form, tradable] of entry.formTradable) {
+      note(form.endsWith('_NORMAL') ? null : resolveFormCode(entry.enumName, form, tokens).code, tradable, form);
+    }
+
+    for (const [formCode, gameMasterTradable] of tradableByForm) {
+      report.checked++;
+      compared.add(key(row.id, formCode));
+      if (gameMasterTradable !== rules.isUntradable(row.id, formCode)) continue; // tradable both ways, or untradable both ways
+      const disagreement: TradabilityDisagreement = { pokemonId: row.id, name: row.name, formCode, gameMasterTradable };
+      const override = TRADABILITY_OVERRIDES.find((o) => o.pokemonId === row.id && o.formCode === formCode && o.gameMasterTradable === gameMasterTradable);
+      if (override) {
+        usedOverrides.add(override);
+        report.overridden.push({ ...disagreement, reason: override.reason });
+      } else report.disagreements.push(disagreement);
+    }
+  }
+
+  const inDex = new Set(species.map((row) => row.id));
+  for (const override of TRADABILITY_OVERRIDES) {
+    if (inDex.has(override.pokemonId) && !usedOverrides.has(override)) {
+      throw new Error(
+        `TRADABILITY_OVERRIDES entry #${override.pokemonId} ${override.formCode ?? '(default form)'} no longer matches a difference ` +
+          `(the game master ${override.gameMasterTradable ? 'no longer says tradable' : 'no longer says untradable'}, or the app's rule changed): remove the entry`,
+      );
+    }
+  }
+  for (const combination of rules.formCombinations) {
+    if (inDex.has(combination.pokemonId) && gameMaster.has(combination.pokemonId) && !compared.has(key(combination.pokemonId, combination.formCode))) {
+      report.unmatchedFormRules.push({ pokemonId: combination.pokemonId, formCode: combination.formCode });
+    }
+  }
+  return report;
 }
 
 // ================================================================================================
@@ -579,6 +812,8 @@ export interface BuildReport {
    *  so they resolve to the species default. May include cosmetic tokens (costumes) that never change typing. */
   assetFormsWithoutTypes: { pokemonId: number; token: string }[];
   formCatalog: FormCatalogReport;
+  /** The game master's `isTradable` against the app's untradable rules; see `checkTradability`. */
+  tradability: TradabilityReport;
 }
 
 export interface PokedexData {
@@ -596,8 +831,10 @@ export function buildPokedexData(input: {
   assetTokens: ReadonlyMap<number, ReadonlySet<string>>;
   /** `constants/base-form-codes.ts`: which form `formCode: null` means for the species it names. */
   baseFormCodes: Readonly<Record<number, string>>;
+  /** `constants/untradable.ts`: the rules `checkTradability` holds the game master's `isTradable` against. */
+  tradabilityRules: TradabilityRules;
 }): PokedexData {
-  const { species, gameMaster, gameMasterForms, assetTokens, baseFormCodes } = input;
+  const { species, gameMaster, gameMasterForms, assetTokens, baseFormCodes, tradabilityRules } = input;
   const missingFromGameMaster: BuildReport['missingFromGameMaster'] = [];
   const disagreements: Disagreement[] = [];
   const formlessDisagreements: Disagreement[] = [];
@@ -649,6 +886,7 @@ export function buildPokedexData(input: {
   overrides.sort((a, b) => a.pokemonId - b.pokemonId || (a.formCode < b.formCode ? -1 : a.formCode > b.formCode ? 1 : 0));
   assetFormsWithoutTypes.sort((a, b) => a.pokemonId - b.pokemonId || (a.token < b.token ? -1 : 1));
   const catalog = buildFormCatalog({ species, gameMasterForms, assetTokens, baseFormCodes });
+  const tradability = checkTradability({ species, gameMaster, assetTokens, rules: tradabilityRules });
   return {
     species: [...species],
     overrides,
@@ -664,8 +902,38 @@ export function buildPokedexData(input: {
       overridesFromTempEvolutions,
       assetFormsWithoutTypes,
       formCatalog: catalog.report,
+      tradability,
     },
   };
+}
+
+/**
+ * Why the generator must NOT write the data file, one sentence per problem (empty when it may). The CLI prints
+ * the detail above these and exits 1; keeping the decision here, next to the report, means a new check cannot
+ * be added to the report and forgotten by the CLI, and it is covered by tests.
+ */
+export function blockingProblems(report: BuildReport): string[] {
+  const problems: string[] = [];
+  if (report.disagreements.length > 0) {
+    problems.push(`the sources disagree about ${report.disagreements.length} species' default typing (listed above).`);
+  }
+  if (report.formCatalog.baseTableConflicts.length > 0) {
+    problems.push(
+      `BASE_FORM_CODES (constants/base-form-codes.ts) names ${report.formCatalog.baseTableConflicts.length} default form(s) the game master does not list (listed above).`,
+    );
+  }
+  if (report.tradability.disagreements.length > 0) {
+    problems.push(
+      `the game master's isTradable disagrees with the app's untradable rules (constants/untradable.ts) for ${report.tradability.disagreements.length} ` +
+        `${report.tradability.disagreements.length === 1 ? 'entry' : 'entries'} not listed in TRADABILITY_OVERRIDES (listed above).`,
+    );
+  }
+  if (report.tradability.unmatchedFormRules.length > 0) {
+    problems.push(
+      `UNTRADABLE_FORM_COMBINATIONS (constants/untradable.ts) names ${report.tradability.unmatchedFormRules.length} form(s) the game master has no template for (listed above).`,
+    );
+  }
+  return problems;
 }
 
 // ================================================================================================
@@ -706,6 +974,10 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
   const unconfirmedForms = data.forms.reduce((sum, entry) => sum + entry.forms.filter((f) => !f.confirmed).length, 0);
   const namedDefaults = data.forms.filter((entry) => entry.defaultCode !== null).length;
   const keptText = report.formCatalog.keptCostumes.map((k) => `#${k.pokemonId} ${k.code}`).join(', ');
+  const unflaggedText = report.formCatalog.excludedUnflaggedCostumes.map((x) => `#${x.pokemonId} ${x.code}`).join(', ');
+  const overrideText = report.tradability.overridden
+    .map((o) => `#${o.pokemonId} ${o.name}${o.formCode === null ? '' : ` ${o.formCode}`}: game master ${o.gameMasterTradable ? 'tradable' : 'untradable'}, app ${o.gameMasterTradable ? 'untradable' : 'tradable'} on purpose (${o.reason})`)
+    .join('; ');
   const statusSpecies = new Set(report.formCatalog.excludedStatus.map((x) => x.pokemonId)).size;
   const statusCodes = [...new Set(report.formCatalog.excludedStatus.map((x) => x.code))];
   const statusText = report.formCatalog.excludedStatus.length > 0 ? ` (code ${statusCodes.join(', ')} on ${statusSpecies} species)` : '';
@@ -725,8 +997,9 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  *     the pokemon row whose id equals the species id.
  *   ${provenance.gameMaster}
  *     latest/latest.json (Pokémon GO's own data). Per-form types, for FORM_TYPE_OVERRIDES; a cross-check of
- *     every species' default typing against PokeAPI's; and each species' list of forms (the FORMS_
- *     templates), for POKEDEX_FORMS.
+ *     every species' default typing against PokeAPI's; each species' list of forms (the FORMS_
+ *     templates), for POKEDEX_FORMS; and a cross-check of every species' and form's isTradable flag
+ *     against the app's untradable rules (nothing from it is written to this file).
  *   ${provenance.spriteAssets}
  *     "Images/Pokemon - 256x256/Addressable Assets" (file listing only). The form-token spelling the app
  *     stores in \`formCode\`, so overrides and the form catalog are keyed exactly as listings carry them.
@@ -748,7 +1021,16 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  }. ${namedDefaults} of those species have a default form with a name of its own (POKEDEX_DEFAULT_FORMS).
  *   - Left out of POKEDEX_FORMS (see the rules below): ${report.formCatalog.excludedCostumes.length} event-costume forms${
    report.formCatalog.keptCostumes.length > 0 ? ` (and kept as forms: ${keptText})` : ''
+ }${
+   report.formCatalog.excludedUnflaggedCostumes.length > 0
+     ? `, ${report.formCatalog.excludedUnflaggedCostumes.length} event forms the game master does not flag (${unflaggedText})`
+     : ''
  }, and ${report.formCatalog.excludedStatus.length} shadow-marker forms${statusText}.
+ *   - Tradability, game master isTradable vs the app's untradable rules (constants/untradable.ts): ${report.tradability.checked} species and form entries compared; ${
+   report.tradability.overridden.length > 0
+     ? `all agree except ${report.tradability.overridden.length} documented override${report.tradability.overridden.length === 1 ? '' : 's'}: ${overrideText}`
+     : 'all agree'
+ }. The generator refuses to write while any other differ (TRADABILITY_OVERRIDES).
  *
  * POKEDEX_DATA is species-level: national dex order, ids 1 through ${report.species}, one row per species with its
  * default form's typing. Typing that depends on the form (Alolan, Galarian, Hisuian, Origin, Crowned, Rotom
@@ -771,11 +1053,13 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  *   - event costumes: forms the game master flags \`isCostume\` (Pikachu's outfits, Corsola SPRING_2026, ...).
  *     Their art sits under \`.f\` sprite tokens, so the sprite split cannot tell them from forms; the flag can.
  *     Costume is a listing attribute of its own. The one exception is Armored Mewtwo (\`A\`), which the app has
- *     always stored as a form (COSTUME_FORMS_KEPT_AS_FORMS in scripts/pokedex-source.ts).
+ *     always stored as a form (COSTUME_FORMS_KEPT_AS_FORMS in scripts/pokedex-source.ts). A few event forms
+ *     carry no flag and are named one by one instead (UNFLAGGED_COSTUME_FORMS_EXCLUDED in the same file).
  *   - the form-level Shadow marker (\`S\`) and any code ending _SHADOW or _PURIFIED: shadow is untradable and
  *     purified is a listing flag (SHADOW_MARKER_CODES in scripts/pokedex-source.ts says why \`S\` counts).
  * Tradability is NOT decided here: forms of untradable species are listed, and \`isPokemonUntradable\`
- * (constants/pokedex.ts) is the one rule that refuses them. Read this through \`formsOf\` / \`defaultFormOf\`.
+ * (constants/untradable.ts, re-exported by constants/pokedex.ts) is the one rule that refuses them. Read this
+ * through \`formsOf\` / \`defaultFormOf\`.
  */
 import type { PokemonTypes } from './pokemon-types';
 

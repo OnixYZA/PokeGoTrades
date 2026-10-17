@@ -43,7 +43,7 @@ interface FormPickerProps {
  * in for a form the trainer can not find in the list; the creature still carries `formCode: null`, so one
  * creature is never stored two ways (`defaultFormOf`).
  *
- * UNTRADABLE FORMS (White and Black Kyurem, Dusk Mane and Dawn Wings Necrozma) are shown, dimmed and marked
+ * UNTRADABLE FORMS (e.g. White Kyurem, Ultra Necrozma, Crowned Sword Zacian; `constants/untradable.ts`) are shown, dimmed and marked
  * with a Ban icon, and tapping one explains why it can't be listed — the same treatment `PokemonPickerModal`
  * gives an untradable species (and the same `UntradableNotice`). They are not hidden: a trainer who owns a
  * White Kyurem would otherwise find no White Kyurem and list it as a plain Kyurem. The rule is
