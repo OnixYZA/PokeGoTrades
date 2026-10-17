@@ -3,14 +3,19 @@ import { Pressable, Text, View } from 'react-native';
 import { FormalOfferCard } from '@/components/chats/FormalOfferCard';
 import { SURFACE } from '@/constants/theme';
 import type { ChatMessage } from '@/data/types';
+import type { OfferAvailability } from '@/store/offer-state';
 
 interface MessageBubbleProps {
   message: ChatMessage;
   /** Re-sends a failed message under the same client id. */
   onRetry?: () => void;
+  /** For an offer message: what may be done with it right now. Without it the card is display-only. */
+  offerAvailability?: OfferAvailability;
+  /** Opens the Trade Summary for this offer message. */
+  onReviewOffer?: () => void;
 }
 
-export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
+export function MessageBubble({ message, onRetry, offerAvailability, onReviewOffer }: MessageBubbleProps) {
   // Lock / unlock / confirm / completed / closed: a centered line, not a bubble from either trainer.
   if (message.role === 'system') {
     return (
@@ -48,7 +53,7 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
   if (message.offer) {
     return (
       <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', opacity: dim }}>
-        <FormalOfferCard offer={message.offer} />
+        <FormalOfferCard offer={message.offer} availability={offerAvailability} onPress={onReviewOffer} />
         {meta}
       </View>
     );

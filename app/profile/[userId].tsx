@@ -9,6 +9,7 @@ import { RepStats } from '@/components/profile/RepStats';
 import { TradeHistoryGrid } from '@/components/profile/TradeHistoryGrid';
 import { WishlistGrid } from '@/components/profile/WishlistGrid';
 import { buildPublicTrainerProfile } from '@/data/publicProfile';
+import { toReadOnlyEntries } from '@/lib/creature-list';
 
 /** Public read-only profile for another trainer — reached by tapping a seller/partner avatar
  *  or name from the feed or chats. Not the current user's own `(tabs)/profile` tab. */
@@ -40,8 +41,8 @@ export default function PublicProfileScreen() {
       >
         <ProfileHero trainer={trainer} />
         <RepStats trainer={trainer} />
-        <ArsenalGrid arsenal={trainer.arsenal} />
-        <WishlistGrid wishlist={trainer.wishlist} />
+        <ArsenalGrid arsenal={toReadOnlyEntries(trainer.arsenal)} />
+        <WishlistGrid wishlist={toReadOnlyEntries(trainer.wishlist)} />
         <TradeHistoryGrid history={trainer.tradeHistory} />
       </ScrollView>
     </PhoneFrame>

@@ -1,10 +1,11 @@
 /**
- * Unit tests for `lib/format.ts` — `fmtDust`'s Stardust abbreviation and `creatureDisplayName`, the one
- * place the shiny `"Shiny "` display prefix is decided (see that function's header comment).
+ * Unit tests for `lib/format.ts` — `fmtDust`'s Stardust abbreviation, `creatureDisplayName`, the one
+ * place the shiny `"Shiny "` display prefix is decided (see that function's header comment), and
+ * `formCodeLabel`, which re-cases a sprite form code for display.
  */
 import { describe, expect, it } from 'vitest';
 
-import { creatureDisplayName, fmtDust } from './format';
+import { creatureDisplayName, fmtDust, formCodeLabel } from './format';
 
 describe('fmtDust', () => {
   it('leaves small numbers as-is', () => {
@@ -47,5 +48,20 @@ describe('creatureDisplayName', () => {
     const creature = { name: 'Garchomp', shiny: true };
     creatureDisplayName(creature);
     expect(creature).toEqual({ name: 'Garchomp', shiny: true });
+  });
+});
+
+describe('formCodeLabel', () => {
+  it('title-cases an underscore-separated code', () => {
+    expect(formCodeLabel('CROWNED_SWORD')).toBe('Crowned Sword');
+    expect(formCodeLabel('ALOLA')).toBe('Alola');
+  });
+
+  it('only re-cases: digits and unknown words are kept as they are', () => {
+    expect(formCodeLabel('JAN_2020_NOEVOLVE')).toBe('Jan 2020 Noevolve');
+  });
+
+  it('ignores stray underscores', () => {
+    expect(formCodeLabel('_ORIGIN__')).toBe('Origin');
   });
 });

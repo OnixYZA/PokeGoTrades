@@ -3,6 +3,7 @@ import { randomUUID } from 'expo-crypto';
 import { findPokemon } from '@/constants/pokedex';
 import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
 import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
+import type { TrainerCreature } from '@/lib/creature-list';
 import type { Database } from '@/lib/database.types';
 import { formatTradeDate } from '@/lib/format';
 import type { PickedProof } from '@/lib/proof-image';
@@ -90,34 +91,48 @@ export async function getPostingReadiness(): Promise<'anonymous' | 'incomplete' 
   return isProfileReady(await fetchMyProfile()) ? 'ready' : 'incomplete';
 }
 
-/** Shared by `fetchMyArsenal` and `fetchMyWishlist`: the signed-in trainer's own creatures in one
- *  list, in slot order. Readable by anyone; owned by them. Parsed defensively, the way
- *  `fetchLatestProfileProof` reads `ocr_extracted`: this client never validates jsonb against a schema. */
-async function fetchMyCreatures(list: CreatureList): Promise<CreatureRef[]> {
-  const id = await currentUserId();
+/** Shared by every Arsenal / Wishlist read: the signed-in trainer's own creatures in one list, in slot
+ *  order, each with the id of the row that holds it (see `TrainerCreature` for why the id matters).
+ *  Readable by anyone; owned by them. Parsed defensively, the way `fetchLatestProfileProof` reads
+ *  `ocr_extracted`: this client never validates jsonb against a schema. */
+async function fetchMyCreatureEntries(list: CreatureList): Promise<TrainerCreature[]> {
+  const ownerId = await currentUserId();
   const { data, error } = await supabase
     .from('trainer_creatures')
-    .select('creature')
-    .eq('owner_id', id)
+    .select('id, creature')
+    .eq('owner_id', ownerId)
     .eq('list', list)
     .order('sort_order', { ascending: true });
   if (error) throw new ProfileError('form', error.message);
-  const creatures: CreatureRef[] = [];
-  for (const { creature } of data) {
+  const entries: TrainerCreature[] = [];
+  for (const { id, creature } of data) {
     const ref = parseCreatureRef(creature);
-    if (ref) creatures.push(ref);
+    if (ref) entries.push({ id, creature: ref });
   }
-  return creatures;
+  return entries;
 }
 
-/** The signed-in trainer's Arsenal (what they can offer), in slot order. */
+/** The signed-in trainer's Arsenal (what they can offer), in slot order, with row ids — what the
+ *  profile screen's editable grid needs to address one entry. */
+export async function fetchMyArsenalEntries(): Promise<TrainerCreature[]> {
+  return fetchMyCreatureEntries('arsenal');
+}
+
+/** The signed-in trainer's Wishlist (what they're hunting), in slot order, with row ids. */
+export async function fetchMyWishlistEntries(): Promise<TrainerCreature[]> {
+  return fetchMyCreatureEntries('wishlist');
+}
+
+/** The signed-in trainer's Arsenal as bare creatures, for readers that only need what's in it (the
+ *  chat's offer picker) and never address a row. Anything that edits the list uses
+ *  `fetchMyArsenalEntries` instead. */
 export async function fetchMyArsenal(): Promise<CreatureRef[]> {
-  return fetchMyCreatures('arsenal');
+  return (await fetchMyArsenalEntries()).map((entry) => entry.creature);
 }
 
-/** The signed-in trainer's Wishlist (what they're hunting), in slot order. */
+/** The signed-in trainer's Wishlist as bare creatures. See `fetchMyArsenal`. */
 export async function fetchMyWishlist(): Promise<CreatureRef[]> {
-  return fetchMyCreatures('wishlist');
+  return (await fetchMyWishlistEntries()).map((entry) => entry.creature);
 }
 
 /** How many rows `fetchMyTradeHistory` shows — the live profile's Trade History section has no "load
@@ -218,6 +233,46 @@ export async function addToArsenal(pokemonId: number, shiny = false): Promise<vo
 /** Adds a Pokémon (by national dex id) to the signed-in trainer's Wishlist, in the lowest free slot. */
 export async function addToWishlist(pokemonId: number, shiny = false): Promise<void> {
   return addCreature('wishlist', pokemonId, shiny);
+}
+
+/**
+ * Shared by `removeFromArsenal` / `removeFromWishlist`. Deletes ONE row, addressed by its id: duplicates
+ * are legal (the unique key is the slot, not the creature), so nothing about the creature itself can pick
+ * out the right twin. `list` and `owner_id` are filters on top of the id, not a second way to find the
+ * row: the id alone is already unique, but this way a stale id handed to the wrong list's remover, or one
+ * belonging to another trainer, matches nothing instead of deleting something. RLS
+ * (`trainer_creatures_delete_self`) enforces the owner rule server-side regardless; the filter is just
+ * defence in depth.
+ *
+ * Zero rows deleted is success, deliberately not inspected: DELETE is idempotent, and the only ways to
+ * match nothing are the row already being gone (removed from another device or tab, or this request being
+ * retried after its response was lost) or it not being this trainer's to delete — in every one of which
+ * the state the caller asked for, "this entry is not in my list", already holds. Reporting an error there
+ * would roll back a removal that is in fact done. A real failure (network, permissions) still throws.
+ *
+ * Frees the row's `sort_order` slot immediately; `firstFreeSlot` re-reads the occupied slots from the
+ * table on every add (it caches nothing), so the next add simply takes the lowest free one — possibly
+ * the slot just vacated, which puts the new entry where the removed one was rather than at the end.
+ */
+async function removeCreature(list: CreatureList, rowId: string): Promise<void> {
+  const ownerId = await currentUserId();
+  const { error } = await supabase
+    .from('trainer_creatures')
+    .delete()
+    .eq('id', rowId)
+    .eq('owner_id', ownerId)
+    .eq('list', list);
+  if (error) throw new ProfileError('form', error.message);
+}
+
+/** Removes one entry (by its `TrainerCreature.id`) from the signed-in trainer's Arsenal. */
+export async function removeFromArsenal(rowId: string): Promise<void> {
+  return removeCreature('arsenal', rowId);
+}
+
+/** Removes one entry (by its `TrainerCreature.id`) from the signed-in trainer's Wishlist. */
+export async function removeFromWishlist(rowId: string): Promise<void> {
+  return removeCreature('wishlist', rowId);
 }
 
 export interface ProfileInput {

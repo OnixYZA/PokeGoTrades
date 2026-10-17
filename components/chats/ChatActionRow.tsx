@@ -15,6 +15,8 @@ interface ChatActionRowProps {
   partner: string;
   /** The Handshake should be shown: right after the seller locks, or when either party re-opens it. */
   onOpenHandshake: () => void;
+  /** The seller pressed Accept: open the Trade Summary for the offer to take. Locking happens only from there. */
+  onReviewOffer: () => void;
   /** The chat was bailed, so there is nothing left to show here. */
   onBailed: () => void;
 }
@@ -25,11 +27,11 @@ const IDLE = { backgroundColor: '#101728', borderWidth: 1, borderColor: '#1e2436
 /**
  * The action row under a chat. Which buttons exist depends on the trainer's side of the trade:
  * only the seller locks and unlocks (D1), so a buyer sees "Awaiting seller" until the seller acts.
- * Each button runs its own RPC through the store and reports failures as a toast.
+ * Unlock and bail run their own RPC through the store and report failures as a toast. Accepting does not
+ * lock from here: it opens the Trade Summary, which is the only place a lock is confirmed.
  */
-export function ChatActionRow({ chatId, partner, onOpenHandshake, onBailed }: ChatActionRowProps) {
+export function ChatActionRow({ chatId, partner, onOpenHandshake, onReviewOffer, onBailed }: ChatActionRowProps) {
   const view = useTradeStore(useShallow((s) => selectTradeView(s, chatId)));
-  const lockChat = useTradeStore((s) => s.lockChat);
   const unlockChat = useTradeStore((s) => s.unlockChat);
   const [showBail, setShowBail] = useState(false);
   const [confirmUnlock, setConfirmUnlock] = useState(false);
@@ -37,15 +39,6 @@ export function ChatActionRow({ chatId, partner, onOpenHandshake, onBailed }: Ch
 
   // A chat that ended has nothing left to do. (The mock's inactive chats keep their old "Trade Locked" look.)
   if (view.live && (view.phase === 'closed' || view.phase === 'bailed' || view.phase === 'completed')) return null;
-
-  const lock = async () => {
-    if (busy) return;
-    setBusy(true);
-    const result = await lockChat(chatId);
-    setBusy(false);
-    // Open the Handshake only once the server accepted the lock — never on a failed or racing attempt.
-    if (result.ok) onOpenHandshake();
-  };
 
   const unlock = async () => {
     setConfirmUnlock(false);
@@ -72,7 +65,7 @@ export function ChatActionRow({ chatId, partner, onOpenHandshake, onBailed }: Ch
         </Pressable>
       ) : null}
 
-      <PrimarySlot view={view} busy={busy} onLock={() => void lock()} onUnlock={() => setConfirmUnlock(true)} onOpenHandshake={onOpenHandshake} />
+      <PrimarySlot view={view} busy={busy} onAccept={onReviewOffer} onUnlock={() => setConfirmUnlock(true)} onOpenHandshake={onOpenHandshake} />
 
       <Modal
         visible={showBail}
@@ -109,13 +102,13 @@ export function ChatActionRow({ chatId, partner, onOpenHandshake, onBailed }: Ch
 function PrimarySlot({
   view,
   busy,
-  onLock,
+  onAccept,
   onUnlock,
   onOpenHandshake,
 }: {
   view: ReturnType<typeof selectTradeView>;
   busy: boolean;
-  onLock: () => void;
+  onAccept: () => void;
   onUnlock: () => void;
   onOpenHandshake: () => void;
 }) {
@@ -147,7 +140,7 @@ function PrimarySlot({
             style={SURFACE.ctaBlueSmall}
             textColor="#04121f"
             icon={<Lock size={14} color="#04121f" />}
-            onPress={onLock}
+            onPress={onAccept}
             disabled={busy}
           />
         );
@@ -158,13 +151,13 @@ function PrimarySlot({
     if (view.phase === 'frozen') return idleButton('Another offer locked');
     return (
       <PrimaryButton
-        label={busy ? 'Locking…' : 'Accept Trade (Lock)'}
+        label="Accept Trade (Lock)"
         flex={1.4}
         fontSize={12}
         style={SURFACE.ctaBlueSmall}
         textColor="#04121f"
         icon={<Lock size={14} color="#04121f" />}
-        onPress={onLock}
+        onPress={onAccept}
         disabled={busy}
       />
     );

@@ -22,3 +22,14 @@ export function formatTradeDate(date: Date): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+
+/** A PokeMiners form code as display text, e.g. `'CROWNED_SWORD'` -> `'Crowned Sword'`. The codes are sprite
+ *  keys (`lib/sprite-url.ts`), not names, so this only re-cases them — it never maps one onto a different name,
+ *  which is also why a formal offer (which carries a code and no display form) is shown through it. */
+export function formCodeLabel(code: string): string {
+  return code
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
+    .join(' ');
+}

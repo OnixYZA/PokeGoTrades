@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { ChevronLeft, LogOut, Share2, UserRound } from 'lucide-react-native';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
@@ -12,20 +12,30 @@ import { ProfileNotice } from '@/components/profile/ProfileNotice';
 import { RepStats } from '@/components/profile/RepStats';
 import { TradeHistoryGrid } from '@/components/profile/TradeHistoryGrid';
 import { WishlistGrid } from '@/components/profile/WishlistGrid';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { findPokemon } from '@/constants/pokedex';
 import { trainer } from '@/data/trainer';
-import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
+import type { TradeHistoryEntry } from '@/data/types';
 import {
   addToArsenal,
   addToWishlist,
-  fetchMyArsenal,
+  fetchMyArsenalEntries,
   fetchMyProfile,
   fetchMyTradeHistory,
-  fetchMyWishlist,
+  fetchMyWishlistEntries,
   isProfileReady,
+  removeFromArsenal,
+  removeFromWishlist,
   type MyProfile,
 } from '@/lib/api/profile';
+import {
+  creatureListsReducer,
+  EMPTY_CREATURE_LISTS,
+  toReadOnlyEntries,
+  visibleEntries,
+  type TrainerCreature,
+} from '@/lib/creature-list';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName } from '@/lib/format';
 import { useSession } from '@/lib/session';
@@ -35,11 +45,19 @@ import { useTradeStore } from '@/store/trade-store';
 /** Which grid the "+" button on the live profile opened the picker for. */
 type CreatureListKind = 'arsenal' | 'wishlist';
 
+const LIST_LABEL: Record<CreatureListKind, string> = { arsenal: 'Arsenal', wishlist: 'Wishlist' };
+
+// The mock trainer's lists, wrapped once: they have no rows, so the grids only ever show them read-only.
+const MOCK_ARSENAL = toReadOnlyEntries(trainer.arsenal);
+const MOCK_WISHLIST = toReadOnlyEntries(trainer.wishlist);
+
 interface MyProfileData {
   status: 'loading' | 'ready' | 'error';
   profile: MyProfile | null;
-  arsenal: CreatureRef[];
-  wishlist: CreatureRef[];
+  /** What the grids show: the server's lists minus any entry the trainer has removed here (see
+   *  `CreatureListsState` — removal masks entries rather than editing the arrays). */
+  arsenal: TrainerCreature[];
+  wishlist: TrainerCreature[];
   tradeHistory: TradeHistoryEntry[];
   error: string | null;
   retry: () => void;
@@ -47,6 +65,14 @@ interface MyProfileData {
    *  the screen the trainer is already looking at doesn't flash back to the loading spinner. Called
    *  both after adding a Pokémon and on tab focus (a trade completed in Chats can add a history row). */
   refresh: () => Promise<void>;
+  /**
+   * Removes one entry, by row id: it leaves the grid at once, then the delete runs. If the delete fails
+   * the entry is shown again — in whatever position the server's current list gives it — and the error
+   * is rethrown for the caller to report. Resolves once the row is confirmed gone (including "already
+   * gone"). Never refetches: the optimistic state is already the truth on success, and a refetch racing
+   * the delete is precisely what the mask in `CreatureListsState` exists to survive.
+   */
+  removeCreature: (list: CreatureListKind, id: string) => Promise<void>;
 }
 
 /**
@@ -57,14 +83,16 @@ interface MyProfileData {
  */
 function useMyProfileData(permanentUserId: string | null): MyProfileData {
   const [profile, setProfile] = useState<MyProfile | null>(null);
-  const [arsenal, setArsenal] = useState<CreatureRef[]>([]);
-  const [wishlist, setWishlist] = useState<CreatureRef[]>([]);
+  const [lists, dispatchLists] = useReducer(creatureListsReducer, EMPTY_CREATURE_LISTS);
   const [tradeHistory, setTradeHistory] = useState<TradeHistoryEntry[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   // Shared by `load` and `refresh` below: whichever fetch resolves last for the *current* permanent
   // user wins, the same guard `lib/use-feed.ts` uses for the feed.
   const latestRequest = useRef(0);
+  // Row ids with a delete currently in flight, so a double-fired confirm can't run (and, if one fails
+  // while the other lands, un-hide) the same removal twice.
+  const removing = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     if (!permanentUserId) return;
@@ -74,14 +102,13 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
     try {
       const [nextProfile, nextArsenal, nextWishlist, nextTradeHistory] = await Promise.all([
         fetchMyProfile(),
-        fetchMyArsenal(),
-        fetchMyWishlist(),
+        fetchMyArsenalEntries(),
+        fetchMyWishlistEntries(),
         fetchMyTradeHistory(),
       ]);
       if (request !== latestRequest.current) return; // a newer load started while this one was in flight
       setProfile(nextProfile);
-      setArsenal(nextArsenal);
-      setWishlist(nextWishlist);
+      dispatchLists({ type: 'loaded', arsenal: nextArsenal, wishlist: nextWishlist });
       setTradeHistory(nextTradeHistory);
       setStatus('ready');
     } catch (reason) {
@@ -100,13 +127,14 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
     const request = ++latestRequest.current;
     try {
       const [nextArsenal, nextWishlist, nextTradeHistory] = await Promise.all([
-        fetchMyArsenal(),
-        fetchMyWishlist(),
+        fetchMyArsenalEntries(),
+        fetchMyWishlistEntries(),
         fetchMyTradeHistory(),
       ]);
       if (request !== latestRequest.current) return;
-      setArsenal(nextArsenal);
-      setWishlist(nextWishlist);
+      // A removal still in flight keeps its entry hidden even if this read still lists it — see the
+      // 'loaded' case in `creatureListsReducer`.
+      dispatchLists({ type: 'loaded', arsenal: nextArsenal, wishlist: nextWishlist });
       setTradeHistory(nextTradeHistory);
     } catch (reason) {
       if (request !== latestRequest.current) return;
@@ -122,15 +150,34 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
       // permanent session's data (e.g. right after sign-out) must not linger unseen in state.
       latestRequest.current++; // invalidate any load already in flight for the old user
       setProfile(null);
-      setArsenal([]);
-      setWishlist([]);
+      dispatchLists({ type: 'reset' });
       setTradeHistory([]);
       setStatus('loading');
       setError(null);
     }
   }, [permanentUserId, load]);
 
-  return { status, profile, arsenal, wishlist, tradeHistory, error, retry: load, refresh };
+  const removeCreature = useCallback(async (list: CreatureListKind, id: string) => {
+    if (removing.current.has(id)) return;
+    removing.current.add(id);
+    dispatchLists({ type: 'removalStarted', id });
+    try {
+      await (list === 'arsenal' ? removeFromArsenal(id) : removeFromWishlist(id));
+    } catch (reason) {
+      // Un-hide just this id. Every other removal's mask, and whatever list a refresh has since
+      // delivered, are left exactly as they are — so this can neither undo a removal that succeeded nor
+      // bring back a stale copy of the list.
+      dispatchLists({ type: 'removalFailed', id });
+      throw reason;
+    } finally {
+      removing.current.delete(id);
+    }
+  }, []);
+
+  const arsenal = useMemo(() => visibleEntries(lists.arsenal, lists.removed), [lists.arsenal, lists.removed]);
+  const wishlist = useMemo(() => visibleEntries(lists.wishlist, lists.removed), [lists.wishlist, lists.removed]);
+
+  return { status, profile, arsenal, wishlist, tradeHistory, error, retry: load, refresh, removeCreature };
 }
 
 export default function ProfileScreen() {
@@ -145,6 +192,9 @@ export default function ProfileScreen() {
   // "Share trade list" (Task 2B) — gates the modal below; there's nothing else to track here since
   // Arsenal/Wishlist stay out of the store (AGENTS.md) and the modal reads them straight off `shareData`.
   const [shareVisible, setShareVisible] = useState(false);
+  // The tile whose trash button was tapped, awaiting the trainer's confirmation. Holds the whole entry
+  // (not just an id) so the dialog can name what it is about to remove.
+  const [removal, setRemoval] = useState<{ list: CreatureListKind; entry: TrainerCreature } | null>(null);
 
   // Same uid through the anonymous -> permanent upgrade, a new uid for a returning-user sign-in —
   // either way this is the one value the live fetch below needs to key off.
@@ -198,12 +248,24 @@ export default function ProfileScreen() {
     }, [live.refresh]),
   );
 
+  /** Runs once the trainer confirms. The tile is already gone by the time the delete starts (see
+   *  `removeCreature`), so the only feedback left to give is a failure: the tile reappears and this says why.
+   *  There is deliberately no success toast — the disappearing tile is the confirmation. */
+  const confirmRemoval = () => {
+    if (!removal) return;
+    const { list, entry } = removal;
+    setRemoval(null); // close before any toast — see lib/toast.ts on modals and their own ToastHost
+    live.removeCreature(list, entry.id).catch(() => {
+      toast(`Couldn't remove ${creatureDisplayName(entry.creature)} from your ${LIST_LABEL[list]}. Try again.`, 'error');
+    });
+  };
+
   /** Shared by both grids' pickers: add the chosen Pokémon, refresh in place, then toast. Errors
    *  (an unknown id, a full list, a lost race on the last free slot) surface the same way. */
   const addPokemon = async (list: CreatureListKind, pokemonId: number, shiny: boolean) => {
     if (addingCreature) return;
     const entry = findPokemon(pokemonId);
-    const listLabel = list === 'arsenal' ? 'Arsenal' : 'Wishlist';
+    const listLabel = LIST_LABEL[list];
     const displayName = entry ? creatureDisplayName({ name: entry.name, shiny }) : 'That Pokémon';
     setAddingCreature(true);
     try {
@@ -223,6 +285,11 @@ export default function ProfileScreen() {
     if (list) void addPokemon(list, pokemonId, shiny);
   };
 
+  // The grids hold entries (creature + row id); the share image and the picker's "already added" check
+  // only want the creatures. Memoized on the entries so a re-render doesn't hand them fresh arrays.
+  const arsenalCreatures = useMemo(() => live.arsenal.map((entry) => entry.creature), [live.arsenal]);
+  const wishlistCreatures = useMemo(() => live.wishlist.map((entry) => entry.creature), [live.wishlist]);
+
   // What "Share trade list" needs — only ever available in the two branches below that actually have
   // both lists loaded (the mock trainer, and a live profile that's finished onboarding). `null`
   // everywhere else, which is also everywhere the button itself is never rendered.
@@ -230,19 +297,20 @@ export default function ProfileScreen() {
     !USE_SUPABASE
       ? { handle: trainer.handle, team: trainer.team, level: trainer.lvl, arsenal: trainer.arsenal, wishlist: trainer.wishlist }
       : live.profile && isProfileReady(live.profile)
-        ? { handle: live.profile.handle, team: live.profile.team, level: undefined, arsenal: live.arsenal, wishlist: live.wishlist }
+        ? { handle: live.profile.handle, team: live.profile.team, level: undefined, arsenal: arsenalCreatures, wishlist: wishlistCreatures }
         : null;
 
   let body: ReactNode;
   if (!USE_SUPABASE) {
-    // Mock data source: there is no write path (no Supabase table to insert into), so no `onEdit` is
-    // passed — the grids hide their "+" button entirely rather than opening a picker that can't work.
+    // Mock data source: there is no write path (no Supabase table to insert into or delete from), so no
+    // `onEdit` / `onRemove` is passed — the grids hide their "+" and trash buttons entirely rather than
+    // offering controls that can't work.
     body = (
       <>
         <ProfileHero trainer={trainer} />
         <RepStats trainer={trainer} />
-        <ArsenalGrid arsenal={trainer.arsenal} />
-        <WishlistGrid wishlist={trainer.wishlist} />
+        <ArsenalGrid arsenal={MOCK_ARSENAL} />
+        <WishlistGrid wishlist={MOCK_WISHLIST} />
         <ShareTradeListButton onPress={() => setShareVisible(true)} />
         <TradeHistoryGrid history={trainer.tradeHistory} />
       </>
@@ -300,8 +368,16 @@ export default function ProfileScreen() {
     body = (
       <>
         <LiveIdentityCard profile={live.profile} />
-        <ArsenalGrid arsenal={live.arsenal} onEdit={() => setPickerFor('arsenal')} />
-        <WishlistGrid wishlist={live.wishlist} onEdit={() => setPickerFor('wishlist')} />
+        <ArsenalGrid
+          arsenal={live.arsenal}
+          onEdit={() => setPickerFor('arsenal')}
+          onRemove={(entry) => setRemoval({ list: 'arsenal', entry })}
+        />
+        <WishlistGrid
+          wishlist={live.wishlist}
+          onEdit={() => setPickerFor('wishlist')}
+          onRemove={(entry) => setRemoval({ list: 'wishlist', entry })}
+        />
         <ShareTradeListButton onPress={() => setShareVisible(true)} />
         <TradeHistoryGrid history={live.tradeHistory} />
       </>
@@ -346,8 +422,25 @@ export default function ProfileScreen() {
         title={pickerFor === 'wishlist' ? 'Add to Wishlist' : 'Add to Arsenal'}
         onClose={() => setPickerFor(null)}
         onSelect={handleSelectPokemon}
-        exclude={pickerFor === 'wishlist' ? live.wishlist : live.arsenal}
+        exclude={pickerFor === 'wishlist' ? wishlistCreatures : arsenalCreatures}
       />
+
+      {/* Mounted only while a removal awaits confirmation (so its text never changes while it fades out).
+       *  A confirm, not an undo toast: a removal runs optimistically and for real the moment it's confirmed,
+       *  whereas an undo would have to hold the delete back for a few seconds — lost if the app is
+       *  backgrounded in that window — or re-insert the row afterwards, which can't give it its old slot
+       *  back. One extra tap per removal is the cheaper price; the toast host has no action button anyway. */}
+      {removal && (
+        <ConfirmModal
+          visible
+          title={`Remove from ${LIST_LABEL[removal.list]}?`}
+          message={`${creatureDisplayName(removal.entry.creature)} will be removed from your ${LIST_LABEL[removal.list]}. You can add it again any time.`}
+          confirmLabel="Remove"
+          destructive
+          onConfirm={confirmRemoval}
+          onCancel={() => setRemoval(null)}
+        />
+      )}
 
       {/* Only ever mounted with real data: `shareData` is null in every branch that doesn't render the
        *  button above, so `shareVisible` can never be true without it. */}

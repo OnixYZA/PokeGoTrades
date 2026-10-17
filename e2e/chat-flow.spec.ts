@@ -175,11 +175,14 @@ test('two-device trade: offer → live inbox → lock → handshake → both con
     await expect(inboxRow).toHaveAccessibleName(/unread/);
   });
 
-  await test.step('Seller opens the chat and clicks "Accept Trade (Lock)"', async () => {
+  await test.step('Seller opens the chat, reviews the Trade Summary and confirms the agreement', async () => {
     await inboxRow.click();
     await expect(seller.page).toHaveURL(new RegExp(`/chats/${chatId}$`));
     await expect(shown(seller.page.getByText(TEST_MESSAGE))).toBeVisible();
+    // "Accept Trade (Lock)" no longer locks by itself: it opens the preview, and only its confirm takes the lock.
     await seller.page.getByRole('button', { name: 'Accept Trade (Lock)' }).click();
+    await expect(shown(seller.page.getByText('TRADE SUMMARY', { exact: true }))).toBeVisible();
+    await seller.page.getByRole('button', { name: 'Confirm Trade Agreement' }).click();
   });
 
   await test.step('Seller: the Handshake opens with real friend codes', async () => {

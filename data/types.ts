@@ -110,6 +110,13 @@ export interface FormalOffer {
 export type ChatStatus = 'open' | 'bailed' | 'completed' | 'closed';
 export type ChatRole = 'seller' | 'buyer';
 
+/**
+ * How a formal offer ended without being locked in. `chat_messages` is insert-only and no RPC retracts an
+ * offer, so nothing in the schema can record either yet and nothing sets this today; `store/offer-state.ts`
+ * already treats both as dead, so only the row mapping has to change when the backend gains one.
+ */
+export type OfferResolution = 'withdrawn' | 'rejected';
+
 export interface ChatMessage {
   /** 'system' rows (lock / unlock / confirm / completed / closed) exist only on Supabase-backed chats. */
   role: 'them' | 'me' | 'system';
@@ -117,6 +124,8 @@ export interface ChatMessage {
   time: string;
   /** Present when this message is an auto-sent formal-offer card rather than plain text. */
   offer?: FormalOffer;
+  /** Set when `offer` was withdrawn or rejected; see `OfferResolution`. Absent means the offer still stands. */
+  offerResolution?: OfferResolution;
 
   // ——— Supabase-backed messages only; the mock thread predates all of these ———
   /** Server row id. For an unconfirmed optimistic message this equals `clientId`. */

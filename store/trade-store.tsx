@@ -29,6 +29,7 @@ import {
   type LockVersion,
 } from './lock-state';
 import { cycleFilter, type FilterKey, type FilterState } from './listing-filters';
+import { offerAvailability } from './offer-state';
 
 // The lock rules live in ./lock-state so they can be tested without the Expo/Supabase module graph.
 // Re-exported here because this is where the rest of the app already imports them from.
@@ -136,6 +137,24 @@ export function selectTradeView(
   };
 }
 
+/**
+ * Why `lockChat` would be refused before it reaches the server, as the RPC's own error code (so the sentence
+ * comes from `lib/rpc-errors.ts`). It is the same rule the chat UI disables its buttons by — `canLock` and
+ * `offerAvailability` — checked again at the one place a lock is actually taken, so a stale button, a
+ * competing lock that landed while a preview was open, or a message that was never the buyer's cannot slip through.
+ */
+function lockRefusal(
+  state: Pick<TradeState, 'chats' | 'lockByListing' | 'lockConfirmations' | 'messages'>,
+  chatId: string,
+  offerMessageId: string | undefined,
+): 'not_seller' | 'not_lockable' | 'invalid_offer_message' | null {
+  const view = selectTradeView(state, chatId);
+  if (!view.canLock) return view.role === 'seller' ? 'not_lockable' : 'not_seller';
+  if (offerMessageId === undefined) return null;
+  const message = state.messages[chatId]?.find((m) => m.id === offerMessageId);
+  return message?.offer && offerAvailability(view, message).confirmable ? null : 'invalid_offer_message';
+}
+
 /** Sum of unread messages across visible chats, for the tab badge. */
 export function selectTotalUnread(state: Pick<TradeState, 'chats'>): number {
   let total = 0;
@@ -221,8 +240,13 @@ interface TradeState {
   markRead: (chatId: string) => void;
 
   // ——— trade lock ———
-  /** Seller only (D1). Locks this chat's trade, freezing every sibling chat competing for the listing. */
-  lockChat: (chatId: string) => Promise<ActionResult>;
+  /**
+   * Seller only (D1). Locks this chat's trade, freezing every sibling chat competing for the listing.
+   * `offerMessageId` names the buyer's offer being accepted — any of them, not just the newest; left out, the
+   * server takes the newest (or none, for a trade agreed in chat). Refused up front, without a request, when
+   * the trade or that offer cannot be accepted (`lockRefusal`).
+   */
+  lockChat: (chatId: string, offerMessageId?: string) => Promise<ActionResult>;
   /** Seller only (D1). Unlocks, thawing the siblings; only the current lock holder can. */
   unlockChat: (chatId: string) => Promise<ActionResult>;
   /** Either party (D2). The second confirmation completes the trade. */
@@ -607,14 +631,16 @@ export const useTradeStore = create<TradeState>((set, get) => {
       if (readUpTo) void chatsApi.markChatRead(chatId, me.id, readUpTo).catch((e) => console.warn('[trade-store] markRead failed', e));
     },
 
-    lockChat: async (chatId) => {
+    lockChat: async (chatId, offerMessageId) => {
+      const refusal = lockRefusal(get(), chatId, offerMessageId);
+      if (refusal) return { ok: false, error: describeError({ message: refusal }) };
       if (!USE_SUPABASE) {
         const chat = get().chats[chatId];
         if (chat) set((state) => ({ lockByListing: { ...state.lockByListing, [chat.listingId]: chatId } }));
         return ok(undefined);
       }
       return attempt(async () => {
-        const lock = await chatsApi.lockTrade(chatId);
+        const lock = await chatsApi.lockTrade(chatId, offerMessageId);
         // Do not wait for the Realtime echo: freeze the siblings right away. 'update', not 'insert':
         // the buyer's Handshake auto-opens on the *other* party's device, never on the seller's.
         set((state) =>

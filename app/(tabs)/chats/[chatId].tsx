@@ -13,15 +13,28 @@ import { FrozenBanner } from '@/components/chats/FrozenBanner';
 import { LockedBanner } from '@/components/chats/LockedBanner';
 import { MessageBubble } from '@/components/chats/MessageBubble';
 import { HandshakeModal } from '@/components/modals/HandshakeModal';
+import { TradeSummaryModal } from '@/components/modals/TradeSummaryModal';
 import { Avatar } from '@/components/ui/Avatar';
 import { IconButton } from '@/components/ui/IconButton';
-import type { CreatureRef } from '@/data/types';
+import { formalOffer } from '@/data/chats';
+import type { ChatMessage, CreatureRef } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { newestAcceptableOffer, offerAvailability } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
 /** How a Supabase chat is coming along. The mock has its chats from the first render. */
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
+
+/**
+ * What sits over the thread. One at a time by construction, so a Trade Summary can never be stacked under (or
+ * left behind) a Handshake, and the hand-off from one to the other happens inside a single native Modal.
+ * `message` is the offer being reviewed; null is a trade agreed in the chat with no formal offer.
+ */
+type Overlay = { kind: 'handshake' } | { kind: 'summary'; message: ChatMessage | null };
+
+/** The mock's placeholder offer card, as the message it stands in for. Real chats show real offers from the thread. */
+const MOCK_OFFER_MESSAGE: ChatMessage = { role: 'them', text: '', time: '', offer: formalOffer };
 
 export default function ActiveChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
@@ -43,7 +56,7 @@ export default function ActiveChatScreen() {
 
   const [draft, setDraft] = useState('');
   const [showArsenal, setShowArsenal] = useState(false);
-  const [showHandshake, setShowHandshake] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [loadState, setLoadState] = useState<LoadState>(chat ? 'ready' : 'loading');
   const [attempt, setAttempt] = useState(0);
 
@@ -73,7 +86,7 @@ export default function ActiveChatScreen() {
   // D1: the seller locked *my* offer, so my Handshake opens by itself (instead of waiting to be tapped).
   useEffect(() => {
     if (handshakeRequest !== null && handshakeRequest === chatId && trade.phase === 'locked') {
-      setShowHandshake(true);
+      setOverlay({ kind: 'handshake' });
       clearHandshakeRequest();
     }
   }, [handshakeRequest, chatId, trade.phase, clearHandshakeRequest]);
@@ -129,6 +142,12 @@ export default function ActiveChatScreen() {
   // The mock's inactive chats used to read as "locked" in the composer; keep that.
   const composerPhase = !trade.live && trade.phase === 'closed' ? 'locked' : trade.phase;
 
+  const openHandshake = () => setOverlay({ kind: 'handshake' });
+  const reviewOffer = (message: ChatMessage | null) => setOverlay({ kind: 'summary', message });
+  // The quick Accept button previews the newest offer that can be taken. Any other offer is reviewed from its own card.
+  const reviewNewestOffer = () =>
+    reviewOffer(newestAcceptableOffer(messages, trade) ?? (USE_SUPABASE ? null : MOCK_OFFER_MESSAGE));
+
   const send = () => {
     const text = draft.trim();
     if (!text) return;
@@ -146,7 +165,7 @@ export default function ActiveChatScreen() {
   /** Mock only: with Supabase the Handshake confirms (and closes itself) through `get_handshake` / `confirm_trade`. */
   const handleMarkCompleted = async () => {
     await confirmTrade(chatId);
-    setShowHandshake(false);
+    setOverlay(null);
     router.back();
   };
 
@@ -176,7 +195,7 @@ export default function ActiveChatScreen() {
             size={34}
             radius={12}
             accessibilityLabel="Re-open handshake and friend codes"
-            onPress={() => setShowHandshake(true)}
+            onPress={openHandshake}
           >
             <Handshake size={16} color="#f5c518" />
           </IconButton>
@@ -203,12 +222,17 @@ export default function ActiveChatScreen() {
             key={m.id ?? i}
             message={m}
             onRetry={m.clientId ? () => void retryMessage(chatId, m.clientId as string) : undefined}
+            offerAvailability={m.offer ? offerAvailability(trade, m) : undefined}
+            onReviewOffer={m.offer ? () => reviewOffer(m) : undefined}
           />
         ))}
         {/* The mock's placeholder offer card. Real chats show real offers from the thread instead. */}
         {!USE_SUPABASE && !showLockedBanner && trade.phase !== 'frozen' && (
           <View style={{ alignItems: 'flex-start' }}>
-            <FormalOfferCard />
+            <FormalOfferCard
+              availability={offerAvailability(trade, MOCK_OFFER_MESSAGE)}
+              onPress={() => reviewOffer(MOCK_OFFER_MESSAGE)}
+            />
           </View>
         )}
       </ScrollView>
@@ -220,7 +244,8 @@ export default function ActiveChatScreen() {
         <ChatActionRow
           chatId={chatId}
           partner={chat.partner}
-          onOpenHandshake={() => setShowHandshake(true)}
+          onOpenHandshake={openHandshake}
+          onReviewOffer={reviewNewestOffer}
           onBailed={() => router.back()}
         />
         <Composer
@@ -238,21 +263,26 @@ export default function ActiveChatScreen() {
       </Modal>
 
       <Modal
-        visible={showHandshake}
+        visible={overlay !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setShowHandshake(false)}
+        onRequestClose={() => setOverlay(null)}
         statusBarTranslucent
       >
-        <HandshakeModal
-          chatId={USE_SUPABASE ? chatId : undefined}
-          onMarkCompleted={() => void handleMarkCompleted()}
-          onCompleted={() => {
-            setShowHandshake(false);
-            router.back();
-          }}
-          onReturnToChat={() => setShowHandshake(false)}
-        />
+        {overlay?.kind === 'handshake' ? (
+          <HandshakeModal
+            chatId={USE_SUPABASE ? chatId : undefined}
+            onMarkCompleted={() => void handleMarkCompleted()}
+            onCompleted={() => {
+              setOverlay(null);
+              router.back();
+            }}
+            onReturnToChat={() => setOverlay(null)}
+          />
+        ) : overlay?.kind === 'summary' ? (
+          // Locked from here and only from here; the Handshake opens once the server accepted the lock.
+          <TradeSummaryModal chatId={chatId} message={overlay.message} onConfirmed={openHandshake} onDismiss={() => setOverlay(null)} />
+        ) : null}
       </Modal>
     </View>
   );
