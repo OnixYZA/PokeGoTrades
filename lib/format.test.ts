@@ -2,13 +2,24 @@
  * Unit tests for `lib/format.ts` — `fmtDust`'s Stardust abbreviation, `creatureDisplayName`, the one
  * place a creature's displayed name is decided (the dex's name for its `pokemonId`, plus one `"Shiny "`
  * when the shiny flag is set — see that function's header comment), `speciesName` underneath it,
- * `formCodeLabel` / `creatureFormLabel`, which re-case a sprite form code for display, and
+ * `creatureFormLabel` / `formCodeLabel`, which turn a sprite form code into display text (an official-name table
+ * for the codes re-casing misnames, re-casing for the rest), and
  * `describeTypes`, the spoken wording of a typing.
  */
 import { describe, expect, it } from 'vitest';
 
 import { POKEDEX, typesOf } from '../constants/pokedex';
-import { creatureDisplayName, creatureFormLabel, describeTypes, fmtDust, formCodeLabel, speciesName } from './format';
+import { FORM_TYPE_OVERRIDES } from '../constants/pokedex-data';
+import {
+  FORM_LABEL_TABLE,
+  creatureDisplayName,
+  creatureFormLabel,
+  describeTypes,
+  fmtDust,
+  formCodeLabel,
+  speciesName,
+} from './format';
+import { BASE_FORM_CODES } from './sprite-url';
 
 describe('fmtDust', () => {
   it('leaves small numbers as-is', () => {
@@ -142,15 +153,117 @@ describe('speciesName', () => {
 });
 
 describe('creatureFormLabel', () => {
-  it('is the re-cased form code, the structured home of what a name used to say in prose', () => {
-    expect(creatureFormLabel({ formCode: 'ORIGIN' })).toBe('Origin');
-    expect(creatureFormLabel({ formCode: 'CROWNED_SWORD' })).toBe('Crowned Sword');
+  it('is undefined for the default form', () => {
+    expect(creatureFormLabel({ pokemonId: 150 })).toBeUndefined();
+    expect(creatureFormLabel({ pokemonId: 150, formCode: null })).toBeUndefined();
+    expect(creatureFormLabel({ pokemonId: 150, formCode: '' })).toBeUndefined();
   });
 
-  it('is undefined for the default form', () => {
-    expect(creatureFormLabel({})).toBeUndefined();
-    expect(creatureFormLabel({ formCode: null })).toBeUndefined();
-    expect(creatureFormLabel({ formCode: '' })).toBeUndefined();
+  it('re-cases a code that already reads as the form name, the structured home of what a name used to say in prose', () => {
+    expect(creatureFormLabel({ pokemonId: 484, formCode: 'ORIGIN' })).toBe('Origin');
+    expect(creatureFormLabel({ pokemonId: 888, formCode: 'CROWNED_SWORD' })).toBe('Crowned Sword');
+    expect(creatureFormLabel({ pokemonId: 383, formCode: 'PRIMAL' })).toBe('Primal');
+    expect(creatureFormLabel({ pokemonId: 384, formCode: 'MEGA' })).toBe('Mega');
+    expect(creatureFormLabel({ pokemonId: 52, formCode: 'GALARIAN' })).toBe('Galarian');
+    expect(creatureFormLabel({ pokemonId: 58, formCode: 'HISUIAN' })).toBe('Hisuian');
+  });
+
+  it('names Armored Mewtwo, whose code is a bare "A"', () => {
+    expect(creatureFormLabel({ pokemonId: 150, formCode: 'A' })).toBe('Armored');
+  });
+
+  it('scopes a species-specific code to its species: "A" on anything else is just "A"', () => {
+    expect(creatureFormLabel({ pokemonId: 151, formCode: 'A' })).toBe('A');
+    expect(creatureFormLabel({ pokemonId: 999_999, formCode: 'A' })).toBe('A');
+  });
+
+  it('turns a region code into its adjective, whatever the species', () => {
+    expect(creatureFormLabel({ pokemonId: 19, formCode: 'ALOLA' })).toBe('Alolan');
+    expect(creatureFormLabel({ pokemonId: 52, formCode: 'ALOLA' })).toBe('Alolan');
+    expect(creatureFormLabel({ pokemonId: 194, formCode: 'PALDEA' })).toBe('Paldean');
+  });
+
+  it('names the three Paldean Tauros breeds', () => {
+    expect(creatureFormLabel({ pokemonId: 128, formCode: 'PALDEA_COMBAT' })).toBe('Paldean Combat Breed');
+    expect(creatureFormLabel({ pokemonId: 128, formCode: 'PALDEA_BLAZE' })).toBe('Paldean Blaze Breed');
+    expect(creatureFormLabel({ pokemonId: 128, formCode: 'PALDEA_AQUA' })).toBe('Paldean Aqua Breed');
+  });
+
+  it('names the Wormadam cloaks and Galarian Darmanitan modes', () => {
+    expect(creatureFormLabel({ pokemonId: 413, formCode: 'WORMADAM_SANDY' })).toBe('Sandy Cloak');
+    expect(creatureFormLabel({ pokemonId: 413, formCode: 'WORMADAM_TRASH' })).toBe('Trash Cloak');
+    expect(creatureFormLabel({ pokemonId: 555, formCode: 'GALARIAN_ZEN' })).toBe('Galarian Zen Mode');
+  });
+
+  it('drops a species name the code repeats (Unown), without needing a row per letter', () => {
+    expect(creatureFormLabel({ pokemonId: 201, formCode: 'UNOWN_A' })).toBe('A');
+    expect(creatureFormLabel({ pokemonId: 201, formCode: 'UNOWN_B' })).toBe('B');
+    // Only the species' OWN name: the same code on another species is left whole.
+    expect(creatureFormLabel({ pokemonId: 1, formCode: 'UNOWN_A' })).toBe('Unown A');
+    // A code that is nothing but the name keeps it rather than rendering blank.
+    expect(creatureFormLabel({ pokemonId: 201, formCode: 'UNOWN_' })).toBe('Unown');
+  });
+
+  it('re-cases a code it has no name for, instead of guessing one', () => {
+    expect(creatureFormLabel({ pokemonId: 150, formCode: 'SOME_NEW_FORM' })).toBe('Some New Form');
+    expect(creatureFormLabel({ pokemonId: 133, formCode: 'SPRING_2026' })).toBe('Spring 2026');
+  });
+
+  it('falls back to re-casing for a species the dex does not know', () => {
+    expect(creatureFormLabel({ pokemonId: 999_999, formCode: 'ORIGIN' })).toBe('Origin');
+    expect(creatureFormLabel({ pokemonId: 999_999, formCode: 'ALOLA' })).toBe('Alolan');
+  });
+
+  it('gives every form code in the data a non-empty label, so none can render blank', () => {
+    const pairs: [number, string][] = [
+      ...FORM_TYPE_OVERRIDES.map(([id, code]): [number, string] => [id, code]),
+      ...Object.entries(BASE_FORM_CODES).map(([id, code]): [number, string] => [Number(id), code]),
+    ];
+    // The data really does have these to check; an empty list would make the loop below vacuous.
+    expect(pairs.length).toBeGreaterThan(100);
+    for (const [pokemonId, formCode] of pairs) {
+      const label = creatureFormLabel({ pokemonId, formCode });
+      expect(label, `${pokemonId}:${formCode}`).toBeTruthy();
+      expect(label!.trim(), `${pokemonId}:${formCode}`).toBe(label);
+    }
+  });
+});
+
+describe('FORM_LABEL_TABLE', () => {
+  /** Rows for codes the app meets from hosted data / the mock listings, not from `FORM_TYPE_OVERRIDES` (which
+   *  lists only forms whose TYPES differ) or `BASE_FORM_CODES`: Armored Mewtwo, `data/listings.ts` l2 and the
+   *  hosted `listings.form_code`. */
+  const FROM_LISTINGS = new Set(['150:A']);
+
+  const known = new Set<string>([
+    ...FORM_TYPE_OVERRIDES.map(([id, code]) => `${id}:${code}`),
+    ...Object.entries(BASE_FORM_CODES).map(([id, code]) => `${id}:${code}`),
+    ...FROM_LISTINGS,
+  ]);
+
+  it('only names codes the data actually has, on the species that has them', () => {
+    for (const [pokemonId, code] of FORM_LABEL_TABLE) {
+      if (pokemonId === '*') {
+        expect(
+          FORM_TYPE_OVERRIDES.some(([, c]) => c === code),
+          `*:${code}`,
+        ).toBe(true);
+      } else {
+        expect(known.has(`${pokemonId}:${code}`), `${pokemonId}:${code}`).toBe(true);
+      }
+    }
+  });
+
+  it('has one row per (species, code) and no blank or code-shaped label', () => {
+    const seen = new Set<string>();
+    for (const [pokemonId, code, label] of FORM_LABEL_TABLE) {
+      const key = `${pokemonId}:${code}`;
+      expect(seen.has(key), `duplicate ${key}`).toBe(false);
+      seen.add(key);
+      expect(label.trim(), key).not.toBe('');
+      // A label is a name, not a re-spelled sprite token.
+      expect(label, key).not.toMatch(/^[A-Z0-9_]+$/);
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { testIds } from '../lib/test-ids';
 import { watchRealtime } from './support/realtime';
 import { recordToasts, type ToastSighting } from './support/toasts';
 import {
@@ -23,8 +24,13 @@ import {
  * Needs: Docker + the local stack (`npx supabase start -x logflare,vector`), the seeded database
  * (`npm run db:reset`), and Chromium (`npx playwright install chromium`). Run with `npm run e2e`.
  *
- * Each run makes its own listing for DriftCoral (unique name) and deletes it afterwards, so the seed stays
- * as it was and the test can be run again straight away.
+ * Each run makes its own listing for DriftCoral and deletes it afterwards, so the seed stays as it was and the
+ * test can be run again straight away.
+ *
+ * HOW THE RUN FINDS ITS OWN LISTING. The app derives every displayed name from the Pokédex, so the fixture is an
+ * honest "Mewtwo" and reads exactly like the seeded Armored Mewtwo: a name cannot tell them apart. What does is
+ * the run's marker in the listing's `notes`, which the feed card renders, and the listing's id, which the Chats tab
+ * carries as a `testID` (`lib/test-ids.ts`; it shows names, never notes).
  */
 
 const runId = Date.now().toString(36);
@@ -81,18 +87,23 @@ async function openDevice(browser: Browser, origin: string, trainer: Trainer): P
 /** Tabs and earlier screens stay mounted underneath the current one, and `getByText` also matches hidden nodes. */
 const shown = (locator: Locator) => locator.filter({ visible: true });
 const handshake = (page: Page) => shown(page.getByText('Exchange Friend Codes'));
+/** The Chats tab's block for one listing, found by its id: the tab shows creature names, which several listings share. */
+const chatGroup = (page: Page, listingId: string) => shown(page.getByTestId(testIds.chatGroup(listingId)));
 
 /**
- * Opens a listing from the feed by tapping its artwork. Known web bug (ListingCard): the text column carries
+ * Opens a listing from the feed by tapping its artwork, found by the run's marker in its `notes` (the one thing the
+ * card shows that is unique to the run). Known web bug (ListingCard): the text column carries
  * `style={{ pointerEvents: 'box-none' }}`, which NativeWind emits as inline CSS the browser rejects, so that
  * column stays `pointer-events: auto` and swallows taps meant for the card's tap-target underlay. Only the
  * artwork side reaches the underlay. This keeps working once the card is fixed.
  */
-async function openListing(page: Page, name: string): Promise<void> {
-  const title = shown(page.getByText(name, { exact: true }));
-  await expect(title).toBeVisible();
-  const box = await title.boundingBox();
-  if (!box) throw new Error(`"${name}" has no box on screen`);
+async function openListing(page: Page, marker: string): Promise<void> {
+  const notes = shown(page.getByText(marker, { exact: true }));
+  await expect(notes).toBeVisible();
+  // The click below is by coordinates, so the card has to be inside the viewport first.
+  await notes.scrollIntoViewIfNeeded();
+  const box = await notes.boundingBox();
+  if (!box) throw new Error(`"${marker}" has no box on screen`);
   test.info().annotations.push({
     type: 'known-issue',
     description: 'ListingCard: taps on the text column do not open the listing on web (pointerEvents "box-none" in style).',
@@ -141,13 +152,16 @@ test('two-device trade: offer → live inbox → lock → handshake → both con
     await seller.page.getByRole('tab', { name: 'Chats' }).click();
     await expect(seller.page.getByText('Your Chats', { exact: true })).toBeVisible();
     // Nobody has made an offer on the new listing yet.
-    await expect(shown(seller.page.getByText(listing.name, { exact: true }))).toHaveCount(0);
+    await expect(chatGroup(seller.page, listing.id)).toHaveCount(0);
   });
 
   await test.step('Buyer (MintRunner) finds the listing in the feed and makes an offer', async () => {
-    await openListing(buyer.page, listing.name);
+    await openListing(buyer.page, listing.notes);
     await buyer.page.getByRole('button', { name: 'Make Offer' }).click();
-    await buyer.page.getByRole('radio', { name: listing.wanted }).click();
+    // Scoped to the offer sheet (an RN Modal, which RN Web renders as a `dialog`): a creature's row is named after
+    // the species, which other screens still mounted underneath can show as well.
+    const offerSheet = buyer.page.getByRole('dialog').filter({ hasText: 'Make an Offer' });
+    await offerSheet.getByRole('radio', { name: listing.wanted }).click();
     await buyer.page.getByRole('button', { name: 'Send offer' }).click();
 
     // `open_offer` returned a chat id and the app navigated straight to it.
@@ -170,7 +184,7 @@ test('two-device trade: offer → live inbox → lock → handshake → both con
     .filter({ hasText: TEST_MESSAGE });
 
   await test.step('Seller sees the offer and the message in the inbox with no refresh', async () => {
-    await expect(shown(seller.page.getByText(listing.name, { exact: true }))).toBeVisible();
+    await expect(chatGroup(seller.page, listing.id)).toBeVisible();
     await expect(inboxRow).toBeVisible();
     await expect(inboxRow).toHaveAccessibleName(/unread/);
   });
@@ -233,13 +247,13 @@ test('two-device trade: offer → live inbox → lock → handshake → both con
     await expect(shown(seller.page.getByText('Your Chats', { exact: true }))).toBeVisible();
     await expect(shown(buyer.page.getByText('Near you', { exact: true }))).toBeVisible();
     // The listing was traded, so it has left the buyer's feed without a refresh (`listing_status`).
-    await expect(shown(buyer.page.getByText(listing.name, { exact: true }))).toHaveCount(0);
+    await expect(shown(buyer.page.getByText(listing.notes, { exact: true }))).toHaveCount(0);
 
     await buyer.page.getByRole('tab', { name: 'Chats' }).click();
     await expect(shown(buyer.page.getByText('Your Chats', { exact: true }))).toBeVisible();
     for (const device of [seller, buyer]) {
       // The chat is archived for both trainers on completion (`confirm_trade`), so the offer is gone from the inbox.
-      await expect(shown(device.page.getByText(listing.name, { exact: true }))).toHaveCount(0);
+      await expect(chatGroup(device.page, listing.id)).toHaveCount(0);
     }
   });
 

@@ -172,6 +172,14 @@ export type OutgoingMessage = { text: string } | { offer: FormalOffer };
 
 const CUSTOM_OFFER_BODY = "Custom offer — let's work out the details here.";
 
+/**
+ * The inbox preview of a chat whose last message is a formal offer. In Supabase mode the server writes it
+ * (`private.on_message_inserted`, migration 20261017000100) and the client shows whatever was stored; the server
+ * has no Pokédex, so it cannot name the species and says only this. The mock builds the same string so a demo
+ * inbox reads like the real one. Keep the two in step.
+ */
+const FORMAL_OFFER_PREVIEW = 'Formal offer';
+
 interface TradeState {
   // ——— normalized entities ———
   listings: Record<string, Listing>;
@@ -561,7 +569,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
           id: chatId,
           listingId,
           partner: listing.seller,
-          preview: selection.kind === 'creature' ? `Formal offer sent · ${creatureDisplayName(selection.offer)}` : CUSTOM_OFFER_BODY,
+          preview: selection.kind === 'creature' ? FORMAL_OFFER_PREVIEW : CUSTOM_OFFER_BODY,
           unread: 0,
           active: true,
           offers: [opener],

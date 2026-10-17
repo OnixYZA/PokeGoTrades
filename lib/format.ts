@@ -79,9 +79,11 @@ export function formatTradeDate(date: Date): string {
 }
 
 
-/** A PokeMiners form code as display text, e.g. `'CROWNED_SWORD'` -> `'Crowned Sword'`. The codes are sprite
- *  keys (`lib/sprite-url.ts`), not names, so this only re-cases them — it never maps one onto a different name,
- *  which is also why a formal offer (which carries a code and no display form) is shown through it. */
+/** A PokeMiners form code re-cased as display text, e.g. `'CROWNED_SWORD'` -> `'Crowned Sword'`. The codes are
+ *  sprite keys (`lib/sprite-url.ts`), not names, so this only re-cases them — it never maps one onto a different
+ *  name. It is the LAST step of `creatureFormLabel`'s lookup (after `FORM_LABEL_TABLE` and the repeated-species
+ *  rule), and the whole answer for the great majority of codes, whose re-cased spelling already is the official
+ *  name (`ORIGIN`, `GALARIAN`, `HISUIAN`, `MEGA_X`, `DAWN_WINGS`, `ICE_RIDER`, `RAPID_STRIKE`, ...). */
 export function formCodeLabel(code: string): string {
   return code
     .split('_')
@@ -90,14 +92,100 @@ export function formCodeLabel(code: string): string {
     .join(' ');
 }
 
-/** A creature's form as a line of text — `formCodeLabel` of its `formCode`, or `undefined` for the species'
- *  default form. The structured home of what a stored name used to say in prose ("Origin Palkia", "Primal
- *  Groudon", "Mega Rayquaza"): `creatureDisplayName` shows the dex species only, so a screen that has room
- *  for a second line shows the form here instead, and the two can never disagree about which form it is.
- *  Same caveat as `formCodeLabel`: it re-cases the sprite code, it does not translate it, so a code with no
- *  readable word in it (`'A'`, Armored Mewtwo) reads as itself. */
-export function creatureFormLabel(c: { formCode?: string | null }): string | undefined {
-  return c.formCode ? formCodeLabel(c.formCode) : undefined;
+/** One row of `FORM_LABEL_TABLE`: `[pokemonId | '*', formCode, label]`. */
+type FormLabelEntry = readonly [pokemonId: number | '*', formCode: string, label: string];
+
+/**
+ * Display names for the form codes whose re-cased spelling (`formCodeLabel`) reads wrongly. Every other code
+ * is left to that fallback, so this stays small on purpose: an entry is added only when re-casing the code
+ * misnames the form, never to dress up a code that already reads correctly. Every label below is the form's
+ * official Pokémon name (AGENTS.md: never hallucinate game data); a name that could not be verified is left
+ * out and falls back to the re-cased code instead of being guessed.
+ *
+ * WHY THE TABLE IS KEYED BY SPECIES AS WELL AS CODE. A code is a sprite token, and the same token can mean
+ * different things on different species: `A` is Armored Mewtwo's code (the only single-letter form code in the
+ * game's art) and means nothing on any other species, `ZEN` is Darmanitan's Zen Mode, `FAIRY` is an Arceus
+ * type form but also a Silvally one. So a row names the species it is for (`pokemonId`), and `'*'` is reserved for
+ * the codes that mean the same on every species that has them. The two regional adjectives below are those:
+ * `ALOLA` is Alolan on Rattata, Sandshrew and Meowth alike. (`GALARIAN` and `HISUIAN` already re-case to the
+ * right adjective, so they have no row.) A lookup tries the species row first, so a `'*'` row never overrides
+ * a species-specific one.
+ *
+ * Rows are checked against the dex data by `lib/format.test.ts`: a code that no species in
+ * `FORM_TYPE_OVERRIDES` / `BASE_FORM_CODES` carries (a typo, a form that was renamed upstream) fails there.
+ */
+export const FORM_LABEL_TABLE: readonly FormLabelEntry[] = [
+  // Regional adjectives: re-casing gives the region ("Alola", "Paldea"), the form is the demonym.
+  ['*', 'ALOLA', 'Alolan'],
+  ['*', 'PALDEA', 'Paldean'],
+
+  // Tauros #128: the three Paldean breeds (official: Paldean Tauros, Combat / Blaze / Aqua Breed).
+  [128, 'PALDEA_COMBAT', 'Paldean Combat Breed'],
+  [128, 'PALDEA_BLAZE', 'Paldean Blaze Breed'],
+  [128, 'PALDEA_AQUA', 'Paldean Aqua Breed'],
+
+  // Mewtwo #150: `A` is PokeMiners' code for Armored Mewtwo (Pokémon GO's Armored costume). Re-cased it reads "A".
+  [150, 'A', 'Armored'],
+
+  // Burmy #412 / Wormadam #413: their codes lead with the species ("WORMADAM_SANDY"), which the screen already
+  // shows in the name above the form line. The official form names are the three cloaks (Plant / Sandy / Trash).
+  [412, 'BURMY_PLANT', 'Plant Cloak'],
+  [413, 'WORMADAM_PLANT', 'Plant Cloak'],
+  [413, 'WORMADAM_SANDY', 'Sandy Cloak'],
+  [413, 'WORMADAM_TRASH', 'Trash Cloak'],
+
+  // Darmanitan #555: Standard Mode / Zen Mode, and the Galarian ones. The bare words are not the form names.
+  [555, 'STANDARD', 'Standard Mode'],
+  [555, 'ZEN', 'Zen Mode'],
+  [555, 'GALARIAN_STANDARD', 'Galarian Standard Mode'],
+  [555, 'GALARIAN_ZEN', 'Galarian Zen Mode'],
+
+  // Oricorio #741: the four Styles. Re-casing misspells two of them (official: "Pa'u" and "Pom-Pom"), and the
+  // set reads as one family only if all four say "Style".
+  [741, 'BAILE', 'Baile Style'],
+  [741, 'PAU', "Pa'u Style"],
+  [741, 'POMPOM', 'Pom-Pom Style'],
+  [741, 'SENSU', 'Sensu Style'],
+
+  // Maushold #925: re-casing capitalises the "of" ("Family Of Four").
+  [925, 'FAMILY_OF_FOUR', 'Family of Four'],
+];
+
+const FORM_LABELS: ReadonlyMap<string, string> = new Map(FORM_LABEL_TABLE.map(([id, code, label]) => [`${id}:${code}`, label]));
+
+/** A code that opens with the species' own name ("UNOWN_A", "WORMADAM_SANDY") with that name taken off
+ *  ("A", "SANDY"), or `undefined` when it does not (or nothing would be left). The name is the dex's name
+ *  upper-cased, so a species whose name is not a bare token (e.g. "Mr. Mime") never matches and keeps the
+ *  full re-cased code. */
+function withoutSpeciesPrefix(pokemonId: number, code: string): string | undefined {
+  const species = findPokemon(pokemonId)?.name.toUpperCase();
+  if (!species || !code.startsWith(`${species}_`)) return undefined;
+  return code.slice(species.length + 1).replace(/^_+/, '') || undefined;
+}
+
+/**
+ * A creature's form as a line of text, or `undefined` for the species' default form (no `formCode`). The
+ * structured home of what a stored name used to say in prose ("Origin Palkia", "Primal Groudon", "Mega
+ * Rayquaza"): `creatureDisplayName` shows the dex species only, so a screen that has room for a second line
+ * shows the form here instead, and the two can never disagree about which form it is.
+ *
+ * `pokemonId` is required because a form code does not name a form by itself, only together with the species
+ * it is on (`A` is Armored on #150 and nothing anywhere else; see `FORM_LABEL_TABLE`). The lookup is, in order:
+ *   1. `FORM_LABEL_TABLE`, the species' own row and then a `'*'` row: the official name where re-casing the
+ *      code would misname the form ("Alolan", "Armored", "Pa'u Style").
+ *   2. A code that starts with the species' name ("UNOWN_A"), minus that name, re-cased: the screen already
+ *      says the species, so repeating it ("Unown A") only adds noise. A rule rather than a table because Unown
+ *      alone has 28 forms and only `UNOWN_A` is in the data today; `UNOWN_A` -> "A".
+ *   3. `formCodeLabel`: the code re-cased ("CROWNED_SWORD" -> "Crowned Sword"). A code nothing above knows
+ *      therefore reads as itself, never blank and never a guessed name.
+ */
+export function creatureFormLabel(c: { pokemonId: number; formCode?: string | null }): string | undefined {
+  const code = c.formCode;
+  if (!code) return undefined;
+  const named = FORM_LABELS.get(`${c.pokemonId}:${code}`) ?? FORM_LABELS.get(`*:${code}`);
+  if (named !== undefined) return named;
+  const unprefixed = withoutSpeciesPrefix(c.pokemonId, code);
+  return formCodeLabel(unprefixed ?? code);
 }
 
 /** A creature's typing as a screen reader should hear it, e.g. `['Fire', 'Flying']` -> `'Fire and Flying type'`

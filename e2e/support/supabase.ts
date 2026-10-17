@@ -69,22 +69,35 @@ export async function signIn(trainer: Trainer): Promise<Session> {
 
 export interface ListingFixture {
   id: string;
+  /** What the app shows for the listing's creature: the dex name for `pokemon_id`. NOT unique to the run (a
+   *  seeded listing of the same species reads identically), so never locate this run's listing by it. */
   name: string;
-  /** The creature the seller is Looking For, i.e. the row the buyer picks in the offer sheet. */
+  /** The run's marker, stored in the listing's `notes`. The feed card renders `notes`, and nothing else on
+   *  screen is both unique to the run and shown there, so this is how a spec finds ITS card. Screens that do
+   *  not render `notes` (the Chats tab) are found by id instead (`lib/test-ids.ts`). */
+  notes: string;
+  /** What the app shows for the creature the seller is Looking For, i.e. the row the buyer picks in the offer
+   *  sheet: the dex name for the `looking` entry's `pokemonId`. */
   wanted: string;
 }
 
 /**
  * A fresh open listing for `seller`, so the run neither depends on nor consumes the seeded ones (completing
- * a trade closes the listing for good). The name is unique per run, which is how the feed finds it.
+ * a trade closes the listing for good).
+ *
+ * The creature is a real one, named as the dex names it ("Mewtwo", "Dragonite"): the app derives every displayed
+ * name from `pokemon_id` (`lib/format.ts` `creatureDisplayName`), so an invented name here would only be dead text
+ * that the screens ignore, and the spec would be asserting on something nobody sees. What makes the listing
+ * identifiable to the run is its `notes` (see `ListingFixture.notes`), which the feed card does render.
  */
 export async function createListingFixture(admin: SupabaseClient, seller: Trainer, runId: string): Promise<ListingFixture> {
-  const wanted = 'E2E Wanted Dragonite';
+  const wanted = 'Dragonite';
+  const notes = `E2E ${runId}`;
   const { data, error } = await admin
     .from('listings')
     .insert({
       seller_id: seller.id,
-      name: `E2E Mewtwo ${runId}`,
+      name: 'Mewtwo',
       pokemon_id: 150,
       form: 'Standard',
       catch_year: 2024,
@@ -94,11 +107,12 @@ export async function createListingFixture(admin: SupabaseClient, seller: Traine
       loc: 'Adyar', // the feed's default area
       trade_type: 'Standard / Registered',
       looking: [{ name: wanted, pokemonId: 149, hue: 340 }],
+      notes,
     })
-    .select('id, name')
+    .select('id, name, notes')
     .single();
   if (error || !data) throw new Error(`Could not create the listing fixture: ${error?.message}`);
-  return { id: data.id as string, name: data.name as string, wanted };
+  return { id: data.id as string, name: data.name as string, notes: data.notes as string, wanted };
 }
 
 /** Everything a run leaves behind: the trade row (its listing FK is `set null`, so it must go first), the

@@ -11,7 +11,7 @@ import { TypeBadge } from '@/components/ui/TypeBadge';
 import { TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
 import { FRIENDSHIP_LEVELS } from '@/constants/theme';
 import { TRADE_COST_MATRIX, type ChatMessage, type ChatRole, type CreatureRef, type FormalOffer, type Listing } from '@/data/types';
-import { creatureDisplayName, fmtDust, formCodeLabel } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, fmtDust } from '@/lib/format';
 import { offerAvailability, type OfferBlock } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
@@ -39,7 +39,8 @@ interface Pill {
 function offerPills(offer: FormalOffer): Pill[] {
   const pills: Pill[] = [offer.shiny ? { label: 'Shiny', tone: 'shiny' } : { label: 'Not shiny' }];
   if (isOfferLucky(offer)) pills.push({ label: 'Lucky', tone: 'lucky' });
-  if (offer.formCode) pills.push({ label: formCodeLabel(offer.formCode) });
+  const form = creatureFormLabel(offer);
+  if (form) pills.push({ label: form });
   if (offer.costumeCode) pills.push({ label: 'Costume' });
   if (offer.iv) pills.push({ label: offer.iv });
   if (offer.move) pills.push({ label: offer.move });
