@@ -10,7 +10,7 @@ import { isPokemonUntradable } from '@/constants/pokedex';
 import type { CreatureRef, Listing } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, creatureFullName } from '@/lib/format';
 import { useTradeStore, type OfferSelection } from '@/store/trade-store';
 
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
@@ -85,7 +85,7 @@ export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModa
         }}
       >
         <Grabber />
-        <Heading sellerName={listing.seller} listingName={creatureDisplayName(listing)} />
+        <Heading sellerName={listing.seller} listingName={creatureFullName(listing)} />
 
         <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
           WHAT ARE YOU OFFERING?
@@ -147,6 +147,8 @@ function Grabber() {
   );
 }
 
+/** `listingName` is the listing's full name (`creatureFullName`): a sentence has no second line to put the form on.
+ *  It sits inline in a centred paragraph, so a long one wraps with the sentence instead of needing a line to itself. */
 function Heading({ sellerName, listingName }: { sellerName: string; listingName: string }) {
   return (
     <View className="mb-5">
@@ -174,7 +176,7 @@ function CreatureOptionRow({
     <Pressable
       onPress={onPress}
       accessibilityRole="radio"
-      accessibilityLabel={creatureDisplayName(creature)}
+      accessibilityLabel={creatureFullName(creature)}
       accessibilityState={{ selected: !!selected }}
       className="flex-row items-center gap-3.5 rounded-2xl border px-4 py-3 active:opacity-90"
       style={{

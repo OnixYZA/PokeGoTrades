@@ -9,7 +9,7 @@ import { trainer } from '@/data/trainer';
 import type { CreatureRef } from '@/data/types';
 import { fetchMyArsenal } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, creatureFullName } from '@/lib/format';
 
 interface ArsenalOfferSheetProps {
   onSelect: (creature: CreatureRef) => void;
@@ -90,7 +90,7 @@ export function ArsenalOfferSheet({ onSelect, onCancel }: ArsenalOfferSheetProps
               key={index}
               onPress={() => onSelect(creature)}
               accessibilityRole="button"
-              accessibilityLabel={`Offer ${creatureDisplayName(creature)}`}
+              accessibilityLabel={`Offer ${creatureFullName(creature)}`}
               className="flex-row items-center gap-3 rounded-2xl border border-border bg-bg-card p-3 active:opacity-80"
             >
               <Chip creature={creature} size={44} />

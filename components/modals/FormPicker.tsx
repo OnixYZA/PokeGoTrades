@@ -3,7 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Ban, Check } from 'lucide-react-native';
 
 import { defaultFormOf, formsOf, isPokemonUntradable } from '@/constants/pokedex';
-import { creatureFormLabel, speciesName } from '@/lib/format';
+import { creatureFormLabel, creatureFullName } from '@/lib/format';
 
 import { UntradableNotice } from './PokemonPickerModal';
 import { MODAL_COLORS } from './tokens';
@@ -104,7 +104,7 @@ export function FormPicker({ pokemonId, formCode, onChange }: FormPickerProps) {
         <View className="mt-3">
           {/* `UntradableNotice` carries its own horizontal margin for the picker sheet's padding; cancel it. */}
           <View style={{ marginHorizontal: -20 }}>
-            <UntradableNotice name={`${refusedOption.label} ${speciesName({ pokemonId })}`} onDismiss={() => setRefused(null)} />
+            <UntradableNotice name={creatureFullName({ pokemonId, formCode: refusedOption.code })} onDismiss={() => setRefused(null)} />
           </View>
         </View>
       )}

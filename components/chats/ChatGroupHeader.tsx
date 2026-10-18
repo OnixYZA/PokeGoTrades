@@ -4,7 +4,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Avatar } from '@/components/ui/Avatar';
 import { Chip } from '@/components/ui/Chip';
 import type { Listing } from '@/data/types';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureFullName } from '@/lib/format';
 
 interface ChatGroupHeaderProps {
   listing: Listing;
@@ -17,8 +17,12 @@ export function ChatGroupHeader({ listing, offerCount, locked }: ChatGroupHeader
     <View className="flex-row items-center gap-2.5 px-1.5 pb-2.5 pt-1.5">
       <Chip creature={listing} size={34} />
       <View className="min-w-0 flex-1">
+        {/* The full name (species + form): this header is the only place the inbox says WHICH creature a group of
+         *  offers is on, and an Armored and a plain Mewtwo are different listings. One line with an ellipsis: the
+         *  row also holds the sprite, the LOCKED badge and the seller pill, so "Shiny Darmanitan (Galarian Zen
+         *  Mode)" cannot fit at phone width, and the whole string is still what a screen reader announces. */}
         <Text numberOfLines={1} className="font-display-semi text-text-primary" style={{ fontSize: 13 }}>
-          {creatureDisplayName(listing)}
+          {creatureFullName(listing)}
         </Text>
         <Text className="font-mono text-text-subtle" style={{ fontSize: 10, letterSpacing: 0.6 }}>
           {offerCount} parallel {offerCount === 1 ? 'offer' : 'offers'}

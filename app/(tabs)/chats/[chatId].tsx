@@ -20,7 +20,7 @@ import { formalOffer } from '@/data/chats';
 import type { ChatMessage, CreatureRef } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureFullName } from '@/lib/format';
 import { newestAcceptableOffer, offerAvailability } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
@@ -187,8 +187,10 @@ export default function ActiveChatScreen() {
           <Text className="font-display text-text-primary" style={{ fontSize: 15 }}>
             {chat.partner}
           </Text>
-          <Text className="font-mono text-text-subtle" style={{ fontSize: 10, letterSpacing: 0.6 }}>
-            RE: {listing ? creatureDisplayName(listing) : ''}
+          {/* The listing's full name (species + form). One line with an ellipsis, so a long one ("RE: Shiny Zygarde
+           *  (Complete Fifty Percent)") cannot push the header taller or the handshake button off the row. */}
+          <Text numberOfLines={1} className="font-mono text-text-subtle" style={{ fontSize: 10, letterSpacing: 0.6 }}>
+            RE: {listing ? creatureFullName(listing) : ''}
           </Text>
         </View>
         {trade.canOpenHandshake && (
