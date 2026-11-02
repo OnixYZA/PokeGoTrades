@@ -13,10 +13,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SafeMeetZone } from '@/components/profile/SafeMeetZone';
 import { LookingForRow } from '@/components/listing/LookingForRow';
 import { StardustCard } from '@/components/listing/StardustCard';
 import { BuyerOfferModal } from '@/components/modals/BuyerOfferModal';
 import { IconButton } from '@/components/ui/IconButton';
+import { GigantamaxBadge } from '@/components/ui/GigantamaxBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
@@ -29,6 +31,7 @@ import { creatureHue } from '@/constants/pokedex';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
 import { demandTier, marketLabel } from '@/constants/market';
 import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
+import { formatVicinityLabel } from '@/constants/locations';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName, creatureFormLabel, formatCp } from '@/lib/format';
@@ -45,6 +48,7 @@ export default function ListingDetailScreen() {
   const subscribeToListing = useTradeStore((s) => s.subscribeToListing);
   const insets = useSafeAreaInsets();
   const [showOfferModal, setShowOfferModal] = useState(false);
+  const [showMeetup, setShowMeetup] = useState(false);
 
   const translateY = useSharedValue(SHEET_TRAVEL);
   const overlayOpacity = useSharedValue(0);
@@ -196,6 +200,7 @@ export default function ListingDetailScreen() {
               <TypeBadge creature={listing} style={{ marginTop: 8 }} />
               <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
                 {listing.lucky && <LuckyBadge />}
+                {listing.isGigantamax && <GigantamaxBadge />}
                 <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
                 {listing.untradable && (
                   <View className="rounded-[6px] border px-2 py-[3px]" style={{ backgroundColor: 'rgba(255,92,138,0.15)', borderColor: 'rgba(255,92,138,0.3)' }}>
@@ -245,6 +250,7 @@ export default function ListingDetailScreen() {
               <View className="h-px flex-1" style={SURFACE.divider} />
             </View>
             <View className="flex-row flex-wrap gap-2">
+              <LogisticsChip icon={<MapPin size={12} color="#4fb3ff" />} label={formatVicinityLabel(listing.loc)} />
               <LogisticsChip icon={<Car size={12} color="#4fb3ff" />} label={listing.willTravel ? 'Will Travel' : 'Local Only'} />
               <LogisticsChip icon={<Clock size={12} color="#4fb3ff" />} label={TRADE_TIMELINE_LABELS[listing.tradeTimeline]} />
               {listing.sizeClass && <LogisticsChip icon={<Ruler size={12} color="#4fb3ff" />} label={`Size: ${listing.sizeClass}`} />}
@@ -275,11 +281,31 @@ export default function ListingDetailScreen() {
           </View>
         </ScrollView>
 
+        {showMeetup ? (
+          <View className="border-t border-border-subtle px-[22px] pb-1 pt-3" accessibilityLiveRegion="polite">
+            <Text className="font-display text-text-primary" style={{ fontSize: 13 }}>
+              Safe meetup vicinity
+            </Text>
+            <SafeMeetZone location={formatVicinityLabel(listing.loc)} />
+            <Text className="mt-2 font-mono text-text-muted" style={{ fontSize: 11, lineHeight: 16 }}>
+              {listing.willTravel ? 'Seller is willing to travel for the meetup.' : 'Seller prefers to meet locally.'}
+            </Text>
+            <Text className="mt-1 text-text-body" style={{ fontSize: 12, lineHeight: 18 }}>
+              Exact meetup spots are agreed in chat after the trade locks. Exact GPS is never shared.
+            </Text>
+          </View>
+        ) : null}
+
         <View
           className="flex-row gap-2 border-t border-border-subtle px-[22px] pt-3.5"
           style={[SURFACE.ctaFade, { paddingBottom: Math.max(insets.bottom, 26) }]}
         >
-          <IconButton size={52} radius={14} accessibilityLabel="View meetup location">
+          <IconButton
+            size={52}
+            radius={14}
+            accessibilityLabel="View meetup location"
+            onPress={() => setShowMeetup((v) => !v)}
+          >
             <MapPin size={20} color="#4fb3ff" />
           </IconButton>
           <PrimaryButton

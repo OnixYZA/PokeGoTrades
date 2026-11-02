@@ -12,6 +12,8 @@ import {
   CheckSquare,
   ChevronDown,
   Droplet,
+  LocateFixed,
+  MapPin,
   Image as ImageIcon,
   Plus,
   Search,
@@ -24,11 +26,12 @@ import { FormPicker } from '@/components/modals/FormPicker';
 import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { GigantamaxSymbol } from '@/components/ui/GigantamaxBadge';
 import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import { findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
+import { canGigantamax, findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
 import { appendDistinctCreature, creatureRefFromPick } from '@/lib/creature-pick';
 import { CP_MAX, CP_MIN, creatureFormLabel, creatureFullName, dexLabel, parseCp } from '@/lib/format';
@@ -53,7 +56,9 @@ import {
   type NewListingInput,
   type ProofKind,
 } from '@/lib/api/listings';
+import { AREAS, VICINITY_RADIUS_LABEL, type AreaName } from '@/constants/locations';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { useVicinity } from '@/lib/use-vicinity';
 import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
@@ -134,6 +139,12 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [specialBackground, setSpecialBackground] = useState(true);
   const [costume, setCostume] = useState(false);
   const [willTravel, setWillTravel] = useState(false);
+  // Only meaningful for a species that can Gigantamax (`canGigantamax`): `handlePickPokemon` clears it on a switch
+  // to one that cannot, and the draft re-checks eligibility, so an ineligible G-Max listing can't be submitted.
+  const [isGigantamax, setIsGigantamax] = useState(false);
+  // The listing's neighbourhood: starts at the feed's current one, and is always one of `AREAS` (the only
+  // location a listing ever carries; exact GPS is never read, stored or shared).
+  const [area, setArea] = useState<AreaName>(() => filterLocation);
   const [pokeball, setPokeball] = useState<Pokeball | null>(null);
   // Seller-declared; null leaves it to an appraisal screenshot to tag.
   const [sizeClass, setSizeClass] = useState<PokemonSize | null>(null);
@@ -209,7 +220,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       shiny,
       accent: '#fbbf24',
       bg,
-      loc: filterLocation,
+      loc: area,
       tradeType,
       iv: knowsIv ? `${ivAtk}/${ivDef}/${ivSta}` : 'Unrated',
       looking,
@@ -223,6 +234,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       sizeClass,
       cp: cpResult.cp,
       willTravel,
+      isGigantamax: isGigantamax && canGigantamax(selectedCreature.pokemonId),
       tradeTimeline,
     };
   }, [
@@ -237,18 +249,19 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     sizeClass,
     cpResult,
     willTravel,
+    isGigantamax,
     tradeTimeline,
     knowsIv,
     ivAtk,
     ivDef,
     ivSta,
     wanted,
-    filterLocation,
+    area,
     selectedTags,
     notes,
   ]);
 
-  /** The draft as the feed card renders it. Seller, ranks, distance and lucky are server-owned, so they are display-only here. */
+  /** The draft as the feed card renders it. Seller, ranks and lucky are server-owned, so they are display-only here. */
   const previewListing = useMemo<Listing | null>(
     () =>
       draft && {
@@ -256,7 +269,6 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         // A new listing is never Lucky: only the OCR worker sets that, after an appraisal proof backs it.
         lucky: false,
         seller: 'You',
-        dist: USE_SUPABASE ? undefined : 0,
         pvp: 'NEW',
         screenshots: uploads.map((u) => u.image.filename),
       },
@@ -296,6 +308,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       if (!entry || isPokemonUntradable(entry.pokemonId)) return;
       // Re-picking the same species keeps its form; a different one starts on its default form.
       if (entry.pokemonId !== selectedCreature?.pokemonId) setFormCode(null);
+      if (!canGigantamax(entry.pokemonId)) setIsGigantamax(false);
       setSelectedCreature(entry);
     } else if (target === 'wanted') {
       // `creatureRefFromPick` is the one place a pick becomes a ref: dex name and hue, the trainer's shiny and
@@ -600,6 +613,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           onToggleCostume={() => setCostume((v) => !v)}
           willTravel={willTravel}
           onToggleWillTravel={() => setWillTravel((v) => !v)}
+          gigantamax={isGigantamax}
+          onToggleGigantamax={selectedCreature && canGigantamax(selectedCreature.pokemonId) ? () => setIsGigantamax((v) => !v) : undefined}
         />
         <IvSpreadSection
           knowsIv={knowsIv}
@@ -612,6 +627,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           onChangeSta={setIvSta}
         />
         <LogisticsSection
+          area={area}
+          onSelectArea={setArea}
           pokeball={pokeball}
           onSelectPokeball={setPokeball}
           sizeClass={sizeClass}
@@ -842,6 +859,8 @@ function AttributesCard({
   onToggleCostume,
   willTravel,
   onToggleWillTravel,
+  gigantamax,
+  onToggleGigantamax,
 }: {
   shiny: boolean;
   onToggleShiny: () => void;
@@ -853,6 +872,9 @@ function AttributesCard({
   onToggleCostume: () => void;
   willTravel: boolean;
   onToggleWillTravel: () => void;
+  gigantamax: boolean;
+  /** Undefined hides the row: the chosen species cannot Gigantamax. */
+  onToggleGigantamax?: () => void;
 }) {
   return (
     <View>
@@ -899,6 +921,17 @@ function AttributesCard({
           onGradient={MODAL_SURFACE.togglePink}
           onPress={onToggleCostume}
         />
+        {onToggleGigantamax && (
+          <AttributeRow
+            icon={<GigantamaxSymbol size={18} color="#ff2a5f" />}
+            tint="rgba(255,42,95,0.12)"
+            title="Gigantamax"
+            description="Can Gigantamax in Max Battles"
+            on={gigantamax}
+            onGradient={MODAL_SURFACE.toggleCrimson}
+            onPress={onToggleGigantamax}
+          />
+        )}
         <AttributeRow
           icon={<Car size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
@@ -1074,6 +1107,81 @@ function PokeballOption({
   );
 }
 
+/** The seller picks the listing's neighbourhood from `AREAS`; buyers only ever see this name plus the vicinity
+ *  radius. The web-only shortcut asks the browser for a coarse fix and keeps just the bucketed area. */
+function AreaPicker({ area, onSelect }: { area: AreaName; onSelect: (area: AreaName) => void }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<View>(null);
+  const vicinity = useVicinity();
+
+  const pickMyVicinity = async () => {
+    const found = await vicinity.locate();
+    if (found) onSelect(found);
+  };
+
+  return (
+    <View>
+      <Text className="font-mono mb-1.5" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
+        NEIGHBOURHOOD
+      </Text>
+      <Pressable
+        ref={anchorRef}
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={`Listing neighbourhood: ${area}`}
+        accessibilityHint="Opens a list of neighbourhoods to choose from"
+        accessibilityState={{ expanded: open }}
+        className="flex-row items-center gap-2 rounded-[14px] border px-4 py-3.5 active:opacity-80"
+        style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+      >
+        <MapPin size={14} color={C.textMuted} />
+        <Text className="flex-1" style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
+          {area}
+        </Text>
+        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted }}>
+          {VICINITY_RADIUS_LABEL}
+        </Text>
+        <ChevronDown size={16} color={C.textMuted} />
+      </Pressable>
+      <Text className="mt-1.5" style={{ fontSize: 11, lineHeight: 16, color: C.textMuted }}>
+        Buyers see only this neighbourhood. Your exact GPS location is never shared.
+      </Text>
+      {vicinity.supported ? (
+        <Pressable
+          onPress={() => void pickMyVicinity()}
+          disabled={vicinity.locating}
+          accessibilityRole="button"
+          accessibilityLabel="Use my vicinity, fuzzed to a neighbourhood"
+          accessibilityHint="Asks your browser for your location and keeps only the neighbourhood"
+          accessibilityState={{ busy: vicinity.locating, disabled: vicinity.locating }}
+          hitSlop={6}
+          className="mt-2 flex-row items-center gap-1.5 self-start active:opacity-70"
+          style={{ opacity: vicinity.locating ? 0.6 : 1 }}
+        >
+          <LocateFixed size={13} color={C.gold} />
+          <Text className="font-display-semi" style={{ fontSize: 12, color: C.gold }}>
+            {vicinity.locating ? 'Locating…' : 'Use my vicinity'}
+          </Text>
+        </Pressable>
+      ) : null}
+      <Dropdown visible={open} onRequestClose={() => setOpen(false)} anchorRef={anchorRef} align="stretch">
+        {AREAS.map((option, i) => (
+          <PokeballOption
+            key={option}
+            label={option}
+            selected={option === area}
+            onPress={() => {
+              onSelect(option);
+              setOpen(false);
+            }}
+            isLast={i === AREAS.length - 1}
+          />
+        ))}
+      </Dropdown>
+    </View>
+  );
+}
+
 /** Optional — `null` ("Not specified") is a real, first-class choice, not just an unset default: most
  *  sellers never learn (or bother recording) which ball a catch used. */
 function PokeballPicker({ pokeball, onSelect }: { pokeball: Pokeball | null; onSelect: (pokeball: Pokeball | null) => void }) {
@@ -1243,6 +1351,8 @@ function CpSection({ cpText, onChangeCp }: { cpText: string; onChangeCp: (value:
 }
 
 function LogisticsSection({
+  area,
+  onSelectArea,
   pokeball,
   onSelectPokeball,
   sizeClass,
@@ -1250,6 +1360,8 @@ function LogisticsSection({
   tradeTimeline,
   onSelectTimeline,
 }: {
+  area: AreaName;
+  onSelectArea: (area: AreaName) => void;
   pokeball: Pokeball | null;
   onSelectPokeball: (pokeball: Pokeball | null) => void;
   sizeClass: PokemonSize | null;
@@ -1263,6 +1375,7 @@ function LogisticsSection({
         LOGISTICS
       </Text>
       <View className="gap-3">
+        <AreaPicker area={area} onSelect={onSelectArea} />
         <PokeballPicker pokeball={pokeball} onSelect={onSelectPokeball} />
         <TimelinePicker timeline={tradeTimeline} onSelect={onSelectTimeline} />
         <SizePicker size={sizeClass} onSelect={onSelectSize} />

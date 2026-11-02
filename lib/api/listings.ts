@@ -1,5 +1,6 @@
 import type { QueryData } from '@supabase/supabase-js';
 
+import { sanitizeLocationLabel, type AreaName } from '@/constants/locations';
 import {
   LISTING_TAGS,
   POKEBALLS,
@@ -41,12 +42,13 @@ type _PokemonSizesMatchDb = Expect<AssertSameMembers<(typeof POKEMON_SIZES)[numb
 type _TradeTimelinesMatchDb = Expect<AssertSameMembers<(typeof TRADE_TIMELINES)[number], Database['public']['Enums']['trade_timeline']>>;
 
 /** `FilterFlagField` (Listing camelCase) -> the actual `listings` column. Only `willTravel` differs. */
-const FLAG_DB_COLUMNS: Record<FilterFlagField, 'shiny' | 'lucky' | 'purified' | 'costume' | 'will_travel'> = {
+const FLAG_DB_COLUMNS: Record<FilterFlagField, 'shiny' | 'lucky' | 'purified' | 'costume' | 'will_travel' | 'is_gigantamax'> = {
   shiny: 'shiny',
   lucky: 'lucky',
   purified: 'purified',
   costume: 'costume',
   willTravel: 'will_travel',
+  isGigantamax: 'is_gigantamax',
 };
 
 /** `FilterEnumField` (Listing camelCase) -> the actual `listings` column. */
@@ -124,7 +126,7 @@ export function listingErrorMessage(error: unknown): string {
  * reads 'NEW' live) in favor of the `pokemon_market_demand` view, fetched separately in `lib/use-feed.ts`.
  */
 const LISTING_COLUMNS =
-  'id, seller_id, status, name, pokemon_id, form_code, costume_code, catch_year, lucky, shiny, cp, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
+  'id, seller_id, status, name, pokemon_id, form_code, costume_code, catch_year, lucky, shiny, cp, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, is_gigantamax, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
 
 function selectListings() {
   return supabase.from('listings').select(LISTING_COLUMNS);
@@ -146,6 +148,14 @@ function parseIv(iv: string): { iv_atk: number; iv_def: number; iv_sta: number }
 }
 
 /** DB row -> the `Listing` shape every component already consumes. `dist` stays unset (D3). */
+/** `listings.loc` is a foreign key to `public.areas`, and constants/locations.test.ts pins `AREAS` to that
+ *  table, so a row outside `AREAS` means the two drifted. Fail loudly instead of inventing a label. */
+function listingArea(loc: string): AreaName {
+  const area = sanitizeLocationLabel(loc);
+  if (!area) throw new ListingsApiError('Listing has a location outside the supported areas.', 'unknown_area');
+  return area;
+}
+
 export function toListing(row: ListingRow): Listing {
   return {
     id: row.id,
@@ -162,7 +172,7 @@ export function toListing(row: ListingRow): Listing {
     hue: row.hue,
     accent: row.accent,
     bg: row.bg,
-    loc: row.loc,
+    loc: listingArea(row.loc),
     pvp: row.pvp_rank,
     tradeType: row.trade_type,
     iv: formatIv(row),
@@ -176,6 +186,7 @@ export function toListing(row: ListingRow): Listing {
     ...(row.cp !== null ? { cp: row.cp } : {}),
     sizeClass: row.size_class,
     willTravel: row.will_travel,
+    isGigantamax: row.is_gigantamax,
     tradeTimeline: row.trade_timeline,
   };
 }
@@ -242,7 +253,7 @@ export function applyFilterSpec(query: ListingsQuery, spec: FilterSpec): Listing
 }
 
 /** Open and locked listings in one area, newest first, narrowed by the compiled filter spec. */
-export async function fetchFeedListings(loc: string, spec: FilterSpec): Promise<Listing[]> {
+export async function fetchFeedListings(loc: AreaName, spec: FilterSpec): Promise<Listing[]> {
   const filtered = applyFilterSpec(selectListings().in('status', FEED_STATUSES).eq('loc', loc), spec);
   const { data, error } = await filtered.order('created_at', { ascending: false });
   if (error) throw apiError(error);
@@ -302,6 +313,7 @@ export type NewListingInput = Pick<
   | 'costume'
   | 'pokeball'
   | 'willTravel'
+  | 'isGigantamax'
   | 'tradeTimeline'
   | 'sizeClass'
 > & {
@@ -342,6 +354,7 @@ function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
     costume: input.costume,
     pokeball: input.pokeball,
     will_travel: input.willTravel,
+    is_gigantamax: input.isGigantamax,
     trade_timeline: input.tradeTimeline,
   };
 }

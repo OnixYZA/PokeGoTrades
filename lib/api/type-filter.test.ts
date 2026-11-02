@@ -270,7 +270,7 @@ function listingOf(row: Row): Listing {
     accent: '#7c3aed',
     bg: 'meta',
     seller: 'Ash',
-    loc: 'Pallet Town',
+    loc: 'Adyar',
     pvp: 'Great League',
     tradeType: 'Standard / Registered',
     iv: '100%',
@@ -281,6 +281,7 @@ function listingOf(row: Row): Listing {
     pokeball: null,
     sizeClass: null,
     willTravel: false,
+    isGigantamax: false,
     tradeTimeline: 'flexible',
   };
 }

@@ -12,6 +12,7 @@ import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attr
 import { FRIENDSHIP_LEVELS } from '@/constants/theme';
 import { TRADE_COST_MATRIX, type ChatMessage, type ChatRole, type CreatureRef, type FormalOffer, type Listing } from '@/data/types';
 import { creatureDisplayName, creatureFormLabel, fmtDust, formatCp } from '@/lib/format';
+import { formatVicinityLabel } from '@/constants/locations';
 import { offerAvailability, type OfferBlock } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
@@ -52,6 +53,7 @@ function listingPills(listing: Listing): Pill[] {
   if (listing.lucky) pills.push({ label: 'Lucky', tone: 'lucky' });
   const form = creatureFormLabel(listing);
   if (form) pills.push({ label: form });
+  if (listing.isGigantamax) pills.push({ label: 'Gigantamax' });
   if (listing.purified) pills.push({ label: 'Purified' });
   if (listing.costume) pills.push({ label: 'Costume' });
   if (listing.cp != null) pills.push({ label: formatCp(listing.cp) });
@@ -224,7 +226,7 @@ export function TradeSummaryModal({ chatId, message, onConfirmed, onDismiss }: T
             </Section>
 
             <Section kicker="MEET-UP">
-              <FactRow icon={<MapPin size={14} color={C.blue} />} text={listing.dist !== undefined ? `${listing.loc} · ${listing.dist} km away` : listing.loc} />
+              <FactRow icon={<MapPin size={14} color={C.blue} />} text={formatVicinityLabel(listing.loc)} />
               <FactRow
                 icon={<Navigation size={14} color={C.blue} />}
                 text={listing.willTravel ? 'Seller will travel to meet' : 'Meet in the seller’s area'}

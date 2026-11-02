@@ -1,7 +1,7 @@
 import { formatTradeDate } from '@/lib/format';
 
 import type { CreatureRef, Trainer } from './types';
-import { locations } from './listings';
+import { AREAS } from '../constants/locations';
 
 /**
  * Other trainers (listing sellers, chat partners) only exist in the mock data as a name string —
@@ -82,7 +82,7 @@ export function buildPublicTrainerProfile(handle: string): Trainer {
     lvl: 20 + (seed % 30),
     team: ['Mystic', 'Valor', 'Instinct'][seed % 3],
     bio: pick(BIOS, seed, 0),
-    safeLoc: `${pick(locations, seed, 0)} · ~500m radius`,
+    safeLoc: `${pick([...AREAS], seed, 0)} · ~500m radius`,
     trades: 8 + (seed % 250),
     rep: Math.round((3.5 + ((seed % 15) / 10)) * 10) / 10,
     streak: seed % 45,

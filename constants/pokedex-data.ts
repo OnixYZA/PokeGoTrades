@@ -16,7 +16,8 @@
  *     against the app's untradable rules (nothing from it is written to this file).
  *   PokeMiners/pogo_assets@c2a686eb08ace6e890d8fe3d2134c76988db87b5
  *     "Images/Pokemon - 256x256/Addressable Assets" (file listing only). The form-token spelling the app
- *     stores in `formCode`, so overrides and the form catalog are keyed exactly as listings carry them.
+ *     stores in `formCode`, so overrides and the form catalog are keyed exactly as listings carry them,
+ *     and which species have Gigantamax art (POKEDEX_GIGANTAMAX_IDS).
  *
  * Coverage when generated:
  *   - 1025 species. The game master has typing for 1024; not for #902 Basculegion, which has PokeAPI typing and no form overrides.
@@ -46,6 +47,9 @@
  *     form the sprite pipeline already treats as the base: Unown A, Vivillon Meadow, Toxtricity Amped), else
  *     the first form the game master lists. Every *_NORMAL form is left out too.
  *   - Mega, Primal and Gigantamax: not stored forms, and the game master's form lists do not carry them.
+ *     Gigantamax is a listing attribute (`isGigantamax`); POKEDEX_GIGANTAMAX_IDS names the species a seller
+ *     may declare it on (read through `canGigantamax`). The game master has no Gigantamax flag, so that list
+ *     comes from the sprite listing alone: a species is in it when upstream has Gigantamax art for it.
  *   - event costumes: forms the game master flags `isCostume` (Pikachu's outfits, Corsola SPRING_2026, ...).
  *     Their art sits under `.f` sprite tokens, so the sprite split cannot tell them from forms; the flag can.
  *     Costume is a listing attribute of its own. The one exception is Armored Mewtwo (`A`), which the app has
@@ -1434,4 +1438,14 @@ export const POKEDEX_DEFAULT_FORMS: readonly (readonly [pokemonId: number, formC
   [982, 'TWO'],
   [1012, 'COUNTERFEIT'],
   [1013, 'UNREMARKABLE'],
+];
+
+/**
+ * Ids of the 18 species upstream has Gigantamax sprite art for, sorted. A listing may be declared
+ * Gigantamax only for these. Not a form: Gigantamax never appears in POKEDEX_FORMS. Read through
+ * `canGigantamax` in constants/pokedex.ts.
+ */
+export const POKEDEX_GIGANTAMAX_IDS: readonly number[] = [
+  3, 6, 9, 12, 25, 52, 68, 94, 99, 131, 143, 569, 812, 815, 818, 849,
+  861, 884,
 ];

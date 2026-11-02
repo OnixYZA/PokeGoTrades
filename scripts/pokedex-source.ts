@@ -382,6 +382,21 @@ export function parseAssetFormTokens(fileNames: readonly string[]): Map<number, 
   return tokens;
 }
 
+/** A sprite token that marks Gigantamax art: `GIGANTAMAX`, or a species-specific spelling such as `GIGANTAMAX_SINGLE_STRIKE`. */
+const GIGANTAMAX_TOKEN = /^GIGANTAMAX(?:_|$)/;
+
+/**
+ * Sorted ids of the species upstream has Gigantamax art for (a `pm{id}.fGIGANTAMAX...` sprite). Gigantamax is
+ * not a stored form (it is the listing attribute `isGigantamax`, and stays out of POKEDEX_FORMS), so this is
+ * the one place it surfaces: the list of species a seller may declare as Gigantamax. The game master has no
+ * per-species Gigantamax flag to cross-check against (verified against the pinned latest.json).
+ */
+export function gigantamaxSpeciesIds(assetTokens: ReadonlyMap<number, ReadonlySet<string>>): number[] {
+  const ids: number[] = [];
+  for (const [id, tokens] of assetTokens) if ([...tokens].some((token) => GIGANTAMAX_TOKEN.test(token))) ids.push(id);
+  return ids.sort((a, b) => a - b);
+}
+
 /** The shape `listings.form_code` and `creature_ref_is_valid` accept (migration 20260927000500). */
 const FORM_CODE = /^[A-Z0-9_]{1,40}$/;
 
@@ -821,6 +836,8 @@ export interface PokedexData {
   overrides: FormOverride[];
   /** Species with at least one selectable non-default form, in id order. */
   forms: FormCatalogEntry[];
+  /** Species with Gigantamax sprite art, sorted; see `gigantamaxSpeciesIds`. */
+  gigantamaxIds: number[];
   report: BuildReport;
 }
 
@@ -891,6 +908,7 @@ export function buildPokedexData(input: {
     species: [...species],
     overrides,
     forms: catalog.entries,
+    gigantamaxIds: gigantamaxSpeciesIds(assetTokens),
     report: {
       species: species.length,
       gameMasterSpecies: species.length - missingFromGameMaster.length,
@@ -1002,7 +1020,8 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  *     against the app's untradable rules (nothing from it is written to this file).
  *   ${provenance.spriteAssets}
  *     "Images/Pokemon - 256x256/Addressable Assets" (file listing only). The form-token spelling the app
- *     stores in \`formCode\`, so overrides and the form catalog are keyed exactly as listings carry them.
+ *     stores in \`formCode\`, so overrides and the form catalog are keyed exactly as listings carry them,
+ *     and which species have Gigantamax art (POKEDEX_GIGANTAMAX_IDS).
  *
  * Coverage when generated:
  *   - ${report.species} species. The game master has typing for ${report.gameMasterSpecies}${
@@ -1050,6 +1069,9 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  *     form the sprite pipeline already treats as the base: Unown A, Vivillon Meadow, Toxtricity Amped), else
  *     the first form the game master lists. Every *_NORMAL form is left out too.
  *   - Mega, Primal and Gigantamax: not stored forms, and the game master's form lists do not carry them.
+ *     Gigantamax is a listing attribute (\`isGigantamax\`); POKEDEX_GIGANTAMAX_IDS names the species a seller
+ *     may declare it on (read through \`canGigantamax\`). The game master has no Gigantamax flag, so that list
+ *     comes from the sprite listing alone: a species is in it when upstream has Gigantamax art for it.
  *   - event costumes: forms the game master flags \`isCostume\` (Pikachu's outfits, Corsola SPRING_2026, ...).
  *     Their art sits under \`.f\` sprite tokens, so the sprite split cannot tell them from forms; the flag can.
  *     Costume is a listing attribute of its own. The one exception is Armored Mewtwo (\`A\`), which the app has
@@ -1097,6 +1119,16 @@ export const POKEDEX_FORMS: readonly (readonly [pokemonId: number, formCodes: re
  */
 export const POKEDEX_DEFAULT_FORMS: readonly (readonly [pokemonId: number, formCode: string])[] = [`);
   for (const entry of data.forms) if (entry.defaultCode !== null) lines.push(`  [${entry.pokemonId}, ${quote(entry.defaultCode)}],`);
+  lines.push('];');
+
+  lines.push(`
+/**
+ * Ids of the ${data.gigantamaxIds.length} species upstream has Gigantamax sprite art for, sorted. A listing may be declared
+ * Gigantamax only for these. Not a form: Gigantamax never appears in POKEDEX_FORMS. Read through
+ * \`canGigantamax\` in constants/pokedex.ts.
+ */
+export const POKEDEX_GIGANTAMAX_IDS: readonly number[] = [`);
+  for (let i = 0; i < data.gigantamaxIds.length; i += 16) lines.push(`  ${data.gigantamaxIds.slice(i, i + 16).join(', ')},`);
   lines.push('];', '');
   return lines.join('\n');
 }

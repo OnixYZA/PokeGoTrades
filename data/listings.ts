@@ -52,6 +52,7 @@ export const listings: Listing[] = [
     cp: 3250,
     sizeClass: null,
     willTravel: true,
+    isGigantamax: false,
     tradeTimeline: 'asap',
   },
   {
@@ -83,6 +84,7 @@ export const listings: Listing[] = [
     cp: 4698,
     sizeClass: null,
     willTravel: false,
+    isGigantamax: false,
     tradeTimeline: 'this_week',
   },
   {
@@ -113,6 +115,7 @@ export const listings: Listing[] = [
     cp: 3980,
     sizeClass: 'XXL',
     willTravel: false,
+    isGigantamax: false,
     tradeTimeline: 'flexible',
   },
   {
@@ -143,6 +146,7 @@ export const listings: Listing[] = [
     cp: 3640,
     sizeClass: null,
     willTravel: false,
+    isGigantamax: false,
     tradeTimeline: 'this_month',
   },
   {
@@ -176,6 +180,7 @@ export const listings: Listing[] = [
     cp: 3798,
     sizeClass: 'XXS',
     willTravel: false,
+    isGigantamax: false,
     tradeTimeline: 'flexible',
   },
   {
@@ -206,8 +211,7 @@ export const listings: Listing[] = [
     cp: 3602,
     sizeClass: null,
     willTravel: false,
+    isGigantamax: false,
     tradeTimeline: 'flexible',
   },
 ];
-
-export const locations = ['Adyar', 'East Tambaram', 'Velachery', 'T. Nagar', 'Anna Nagar', 'Besant Nagar'];

@@ -1,6 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { create } from 'zustand';
 
+import type { AreaName } from '@/constants/locations';
 import { chats as seedChats, fallbackOffers } from '@/data/chats';
 import { listings as seedListings } from '@/data/listings';
 import type {
@@ -206,8 +207,8 @@ interface TradeState {
   clearHandshakeRequest: () => void;
 
   // ——— filters / prefs ———
-  filterLocation: string;
-  setFilterLocation: (loc: string) => void;
+  filterLocation: AreaName;
+  setFilterLocation: (loc: AreaName) => void;
   friendship: FriendshipLabel;
   setFriendship: (level: FriendshipLabel) => void;
   /** Tristate feed-attribute filters (constants/listing-attributes.ts / store/listing-filters.ts).

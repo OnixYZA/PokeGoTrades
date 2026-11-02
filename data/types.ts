@@ -1,3 +1,4 @@
+import type { AreaName } from '@/constants/locations';
 import type { ListingTag, Pokeball, PokemonSize, TradeTimeline } from '@/constants/listing-attributes';
 import type { MarketSignal } from '@/constants/market';
 
@@ -61,7 +62,7 @@ export interface Listing extends CreatureRef {
   /** Kilometres from the viewer. Mock data only: proximity is not persisted (SUPABASE_PLAN.md D3),
    *  so Supabase-backed listings leave it undefined and the UI hides the badge. */
   dist?: number;
-  loc: string;
+  loc: AreaName;
   pvp: string;
   tradeType: TradeType;
   iv: string;
@@ -92,6 +93,9 @@ export interface Listing extends CreatureRef {
    *  the OCR pass only fills it while null. */
   sizeClass: PokemonSize | null;
   willTravel: boolean;
+  /** Seller-declared Gigantamax Pokémon (migration …20261103000300). Only offered for species
+   *  `canGigantamax` (constants/pokedex.ts) names. */
+  isGigantamax: boolean;
   tradeTimeline: TradeTimeline;
   /** Live want/have signal for this (pokemonId, shiny) pair (`pokemon_market_demand`). Undefined
    *  until `useFeed` fetches it, or if that fetch failed — never treat absence as "no demand",

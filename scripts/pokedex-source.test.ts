@@ -20,6 +20,7 @@ import {
   checkTradability,
   COSTUME_FORMS_KEPT_AS_FORMS,
   csvRecords,
+  gigantamaxSpeciesIds,
   gameMasterDefaultTypes,
   parseAssetFormTokens,
   parseCsv,
@@ -952,6 +953,45 @@ describe('the generator import graph', () => {
     const source = readFileSync(path.resolve(__dirname, '..', 'constants', 'untradable.ts'), 'utf8');
     expect(source).not.toMatch(/^\s*import\b/m);
     expect(isPokemonUntradable(890, 'ETERNAMAX')).toBe(true);
+  });
+});
+
+// ——— Gigantamax eligibility ———
+
+describe('gigantamaxSpeciesIds', () => {
+  const ids = (files: string[]) => gigantamaxSpeciesIds(parseAssetFormTokens(files));
+
+  it('lists the species with a Gigantamax sprite, sorted and de-duplicated', () => {
+    expect(ids(['pm25.fGIGANTAMAX.icon.png', 'pm6.fGIGANTAMAX.icon.png', 'pm6.fGIGANTAMAX.g2.icon.png', 'pm6.icon.png'])).toEqual([6, 25]);
+  });
+
+  it('accepts a species-specific Gigantamax spelling but not a lookalike', () => {
+    expect(ids(['pm892.fGIGANTAMAX_SINGLE_STRIKE.icon.png'])).toEqual([892]);
+    expect(ids(['pm1.fNOT_GIGANTAMAX.icon.png', 'pm2.fGIGANTAMAXED.icon.png'])).toEqual([]);
+  });
+
+  it('ignores species whose only forms are other tokens or costume art', () => {
+    expect(ids(['pm37.fALOLA.icon.png', 'pm150.fMEGA_X.icon.png', 'pm25.cGIGANTAMAX.icon.png', 'pm4.icon.png'])).toEqual([]);
+  });
+
+  it('does not make Gigantamax a stored form, and renders the list as its own block', () => {
+    const data = buildPokedexData({
+      species: [CHARIZARD_ROW],
+      gameMaster: parseGameMaster(CHARIZARD),
+      gameMasterForms: parseGameMasterForms(CHARIZARD),
+      assetTokens: parseAssetFormTokens(['pm6.fGIGANTAMAX.icon.png']),
+      baseFormCodes: {},
+      tradabilityRules: RULES,
+    });
+    expect(data.gigantamaxIds).toEqual([6]);
+    expect(data.forms).toEqual([]);
+    const out = renderDataFile(data, {
+      pokeApi: `PokeAPI/pokeapi@${'a'.repeat(40)}`,
+      gameMaster: `PokeMiners/game_masters@${'b'.repeat(40)}`,
+      spriteAssets: `PokeMiners/pogo_assets@${'c'.repeat(40)}`,
+    });
+    expect(out).toContain('export const POKEDEX_GIGANTAMAX_IDS: readonly number[] = [\n  6,\n];');
+    expect(out).not.toMatch(/GIGANTAMAX'/);
   });
 });
 

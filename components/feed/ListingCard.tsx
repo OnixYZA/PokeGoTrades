@@ -5,6 +5,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Avatar } from '@/components/ui/Avatar';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { DemandBadge } from '@/components/ui/DemandBadge';
+import { GigantamaxBadge } from '@/components/ui/GigantamaxBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { Sprite } from '@/components/ui/Sprite';
@@ -92,6 +93,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
         <View className="mt-0.5 flex-row flex-wrap items-center gap-1.5" style={{ pointerEvents: 'none' }}>
           <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
           {listing.lucky && <LuckyBadge size="sm" />}
+          {listing.isGigantamax && <GigantamaxBadge size="sm" />}
         </View>
 
         {visibleBadges.length > 0 && (
@@ -116,14 +118,12 @@ export function ListingCard({ listing }: { listing: Listing }) {
 
         <View className="mt-1.5 flex-row items-center justify-between" style={{ pointerEvents: 'box-none' }}>
           <View className="flex-row items-center gap-1" style={{ pointerEvents: 'box-none' }}>
-            {listing.dist !== undefined ? (
-              <>
-                <MapPin size={12} color="#6d7690" />
-                <Text className="font-mono text-text-muted" style={{ fontSize: 11, pointerEvents: 'none' }}>
-                  {listing.dist.toFixed(1)} km ·
-                </Text>
-              </>
-            ) : null}
+            {/* The neighbourhood, never a distance: the same fact in mock and Supabase mode, and the only
+             *  location a listing reveals. */}
+            <MapPin size={12} color="#6d7690" />
+            <Text className="font-mono text-text-muted" style={{ fontSize: 11, pointerEvents: 'none' }}>
+              {listing.loc} ·
+            </Text>
             <Pressable
               onPress={(e) => {
                 e.stopPropagation();

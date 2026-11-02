@@ -11,6 +11,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  canGigantamax,
   creatureHasType,
   creatureHue,
   defaultFormOf,
@@ -32,7 +33,7 @@ import {
 } from './pokedex';
 import { creatureFormLabel } from '../lib/format';
 import { BASE_FORM_CODES } from './base-form-codes';
-import { FORM_TYPE_OVERRIDES, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS } from './pokedex-data';
+import { FORM_TYPE_OVERRIDES, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS, POKEDEX_GIGANTAMAX_IDS } from './pokedex-data';
 import { isPokemonUntradable as isPokemonUntradableLeaf, UNTRADABLE_FORM_COMBINATIONS as UNTRADABLE_FORM_COMBINATIONS_LEAF } from './untradable';
 
 describe('findPokemon', () => {
@@ -484,6 +485,28 @@ describe('FORM_TYPE_OVERRIDES', () => {
     for (const { pokemonId, formCode } of typed) {
       expect(typesOf({ pokemonId, formCode }), formCode).not.toEqual(typesOf({ pokemonId }));
     }
+  });
+});
+
+// ——— Gigantamax ———
+
+describe('canGigantamax', () => {
+  it('is true for the species the pinned sprite listing has Gigantamax art for', () => {
+    for (const id of [3, 6, 9, 12, 25, 52, 68, 94, 99, 131, 143]) expect(canGigantamax(id)).toBe(true); // Venusaur .. Snorlax
+  });
+
+  it('is false for species without Gigantamax art, and for ids outside the dex', () => {
+    expect(canGigantamax(150)).toBe(false); // Mewtwo
+    expect(canGigantamax(1)).toBe(false);
+    expect(canGigantamax(0)).toBe(false);
+    expect(canGigantamax(-6)).toBe(false);
+    expect(canGigantamax(99999)).toBe(false);
+  });
+
+  it('is generated data: sorted, unique, inside the dex, and never a stored form', () => {
+    expect([...POKEDEX_GIGANTAMAX_IDS]).toEqual([...new Set(POKEDEX_GIGANTAMAX_IDS)].sort((a, b) => a - b));
+    for (const id of POKEDEX_GIGANTAMAX_IDS) expect(findPokemon(id)).toBeDefined();
+    for (const [, codes] of POKEDEX_FORMS) expect(codes.some((code) => code.includes('GIGANTAMAX'))).toBe(false);
   });
 });
 

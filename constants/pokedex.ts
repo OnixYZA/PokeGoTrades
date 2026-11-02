@@ -12,7 +12,7 @@
  * species' DEFAULT form. A type filter asks `typeMembership(type)` (or `creatureHasType` client-side).
  * `PokedexEntry.hue` is `TYPE_HUE[types[0]]`, i.e. the species' primary type.
  */
-import { FORM_TYPE_OVERRIDES, POKEDEX_DATA, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS } from './pokedex-data';
+import { FORM_TYPE_OVERRIDES, POKEDEX_DATA, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS, POKEDEX_GIGANTAMAX_IDS } from './pokedex-data';
 import { POKEMON_TYPES, formatTypes, type PokemonType, type PokemonTypes } from './pokemon-types';
 
 // The type vocabulary lives in a leaf module (the generator and the generated data import it without
@@ -270,6 +270,18 @@ export function formsOf(pokemonId: number): readonly string[] {
  */
 export function defaultFormOf(pokemonId: number): string | undefined {
   return DEFAULT_FORM_BY_SPECIES.get(pokemonId);
+}
+
+const GIGANTAMAX_IDS: ReadonlySet<number> = new Set(POKEDEX_GIGANTAMAX_IDS);
+
+/**
+ * Whether a species can be a Gigantamax Pokémon, i.e. whether the Create Listing form should offer the
+ * Gigantamax toggle. The list is generated (`POKEDEX_GIGANTAMAX_IDS`: species upstream has Gigantamax art
+ * for), never hand-typed. Gigantamax is a listing attribute (`Listing.isGigantamax`), not a form, so it is
+ * independent of `formCode`. `false` for an id outside the dex. The database does not enforce eligibility.
+ */
+export function canGigantamax(pokemonId: number): boolean {
+  return GIGANTAMAX_IDS.has(pokemonId);
 }
 
 // ——— trade eligibility ———

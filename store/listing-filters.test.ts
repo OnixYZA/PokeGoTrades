@@ -23,7 +23,7 @@ function makeListing(partial: Partial<Listing> = {}): Listing {
     accent: '#7c3aed',
     bg: 'meta',
     seller: 'Ash',
-    loc: 'Pallet Town',
+    loc: 'Adyar',
     pvp: 'Great League',
     tradeType: 'Standard / Registered',
     iv: '100%',
@@ -34,6 +34,7 @@ function makeListing(partial: Partial<Listing> = {}): Listing {
     pokeball: null,
     sizeClass: null,
     willTravel: false,
+    isGigantamax: false,
     tradeTimeline: 'flexible',
     ...partial,
   };
@@ -89,6 +90,42 @@ describe('compileFilter / matchesFilter — flags', () => {
     const spec = compileFilter({ shiny: 'include' });
     expect(matchesFilter(makeListing({ shiny: true }), spec)).toBe(true);
     expect(matchesFilter(makeListing({ shiny: false }), spec)).toBe(false);
+  });
+
+  it('the Gigantamax chip includes only G-Max listings', () => {
+    const spec = compileFilter({ isGigantamax: 'include' });
+    expect(spec.flags.isGigantamax).toBe(true);
+    expect(matchesFilter(makeListing({ isGigantamax: true }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ isGigantamax: false }), spec)).toBe(false);
+  });
+
+  it('the Gigantamax chip excludes G-Max listings', () => {
+    const spec = compileFilter({ isGigantamax: 'exclude' });
+    expect(spec.flags.isGigantamax).toBe(false);
+    expect(matchesFilter(makeListing({ isGigantamax: false }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ isGigantamax: true }), spec)).toBe(false);
+  });
+});
+
+describe('compileFilter / matchesFilter — Gigantamax combined', () => {
+  it('ANDs the Gigantamax chip with another flag: G-Max and shiny needs both', () => {
+    const spec = compileFilter({ isGigantamax: 'include', shiny: 'include' });
+    expect(matchesFilter(makeListing({ isGigantamax: true, shiny: true }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ isGigantamax: true, shiny: false }), spec)).toBe(false);
+    expect(matchesFilter(makeListing({ isGigantamax: false, shiny: true }), spec)).toBe(false);
+  });
+
+  it('G-Max include plus lucky exclude keeps a non-lucky G-Max and drops a lucky one', () => {
+    const spec = compileFilter({ isGigantamax: 'include', lucky: 'exclude' });
+    expect(matchesFilter(makeListing({ isGigantamax: true, lucky: false }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ isGigantamax: true, lucky: true }), spec)).toBe(false);
+  });
+
+  it('filterKey tells Gigantamax include from exclude from neutral', () => {
+    const keys = [{}, { isGigantamax: 'include' }, { isGigantamax: 'exclude' }].map((f) =>
+      filterKey(compileFilter(f as FilterState)),
+    );
+    expect(new Set(keys).size).toBe(3);
   });
 });
 
