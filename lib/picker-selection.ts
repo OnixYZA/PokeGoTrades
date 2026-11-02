@@ -19,19 +19,12 @@
  * explains. (`constants/pokedex.ts` and `lib/sprite-url.ts` are plain TypeScript for the same reason.)
  */
 import { formsOf, isPokemonUntradable } from '../constants/pokedex';
+import type { PickedCreature } from './creature-pick';
 import { spriteVariantKey, spriteVariantOf, type SpriteSubject } from './sprite-url';
 
-/** What the picker hands its caller. */
-export interface PickedCreature {
-  pokemonId: number;
-  /** Always `false` when the picker was opened with `allowShiny: false`. */
-  shiny: boolean;
-  /** A form code in PokeMiners' spelling (`CreatureRef.formCode`), or `null` for the species' default form.
-   *  ALWAYS `null` when the picker was opened with `allowForm: false`, and for a species with no forms. The
-   *  default form is `null` even where it has a name of its own (Hero Zacian is `null`, never `'HERO'`), so
-   *  one creature is never stored two ways (`defaultFormOf`). */
-  formCode: string | null;
-}
+// Defined beside the code that STORES a pick (lib/creature-pick.ts), so the data layer never depends on the
+// picker; re-exported here because this is where the picker's contract is described.
+export type { PickedCreature };
 
 /** One form a variant can be in: a PokeMiners code, or `null` for the species' default form. */
 export type FormChoice = string | null;

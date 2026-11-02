@@ -17,13 +17,22 @@ import type { CreatureRef } from '../data/types';
 import { spriteVariantKey, spriteVariantOf, type SpriteSubject } from './sprite-url';
 
 /**
- * What a pick is made of: the species, whether the trainer asked for the shiny, and the form
- * (`CreatureRef.formCode`: null or absent is the species' default form). Deliberately the identity fields of
- * `SpriteSubject` rather than a type of its own, so a pick can never hold something a sprite could not be drawn
- * from. The picker's output (`PickedCreature`, re-exported by components/modals/PokemonPickerModal.tsx) fits it
- * structurally; this is the looser INPUT type, so the code that stores a pick does not depend on the picker.
+ * THE one type for a picked creature: what the Pokémon picker hands its caller (`lib/picker-selection.ts`'s
+ * `buildPick` is the only place one is made) and what every store of a pick takes (`creatureRefFromPick`,
+ * `lib/api/profile.ts`'s `addToArsenal` / `addToWishlist`). Defined here, beside the code that stores it, so the
+ * data layer never imports the picker; `picker-selection.ts` and `PokemonPickerModal.tsx` re-export it. Every
+ * field is required, so a pick that forgot its form cannot type-check as one that chose the default.
  */
-export type CreaturePick = Pick<SpriteSubject, 'pokemonId' | 'shiny' | 'formCode'>;
+export interface PickedCreature {
+  pokemonId: number;
+  /** Always `false` when the picker was opened with `allowShiny: false`. */
+  shiny: boolean;
+  /** A form code in PokeMiners' spelling (`CreatureRef.formCode`), or `null` for the species' default form.
+   *  ALWAYS `null` when the picker was opened with `allowForm: false`, and for a species with no forms. The
+   *  default form is `null` even where it has a name of its own (Hero Zacian is `null`, never `'HERO'`), so
+   *  one creature is never stored two ways (`defaultFormOf`). */
+  formCode: string | null;
+}
 
 /** Why a pick cannot become a ref. The picker already refuses the last two, so reaching either means a caller
  *  skipped it; the check is the same belt-and-braces `handlePickForm` is, with the database as the backstop
@@ -49,7 +58,7 @@ export type PickResult = { ok: true; ref: CreatureRef } | { ok: false; reason: P
  * `hue` is the species' (`PokedexEntry.hue` is its default form's primary type), not the form's: a form that
  * changes typing (Alolan Vulpix is Ice) is still tinted by its species, as a listing for it already is.
  */
-export function creatureRefFromPick(pick: CreaturePick): PickResult {
+export function creatureRefFromPick(pick: PickedCreature): PickResult {
   const entry = findPokemon(pick.pokemonId);
   if (!entry) return { ok: false, reason: 'unknown_species' };
 

@@ -3,7 +3,7 @@ import { randomUUID } from 'expo-crypto';
 import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
 import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
 import type { TrainerCreature } from '@/lib/creature-list';
-import { creatureRefFromPick, type CreaturePick, type PickFailure } from '@/lib/creature-pick';
+import { creatureRefFromPick, type PickedCreature, type PickFailure } from '@/lib/creature-pick';
 import type { Database } from '@/lib/database.types';
 import { formatTradeDate } from '@/lib/format';
 import type { PickedProof } from '@/lib/proof-image';
@@ -215,7 +215,7 @@ const PICK_FAILURE_MESSAGE: Record<PickFailure, (list: CreatureList) => string> 
  * would store Vulpix when the trainer picked Alolan Vulpix; `creatureRefToJson` then writes it as `formCode`
  * (the key `creature_ref_is_valid` accepts on `trainer_creatures.creature`) and `parseCreatureRef` reads it back.
  */
-async function addCreature(list: CreatureList, pick: CreaturePick): Promise<void> {
+async function addCreature(list: CreatureList, pick: PickedCreature): Promise<void> {
   const built = creatureRefFromPick(pick);
   if (!built.ok) throw new ProfileError('form', PICK_FAILURE_MESSAGE[built.reason](list));
   // `creatureRefToJson` (not a raw object literal): the one place that omits a falsy `shiny` / an absent
@@ -239,13 +239,13 @@ async function addCreature(list: CreatureList, pick: CreaturePick): Promise<void
 
 /** Adds a creature (national dex id, shiny flag and form — the picker's `PickedCreature` fits) to the signed-in
  *  trainer's Arsenal, in the lowest free slot. */
-export async function addToArsenal(pick: CreaturePick): Promise<void> {
+export async function addToArsenal(pick: PickedCreature): Promise<void> {
   return addCreature('arsenal', pick);
 }
 
 /** Adds a creature (national dex id, shiny flag and form) to the signed-in trainer's Wishlist, in the lowest
  *  free slot. */
-export async function addToWishlist(pick: CreaturePick): Promise<void> {
+export async function addToWishlist(pick: PickedCreature): Promise<void> {
   return addCreature('wishlist', pick);
 }
 

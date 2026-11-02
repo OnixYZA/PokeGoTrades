@@ -8,7 +8,15 @@ import { describe, expect, it } from 'vitest';
 import { POKEDEX, findPokemon, formsOf, isPokemonUntradable } from '../constants/pokedex';
 import type { CreatureRef } from '../data/types';
 import { creatureRefToJson, parseCreatureRef } from './api/creature-ref';
-import { appendDistinctCreature, creatureRefFromPick } from './creature-pick';
+import { appendDistinctCreature, creatureRefFromPick, type PickedCreature } from './creature-pick';
+
+/** A complete pick: the regular, default-form creature unless `rest` says otherwise. */
+const p = (pokemonId: number, rest: Partial<Omit<PickedCreature, 'pokemonId'>> = {}): PickedCreature => ({
+  pokemonId,
+  shiny: false,
+  formCode: null,
+  ...rest,
+});
 
 /** Vulpix (#37) is the fixture: Fire, with one extra form (`ALOLA`, Ice), tradable in both. */
 const VULPIX = 37;
@@ -23,7 +31,7 @@ describe('creatureRefFromPick', () => {
   it('takes name and hue from the dex by pokemonId and carries the trainer\'s shiny and form', () => {
     const entry = findPokemon(VULPIX);
     expect(entry).toBeDefined();
-    expect(refOf({ pokemonId: VULPIX, shiny: true, formCode: 'ALOLA' })).toEqual({
+    expect(refOf(p(VULPIX, { shiny: true, formCode: 'ALOLA' }))).toEqual({
       name: entry!.name,
       pokemonId: VULPIX,
       hue: entry!.hue,
@@ -33,11 +41,10 @@ describe('creatureRefFromPick', () => {
     expect(entry!.name).toBe('Vulpix');
   });
 
-  it('leaves shiny and formCode OUT for a regular, default-form pick (null, absent and empty alike)', () => {
+  it('leaves shiny and formCode OUT for a regular, default-form pick (null and empty alike)', () => {
     for (const pick of [
-      { pokemonId: VULPIX, shiny: false, formCode: null },
-      { pokemonId: VULPIX },
-      { pokemonId: VULPIX, formCode: '' },
+      p(VULPIX, { shiny: false, formCode: null }),
+      p(VULPIX, { formCode: '' }),
     ]) {
       const ref = refOf(pick);
       expect(ref).not.toHaveProperty('shiny');
@@ -50,7 +57,7 @@ describe('creatureRefFromPick', () => {
     let checked = 0;
     for (const { pokemonId } of POKEDEX) {
       for (const formCode of formsOf(pokemonId)) {
-        const result = creatureRefFromPick({ pokemonId, formCode });
+        const result = creatureRefFromPick(p(pokemonId, { formCode }));
         if (isPokemonUntradable(pokemonId, formCode)) {
           expect(result, `${pokemonId} ${formCode}`).toEqual({ ok: false, reason: 'untradable' });
         } else {
@@ -64,34 +71,34 @@ describe('creatureRefFromPick', () => {
   });
 
   it('refuses an id outside the dex', () => {
-    expect(creatureRefFromPick({ pokemonId: 999_999 })).toEqual({ ok: false, reason: 'unknown_species' });
-    expect(creatureRefFromPick({ pokemonId: 999_999, formCode: 'ALOLA' })).toEqual({ ok: false, reason: 'unknown_species' });
+    expect(creatureRefFromPick(p(999_999))).toEqual({ ok: false, reason: 'unknown_species' });
+    expect(creatureRefFromPick(p(999_999, { formCode: 'ALOLA' }))).toEqual({ ok: false, reason: 'unknown_species' });
   });
 
   it('refuses a form the species does not come in', () => {
-    expect(creatureRefFromPick({ pokemonId: VULPIX, formCode: 'GALARIAN' })).toEqual({ ok: false, reason: 'unknown_form' });
+    expect(creatureRefFromPick(p(VULPIX, { formCode: 'GALARIAN' }))).toEqual({ ok: false, reason: 'unknown_form' });
     // Pikachu has no selectable forms at all, so even another species' real code is refused on it.
     expect(formsOf(25)).toEqual([]);
-    expect(creatureRefFromPick({ pokemonId: 25, formCode: 'ALOLA' })).toEqual({ ok: false, reason: 'unknown_form' });
+    expect(creatureRefFromPick(p(25, { formCode: 'ALOLA' }))).toEqual({ ok: false, reason: 'unknown_form' });
     // The code's spelling is exact: a lowercase one is not the form.
-    expect(creatureRefFromPick({ pokemonId: VULPIX, formCode: 'alola' })).toEqual({ ok: false, reason: 'unknown_form' });
+    expect(creatureRefFromPick(p(VULPIX, { formCode: 'alola' }))).toEqual({ ok: false, reason: 'unknown_form' });
   });
 
   it('refuses an untradable creature, judged WITH its form', () => {
     // A whole species...
-    expect(creatureRefFromPick({ pokemonId: 151 })).toEqual({ ok: false, reason: 'untradable' }); // Mew
+    expect(creatureRefFromPick(p(151))).toEqual({ ok: false, reason: 'untradable' }); // Mew
     // ...a form of a species whose other forms trade...
-    expect(creatureRefFromPick({ pokemonId: 646, formCode: 'WHITE' })).toEqual({ ok: false, reason: 'untradable' });
-    expect(creatureRefFromPick({ pokemonId: 888, formCode: 'CROWNED_SWORD' })).toEqual({ ok: false, reason: 'untradable' });
+    expect(creatureRefFromPick(p(646, { formCode: 'WHITE' }))).toEqual({ ok: false, reason: 'untradable' });
+    expect(creatureRefFromPick(p(888, { formCode: 'CROWNED_SWORD' }))).toEqual({ ok: false, reason: 'untradable' });
     // ...while the same species in its default form is fine.
-    expect(refOf({ pokemonId: 646 })).toMatchObject({ pokemonId: 646 });
-    expect(refOf({ pokemonId: 888 })).toMatchObject({ pokemonId: 888 });
+    expect(refOf(p(646))).toMatchObject({ pokemonId: 646 });
+    expect(refOf(p(888))).toMatchObject({ pokemonId: 888 });
   });
 
   it('builds a ref that survives creatureRefToJson -> parseCreatureRef unchanged (what the insert and the read do)', () => {
     for (const pick of [
-      { pokemonId: VULPIX, shiny: true, formCode: 'ALOLA' },
-      { pokemonId: VULPIX, shiny: false, formCode: null },
+      p(VULPIX, { shiny: true, formCode: 'ALOLA' }),
+      p(VULPIX, { shiny: false, formCode: null }),
     ]) {
       const ref = refOf(pick);
       expect(parseCreatureRef(creatureRefToJson(ref))).toEqual(ref);
@@ -100,9 +107,9 @@ describe('creatureRefFromPick', () => {
 });
 
 describe('appendDistinctCreature', () => {
-  const vulpix = (): CreatureRef => refOf({ pokemonId: VULPIX });
-  const alolanVulpix = (): CreatureRef => refOf({ pokemonId: VULPIX, formCode: 'ALOLA' });
-  const shinyVulpix = (): CreatureRef => refOf({ pokemonId: VULPIX, shiny: true });
+  const vulpix = (): CreatureRef => refOf(p(VULPIX));
+  const alolanVulpix = (): CreatureRef => refOf(p(VULPIX, { formCode: 'ALOLA' }));
+  const shinyVulpix = (): CreatureRef => refOf(p(VULPIX, { shiny: true }));
 
   it('lets two forms of one species sit side by side, in either order', () => {
     expect(appendDistinctCreature([vulpix()], alolanVulpix(), 3).map((c) => c.formCode)).toEqual([undefined, 'ALOLA']);
@@ -111,7 +118,7 @@ describe('appendDistinctCreature', () => {
 
   it('treats a shiny and a regular of one species, and of one form, as different entries', () => {
     expect(appendDistinctCreature([vulpix()], shinyVulpix(), 3)).toHaveLength(2);
-    expect(appendDistinctCreature([alolanVulpix()], refOf({ pokemonId: VULPIX, shiny: true, formCode: 'ALOLA' }), 3)).toHaveLength(2);
+    expect(appendDistinctCreature([alolanVulpix()], refOf(p(VULPIX, { shiny: true, formCode: 'ALOLA' })), 3)).toHaveLength(2);
   });
 
   it('refuses an exact repeat, returning the same array so a state setter skips the render', () => {
@@ -122,7 +129,7 @@ describe('appendDistinctCreature', () => {
 
   it('refuses another entry once the list is full, even a new one', () => {
     const list = [vulpix(), alolanVulpix(), shinyVulpix()];
-    expect(appendDistinctCreature(list, refOf({ pokemonId: 4 }), 3)).toBe(list);
+    expect(appendDistinctCreature(list, refOf(p(4)), 3)).toBe(list);
   });
 
   it('does not mutate the list it is given', () => {
