@@ -6,9 +6,11 @@
 -- yet; and once a chat exists, changing `purified` is refused by `guard_listing_update` the same way changing
 -- `lucky` or `shiny` already is.
 --
--- Fixture (supabase/seed.sql): listing b…004 belongs to EmberVale (a…005), is `open`, and has zero chats —
--- the same listing the lucky test uses, and for the same reason (nothing here can trip the guard). Listing
--- b…001 belongs to DriftCoral (a…001) and already has chat c…001 on it, so it is used for the guard case.
+-- Fixture (supabase/seed.sql): listing b…005 belongs to IronGlass (a…006), is `open`, is not purified (seed.sql
+-- marks only b…004 and b…006 purified) and has zero chats — nothing here can trip the guard. (b…004 was used
+-- until seed.sql started setting it purified; the asserted "starts not purified -> becomes purified" needs a
+-- listing that really starts un-purified.) Listing b…001 belongs to DriftCoral (a…001) and already has chat
+-- c…001 on it, so it is used for the guard case.
 begin;
 select plan(8);
 
@@ -19,27 +21,27 @@ $$;
 
 -- ——— fixture sanity ———
 select is(
-  (select purified from public.listings where id = 'b0000000-0000-4000-8000-000000000004'),
-  false, 'fixture: EmberVale''s listing starts not purified');
+  (select purified from public.listings where id = 'b0000000-0000-4000-8000-000000000005'),
+  false, 'fixture: IronGlass''s listing starts not purified');
 select is(
-  (select count(*) from public.chats where listing_id = 'b0000000-0000-4000-8000-000000000004'),
+  (select count(*) from public.chats where listing_id = 'b0000000-0000-4000-8000-000000000005'),
   0::bigint, 'and has zero chats, so the guard cannot fire on it yet');
 
 -- ——— size_class is service-role only ———
-select pg_temp.act_as('a0000000-0000-4000-8000-000000000005');   -- EmberVale, seller of b...004
+select pg_temp.act_as('a0000000-0000-4000-8000-000000000006');   -- IronGlass, seller of b...005
 set local role authenticated;
 select throws_ok(
-  $$ update public.listings set size_class = 'XL' where id = 'b0000000-0000-4000-8000-000000000004' $$,
+  $$ update public.listings set size_class = 'XL' where id = 'b0000000-0000-4000-8000-000000000005' $$,
   '42501', null,
   'authenticated cannot update size_class, even on their own open listing');
 
 -- ——— the seller CAN set pokeball / costume / purified while no offers exist yet ———
 select lives_ok(
   $$ update public.listings set pokeball = 'ultra', costume = true, purified = true
-      where id = 'b0000000-0000-4000-8000-000000000004' $$,
+      where id = 'b0000000-0000-4000-8000-000000000005' $$,
   'the seller can set pokeball / costume / purified on their own open, offer-free listing');
 select is(
-  (select row(pokeball, costume, purified) from public.listings where id = 'b0000000-0000-4000-8000-000000000004'),
+  (select row(pokeball, costume, purified) from public.listings where id = 'b0000000-0000-4000-8000-000000000005'),
   row('ultra'::public.pokeball, true, true),
   'and all three values land');
 reset role;

@@ -3,6 +3,9 @@
 -- apply_profile_proof RPC (service-role-only; the verified path; the handle_taken collision path, which must
 -- leave the losing trainer's own profile untouched).
 --
+-- Needs the Supabase local stack's `storage` schema (`storage.buckets` / `storage.objects`, which migration
+-- 20260926000100 inserts a bucket into and `pg_temp.put_object` writes to); it cannot run on a bare Postgres.
+--
 -- This pgTAP session cannot perform a real Storage upload, so `pg_temp.put_object` inserts the `storage.objects`
 -- row `private.profile_proof_object_exists` looks for directly, standing in for one.
 --
