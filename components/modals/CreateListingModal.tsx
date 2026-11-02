@@ -702,7 +702,7 @@ function CreatureSelector({
   formCode: string | null;
   onPress: () => void;
 }) {
-  const creature = selected && { pokemonId: selected.pokemonId, hue: selected.hue, formCode };
+  const creature = selected && { pokemonId: selected.pokemonId, hue: selected.hue, formCode }; // `Chip` tints via `creatureHue`, so the stored hue goes in raw
   const formLabel = selected ? creatureFormLabel({ pokemonId: selected.pokemonId, formCode }) : undefined;
   return (
     <View>

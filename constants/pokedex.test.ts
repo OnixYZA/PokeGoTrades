@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   creatureHasType,
+  creatureHue,
   defaultFormOf,
   findPokemon,
   formatTypes,
@@ -742,5 +743,59 @@ describe('formatTypes', () => {
   it('formats what typesOf returns', () => {
     const types = typesOf({ pokemonId: 888, formCode: 'CROWNED_SWORD' });
     expect(types && formatTypes(types)).toBe('Fairy / Steel');
+  });
+});
+
+describe('creatureHue', () => {
+  const VULPIX = 37;
+  const ROTOM = 479;
+  const CHARIZARD = 6;
+  const stored = (pokemonId: number) => findPokemon(pokemonId)!.hue;
+
+  it('tints a form whose primary type differs from the species by that form\'s type', () => {
+    // Vulpix is Fire; Alolan Vulpix is Ice, so the tint follows the type badge, not the species.
+    expect(creatureHue({ pokemonId: VULPIX, formCode: 'ALOLA', hue: stored(VULPIX) })).toBe(TYPE_HUE.Ice);
+    expect(creatureHue({ pokemonId: VULPIX, formCode: 'ALOLA', hue: stored(VULPIX) })).not.toBe(TYPE_HUE.Fire);
+    // Alolan Rattata is Dark/Normal where Rattata is Normal.
+    expect(creatureHue({ pokemonId: 19, formCode: 'ALOLA', hue: stored(19) })).toBe(TYPE_HUE.Dark);
+  });
+
+  it('keeps the stored hue for a form that shares the species\' primary type', () => {
+    // Wash Rotom is Electric/Water and Rotom is Electric/Ghost: the PRIMARY is Electric in both, so no change.
+    expect(typesOf({ pokemonId: ROTOM, formCode: 'WASH' })).toEqual(['Electric', 'Water']);
+    expect(creatureHue({ pokemonId: ROTOM, formCode: 'WASH', hue: 123 })).toBe(123);
+    // Mega X Charizard is Fire/Dragon, Charizard Fire/Flying.
+    expect(creatureHue({ pokemonId: CHARIZARD, formCode: 'MEGA_X', hue: 18 })).toBe(18);
+  });
+
+  it('keeps a hand-picked stored hue on the default form, however the form is absent', () => {
+    for (const formCode of [undefined, null, '']) {
+      expect(creatureHue({ pokemonId: 382, formCode, hue: 340 })).toBe(340);
+    }
+    expect(creatureHue({ pokemonId: 382, hue: 210 })).toBe(210);
+  });
+
+  it('keeps the stored hue for an unknown id or an unknown form code', () => {
+    expect(creatureHue({ pokemonId: 999_999, formCode: 'ALOLA', hue: 77 })).toBe(77);
+    expect(creatureHue({ pokemonId: VULPIX, formCode: 'NOT_A_FORM', hue: 77 })).toBe(77);
+  });
+
+  it('for every (species, form) in the dex is either the stored hue or the form\'s primary type hue', () => {
+    const stub = 1234; // not a TYPE_HUE value, so "stored" and "type" can never be confused
+    let retinted = 0;
+    for (const entry of POKEDEX) {
+      for (const formCode of [null, ...formsOf(entry.pokemonId)]) {
+        const creature = { pokemonId: entry.pokemonId, formCode, hue: stub };
+        const formPrimary = typesOf(creature)![0];
+        const result = creatureHue(creature);
+        if (formPrimary !== entry.types[0]) {
+          expect(result, `${entry.pokemonId} ${formCode}`).toBe(TYPE_HUE[formPrimary]);
+          retinted++;
+        } else {
+          expect(result, `${entry.pokemonId} ${formCode}`).toBe(stub);
+        }
+      }
+    }
+    expect(retinted).toBeGreaterThan(0);
   });
 });

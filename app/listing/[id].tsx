@@ -25,6 +25,7 @@ import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { TypeBadge } from '@/components/ui/TypeBadge';
+import { creatureHue } from '@/constants/pokedex';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
 import { demandTier, marketLabel } from '@/constants/market';
 import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
@@ -163,7 +164,7 @@ export default function ListingDetailScreen() {
 
         <View
           className="relative border-b border-border-subtle px-[22px] pb-[22px] pt-[18px]"
-          style={hueHeroBleed(listing.hue)}
+          style={hueHeroBleed(creatureHue(listing))}
         >
           <View className="absolute right-4 top-3">
             <IconButton size={34} radius={12} accessibilityLabel="Close" onPress={() => close()}>
@@ -195,7 +196,7 @@ export default function ListingDetailScreen() {
               <TypeBadge creature={listing} style={{ marginTop: 8 }} />
               <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
                 {listing.lucky && <LuckyBadge />}
-                <BackgroundBadge bg={listing.bg} hue={listing.hue} accent={listing.accent} />
+                <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
                 {listing.untradable && (
                   <View className="rounded-[6px] border px-2 py-[3px]" style={{ backgroundColor: 'rgba(255,92,138,0.15)', borderColor: 'rgba(255,92,138,0.3)' }}>
                     <Text className="font-display-semi uppercase" style={{ fontSize: 10, letterSpacing: 0.8, color: '#ff5c8a' }}>

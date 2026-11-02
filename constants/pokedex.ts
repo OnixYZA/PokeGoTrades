@@ -113,6 +113,46 @@ export function typesOf(creature: TypedCreature): PokemonTypes | undefined {
   return (creature.formCode ? FORM_TYPES.get(overrideKey(creature.pokemonId, creature.formCode)) : undefined) ?? species.types;
 }
 
+/** A creature as `creatureHue` needs it: identity (for the form's typing) plus the hue stored beside it. */
+export interface HuedCreature extends TypedCreature {
+  /** The stored hue (`CreatureRef.hue`, `Listing.hue`, `listings.hue`): the species' default-form tint at the
+   *  time the row was written. */
+  hue: number;
+}
+
+/**
+ * The hue (0-360) a creature's tint should be drawn with: every chip, disc, bleed and badge background in the app
+ * reads THIS, never the raw `.hue` field (`constants/theme.ts`'s `hue*` helpers take its result).
+ *
+ * THE RULE. When the creature has a `formCode` whose PRIMARY type (`typesOf`) differs from its species' default
+ * primary type, the tint is `TYPE_HUE[formPrimary]`, so Alolan Vulpix (Ice; Vulpix is Fire) is drawn Ice-blue and
+ * Wash Rotom (Water; Rotom is Electric/Ghost) is drawn Water-blue, in step with the type badge beside it
+ * (`TypeBadge` also reads `typesOf`). In every other case the STORED `hue` is returned unchanged: a default form,
+ * a form that keeps the species' primary type (a Hero Zacian, a costume, Mega Charizard Y still being Fire) and an
+ * id outside the dex (no typing to consult; this never guesses one).
+ *
+ * WHY THE STORED HUE IS KEPT RATHER THAN RECOMPUTING FROM TYPE EVERY TIME. Stored hues are not always
+ * `TYPE_HUE[primary]`: seed and mock data (`data/listings.ts`, the demo creatures) carry hand-picked hues (a Kyogre
+ * stored as 340 or 210 where Water is 205), and the user requires a default-form creature to look exactly as it
+ * does today. Returning the stored value wherever the form does not change the primary type guarantees that
+ * byte-for-byte, while the override fixes the case the stored value is plainly wrong for (a form of another type).
+ *
+ * `hue` itself is legacy derived data: it is `TYPE_HUE[defaultPrimary]` frozen into a row (`creatureRefFromPick`,
+ * `listings.hue`, `creature-ref.ts` copy it around), i.e. a cache of something `typesOf` can answer. Once the
+ * hand-picked seed hues are retired it can be dropped and this function become `TYPE_HUE[typesOf(c)[0]]`; that
+ * cleanup is deliberately NOT done here, and nothing written to the database changed with this helper.
+ *
+ * Lives here, not in `constants/pokemon-types.ts`: that module is an import-free leaf with no dex access, while
+ * this needs `typesOf`, the dex's species lookup and `TYPE_HUE`, which all live in this file.
+ */
+export function creatureHue(creature: HuedCreature): number {
+  if (!creature.formCode) return creature.hue;
+  const species = BY_ID.get(creature.pokemonId);
+  const formPrimary = typesOf(creature)?.[0];
+  if (!species || !formPrimary || formPrimary === species.types[0]) return creature.hue;
+  return TYPE_HUE[formPrimary];
+}
+
 /** Whether the creature has `type` in either slot. False for an id outside the dex. */
 export function creatureHasType(creature: TypedCreature, type: PokemonType): boolean {
   return typesOf(creature)?.includes(type) ?? false;

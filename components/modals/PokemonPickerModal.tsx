@@ -20,7 +20,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { hueBadgeStyle } from '@/constants/theme';
-import { formatTypes, POKEDEX, searchPokedex, TYPE_HUE, typesOf, type PokedexEntry } from '@/constants/pokedex';
+import { creatureHue, formatTypes, POKEDEX, searchPokedex, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import { creatureDisplayName, creatureFullName, describeTypes } from '@/lib/format';
 import {
   addedFormsOf,
@@ -508,7 +508,7 @@ function FormStep({
   const pick = choice ? buildPick(pokemonId, shiny, choice.formCode, options) : null;
   const fullName = creatureFullName({ pokemonId, shiny, formCode });
   const types = typesOf({ pokemonId, formCode }) ?? entry.types;
-  const hue = TYPE_HUE[types[0]];
+  const hue = creatureHue({ pokemonId, formCode, hue: entry.hue });
   const dex = `#${String(pokemonId).padStart(3, '0')}`;
   return (
     <View className="flex-1">

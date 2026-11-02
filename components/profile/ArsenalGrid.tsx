@@ -6,6 +6,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
 import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { RemoveCreatureButton } from '@/components/profile/RemoveCreatureButton';
+import { creatureHue } from '@/constants/pokedex';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import { creatureFullName } from '@/lib/format';
 import type { TrainerCreature } from '@/lib/creature-list';
@@ -49,7 +50,7 @@ export function ArsenalGrid({ arsenal, onEdit, onRemove }: ArsenalGridProps) {
         keyExtractor={(entry) => entry.id}
         renderItem={(entry) => (
           <View className="relative items-center gap-2 overflow-hidden rounded-2xl border border-border bg-bg-card p-2.5">
-            <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(entry.creature.hue)]} />
+            <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(creatureHue(entry.creature))]} />
             {/* A lucky entry shows both the Chip's small gold "L" and this tile's clover "LUCKY" caption below. */}
             <Chip creature={entry.creature} size={52} />
             {/* numberOfLines: 3 narrow columns (Task 1) + the "Shiny " prefix means a name like "Shiny

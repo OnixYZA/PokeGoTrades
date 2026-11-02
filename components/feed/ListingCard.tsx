@@ -10,6 +10,7 @@ import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { Sprite } from '@/components/ui/Sprite';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { TypeBadge } from '@/components/ui/TypeBadge';
+import { creatureHue } from '@/constants/pokedex';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { Listing } from '@/data/types';
 import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
@@ -50,7 +51,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
         style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 }}
       />
 
-      <View className="absolute h-[120px] w-[120px] rounded-full" style={[{ top: -30, right: -30, pointerEvents: 'none' }, hueBleed(listing.hue)]} />
+      <View className="absolute h-[120px] w-[120px] rounded-full" style={[{ top: -30, right: -30, pointerEvents: 'none' }, hueBleed(creatureHue(listing))]} />
 
       <View style={{ pointerEvents: 'none' }}>
         <Sprite creature={listing} purified={listing.purified} size={72} />
@@ -81,7 +82,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
         </Text>
 
         <View className="mt-0.5 flex-row flex-wrap items-center gap-1.5" style={{ pointerEvents: 'none' }}>
-          <BackgroundBadge bg={listing.bg} hue={listing.hue} accent={listing.accent} />
+          <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
           {listing.lucky && <LuckyBadge size="sm" />}
         </View>
 

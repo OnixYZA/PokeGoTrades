@@ -18,6 +18,7 @@ import {
   creatureForm,
   creatureFormLabel,
   creatureFullName,
+  spriteAltText,
   describeTypes,
   fmtDust,
   formCodeLabel,
@@ -503,5 +504,25 @@ describe('describeTypes', () => {
     const zacian = { pokemonId: 888 };
     expect(describeTypes(typesOf(zacian)!)).toBe('Fairy type');
     expect(describeTypes(typesOf({ ...zacian, formCode: 'CROWNED_SWORD' })!)).toBe('Fairy and Steel type');
+  });
+});
+
+describe('spriteAltText', () => {
+  it('names the species for a default form', () => {
+    expect(spriteAltText({ pokemonId: 37 })).toBe('Vulpix sprite');
+  });
+
+  it('puts a shiny first', () => {
+    expect(spriteAltText({ pokemonId: 37, shiny: true })).toBe('Shiny Vulpix sprite');
+  });
+
+  it('names a prefix form and a suffix form', () => {
+    expect(spriteAltText({ pokemonId: 37, formCode: 'ALOLA', shiny: true })).toBe('Shiny Alolan Vulpix sprite');
+    expect(spriteAltText({ pokemonId: 201, formCode: 'UNOWN_F' })).toBe('Unown (F) sprite');
+  });
+
+  it('falls back to the stored name, then the dex number, for an id outside the dex', () => {
+    expect(spriteAltText({ pokemonId: 999_999, name: 'Mystery' })).toBe('Mystery sprite');
+    expect(spriteAltText({ pokemonId: 999_999 })).toBe('Pokémon #999999 sprite');
   });
 });

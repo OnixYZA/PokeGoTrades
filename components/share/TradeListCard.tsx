@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
+import { creatureHue } from '@/constants/pokedex';
 import { COLORS, GO_SPRITE_ZOOM } from '@/constants/theme';
 import {
   CARD_PADDING,
@@ -25,7 +26,7 @@ import {
   type TradeListSection,
 } from '@/constants/trade-list-layout';
 import type { CreatureRef } from '@/data/types';
-import { speciesName } from '@/lib/format';
+import { speciesName, spriteAltText } from '@/lib/format';
 import { spriteVariantOf } from '@/lib/sprite-url';
 import { useSpriteSource } from '@/lib/use-sprite-source';
 
@@ -277,7 +278,7 @@ function CreatureTile({ creature, onSettled }: { creature: CreatureRef; onSettle
       {exhausted ? (
         <View
           className="h-full w-full items-center justify-center"
-          style={{ backgroundColor: hueSolidColor(creature.hue) }}
+          style={{ backgroundColor: hueSolidColor(creatureHue(creature)) }}
         >
           <Text className="font-display text-white" style={{ fontSize: GRID_TILE_SIZE * 0.32 }}>
             {speciesName(creature).charAt(0).toUpperCase()}
@@ -296,8 +297,8 @@ function CreatureTile({ creature, onSettled }: { creature: CreatureRef; onSettle
           onLoad={onLoad}
           onError={onError}
           accessibilityIgnoresInvertColors
-          alt={`Pokemon ${creature.pokemonId} sprite`}
-          accessibilityLabel={`Pokemon ${creature.pokemonId} sprite`}
+          alt={spriteAltText(creature)}
+          accessibilityLabel={spriteAltText(creature)}
         />
       )}
       {creature.shiny && <ShinyGlint size={9} color="#fff" glow style={{ position: 'absolute', top: 3, right: 4 }} />}

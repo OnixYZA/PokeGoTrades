@@ -2,8 +2,9 @@ import { Image } from 'expo-image';
 import { Text, View } from 'react-native';
 
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
-import { findPokemon } from '@/constants/pokedex';
+import { creatureHue, findPokemon } from '@/constants/pokedex';
 import { GO_SPRITE_ZOOM, hueChipBg, hueChipGlow } from '@/constants/theme';
+import { spriteAltText } from '@/lib/format';
 import { spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
 import { useSpriteSource } from '@/lib/use-sprite-source';
 
@@ -23,12 +24,14 @@ const INNER_RADIUS = 12 - 1;
 export function Chip({ creature, size = 48 }: ChipProps) {
   const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource(spriteVariantOf(creature));
 
+  const hue = creatureHue(creature);
+
   return (
     <View
       style={[
         { width: size, height: size, borderRadius: 12, borderWidth: 1 },
-        hueChipBg(creature.hue),
-        hueChipGlow(creature.hue),
+        hueChipBg(hue),
+        hueChipGlow(hue),
       ]}
       className="shrink-0 items-center justify-center"
     >
@@ -60,8 +63,8 @@ export function Chip({ creature, size = 48 }: ChipProps) {
             onLoad={onLoad}
             onError={onError}
             accessibilityIgnoresInvertColors
-            alt={`Pokemon ${creature.pokemonId} sprite`}
-            accessibilityLabel={`Pokemon ${creature.pokemonId} sprite`}
+            alt={spriteAltText(creature)}
+            accessibilityLabel={spriteAltText(creature)}
           />
         )}
       </View>

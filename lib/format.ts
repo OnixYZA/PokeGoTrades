@@ -290,6 +290,17 @@ export function creatureFullName(c: NamedCreature & { shiny?: boolean | null; fo
   return withShinyPrefix(named, c.shiny);
 }
 
+/**
+ * The default accessible name of a creature's sprite image, e.g. "Shiny Alolan Vulpix sprite" or "Unown (F) sprite".
+ * `Sprite`, `Chip` and the share card's tile all label their image with this, so the three cannot disagree, and it
+ * is the full name (`creatureFullName`: species, form and shiny from the structured fields), never a bare dex
+ * number, so a screen reader says which creature and which form is pictured. An id outside the dex reads
+ * "Pokémon #<id> sprite" (the `speciesName` fallback).
+ */
+export function spriteAltText(c: NamedCreature & { shiny?: boolean | null; formCode?: string | null }): string {
+  return `${creatureFullName(c)} sprite`;
+}
+
 /** A creature's typing as a screen reader should hear it, e.g. `['Fire', 'Flying']` -> `'Fire and Flying type'`
  *  and `['Fairy']` -> `'Fairy type'`. The one wording every type label shares (`TypeBadge`, the Pokémon
  *  picker's rows, a formal offer's card), so they cannot disagree on it. Primary type first, as `PokemonTypes` orders it. */
