@@ -40,7 +40,7 @@ export default function PublicProfileScreen() {
         showsVerticalScrollIndicator={false}
       >
         <ProfileHero trainer={trainer} />
-        <RepStats trainer={trainer} />
+        <RepStats trainer={trainer} bailsCount={trainer.bailsCount} />
         <ArsenalGrid arsenal={toReadOnlyEntries(trainer.arsenal)} />
         <WishlistGrid wishlist={toReadOnlyEntries(trainer.wishlist)} />
         <TradeHistoryGrid history={trainer.tradeHistory} />

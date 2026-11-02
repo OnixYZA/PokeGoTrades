@@ -10,6 +10,7 @@ export const trainer: Trainer = {
   trades: 214,
   rep: 4.9,
   streak: 38,
+  bailsCount: 0,
   arsenal: [
     { name: 'Rayquaza', pokemonId: 384, hue: 145, shiny: true },
     { name: 'Legacy Dnite', pokemonId: 149, hue: 205, lucky: true },

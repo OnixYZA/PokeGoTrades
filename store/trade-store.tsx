@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import type { AreaName } from '@/constants/locations';
 import { chats as seedChats, fallbackOffers } from '@/data/chats';
 import { listings as seedListings } from '@/data/listings';
+import { trainer as mockTrainer } from '@/data/trainer';
 import type {
   Chat,
   ChatMessage,
@@ -19,6 +20,7 @@ import { fetchListingsByIds } from '@/lib/api/listings';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName } from '@/lib/format';
 import { openPrivateChannel } from '@/lib/realtime';
+import { computeRepAfterTrade, computeStreakAfterTrade, evaluateBailOutcome, evaluateUnlockOutcome, MAX_REP, MIN_REP } from '@/lib/reputation';
 import { describeError, type ErrorInfo } from '@/lib/rpc-errors';
 import { toast } from '@/lib/toast';
 import {
@@ -200,6 +202,13 @@ interface TradeState {
   lockEventVersion: Record<string, LockVersion>;
   /** chatId -> each side's confirmation of the trade that chat holds. Live chats only. */
   lockConfirmations: Record<string, LockConfirmations>;
+  /**
+   * Mock mode only (no backend): the local trainer's reputation stats, moved by `confirmTrade` / `bailChat`
+   * with the same rules the server applies (lib/reputation.ts). In live mode the server owns these
+   * (`profiles.rep` etc., see `fetchMyProfile`) and this stays at its seed. Partner penalties are not
+   * representable: mock partners have no profile records.
+   */
+  mockStats: MockTrainerStats;
   /** The signed-in trainer. Set by `LiveSync`; message roles are derived against it. */
   me: { id: string } | null;
   /** A chat whose Handshake should open by itself: the buyer's, when the seller locks (D1). */
@@ -328,6 +337,18 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMe
 
 function newestServerTimestamp(list: ChatMessage[] | undefined): string | undefined {
   return list ? [...list].reverse().find((m) => m.createdAt && !m.delivery)?.createdAt : undefined;
+}
+
+export interface MockTrainerStats {
+  trades: number;
+  rep: number;
+  streak: number;
+  bailsCount: number;
+  lastTradeAt: string | null;
+}
+
+function seedMockStats(): MockTrainerStats {
+  return { trades: mockTrainer.trades, rep: mockTrainer.rep, streak: mockTrainer.streak, bailsCount: mockTrainer.bailsCount ?? 0, lastTradeAt: null };
 }
 
 function dropChat(state: TradeState, chatId: string): Partial<TradeState> {
@@ -514,6 +535,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
     lockByListing: {},
     lockConfirmations: {},
     lockEventVersion: {},
+    mockStats: seedMockStats(),
     me: null,
     handshakeRequest: null,
     clearHandshakeRequest: () => set({ handshakeRequest: null }),
@@ -658,7 +680,15 @@ export const useTradeStore = create<TradeState>((set, get) => {
       if (refusal) return { ok: false, error: describeError({ message: refusal }) };
       if (!USE_SUPABASE) {
         const chat = get().chats[chatId];
-        if (chat) set((state) => ({ lockByListing: { ...state.lockByListing, [chat.listingId]: chatId } }));
+        if (chat) {
+          set((state) => ({
+            lockByListing: { ...state.lockByListing, [chat.listingId]: chatId },
+            lockConfirmations: {
+              ...state.lockConfirmations,
+              [chatId]: { lockedAt: new Date().toISOString(), sellerConfirmedAt: null, buyerConfirmedAt: null },
+            },
+          }));
+        }
         return ok(undefined);
       }
       return attempt(async () => {
@@ -675,6 +705,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
               chatId: lock.chat_id,
               sellerConfirmedAt: lock.seller_confirmed_at,
               buyerConfirmedAt: lock.buyer_confirmed_at,
+              lockedAt: lock.locked_at,
               updatedAt: lock.updated_at,
             },
             nextLockSeq(),
@@ -689,7 +720,26 @@ export const useTradeStore = create<TradeState>((set, get) => {
         set((state) => {
           const chat = state.chats[chatId];
           if (!chat || state.lockByListing[chat.listingId] !== chatId) return state;
-          return { lockByListing: omit(state.lockByListing, chat.listingId) };
+          // Caller = seller (D1). Read the lock confirmations BEFORE they are omitted, like the RPC does.
+          const lock = state.lockConfirmations[chatId];
+          const outcome = evaluateUnlockOutcome({
+            lockedAtIso: lock?.lockedAt ?? null,
+            sellerConfirmed: Boolean(lock?.sellerConfirmedAt),
+            buyerConfirmed: Boolean(lock?.buyerConfirmedAt),
+          });
+          return {
+            ...(outcome.sellerPenalty > 0
+              ? {
+                  mockStats: {
+                    ...state.mockStats,
+                    rep: Math.max(MIN_REP, Math.min(MAX_REP, Math.round((state.mockStats.rep - outcome.sellerPenalty) * 10) / 10)),
+                    bailsCount: state.mockStats.bailsCount + 1,
+                  },
+                }
+              : {}),
+            lockByListing: omit(state.lockByListing, chat.listingId),
+            lockConfirmations: omit(state.lockConfirmations, chatId),
+          };
         });
         return ok(undefined);
       }
@@ -707,6 +757,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
                 chatId,
                 sellerConfirmedAt: null,
                 buyerConfirmedAt: null,
+                lockedAt: null,
                 updatedAt: null, // a release always applies; see isStaleLock
               },
               nextLockSeq(),
@@ -723,6 +774,16 @@ export const useTradeStore = create<TradeState>((set, get) => {
         const chat = get().chats[chatId];
         get().archiveChat(chatId);
         if (chat) get().removeListing(chat.listingId);
+        const nowIso = new Date().toISOString();
+        set((state) => ({
+          mockStats: {
+            ...state.mockStats,
+            trades: state.mockStats.trades + 1,
+            rep: computeRepAfterTrade(state.mockStats.rep),
+            streak: computeStreakAfterTrade(state.mockStats.streak, state.mockStats.lastTradeAt, nowIso),
+            lastTradeAt: nowIso,
+          },
+        }));
         return ok('completed' as const);
       }
       return attempt(async () => {
@@ -731,7 +792,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
           const chat = get().chats[chatId];
           const now = new Date().toISOString();
           set((state) => {
-            const current = state.lockConfirmations[chatId] ?? { sellerConfirmedAt: null, buyerConfirmedAt: null };
+            const current = state.lockConfirmations[chatId] ?? { lockedAt: null, sellerConfirmedAt: null, buyerConfirmedAt: null };
             return {
               lockConfirmations: {
                 ...state.lockConfirmations,
@@ -784,6 +845,24 @@ export const useTradeStore = create<TradeState>((set, get) => {
 
     bailChat: async (chatId, reason, note) => {
       if (!USE_SUPABASE) {
+        // Read the lock BEFORE removeChat drops it, like the RPC reads trade_locks before deleting it.
+        const state = get();
+        const lock = state.lockConfirmations[chatId];
+        const outcome = evaluateBailOutcome({
+          reason,
+          lockedAtIso: lock?.lockedAt ?? null,
+          callerConfirmed: Boolean(state.chats[chatId]?.myRole === 'buyer' ? lock?.buyerConfirmedAt : lock?.sellerConfirmedAt),
+          partnerConfirmed: Boolean(state.chats[chatId]?.myRole === 'buyer' ? lock?.sellerConfirmedAt : lock?.buyerConfirmedAt),
+        });
+        if (outcome.callerPenalty > 0) {
+          set((s) => ({
+            mockStats: {
+              ...s.mockStats,
+              rep: Math.max(MIN_REP, Math.min(MAX_REP, Math.round((s.mockStats.rep - outcome.callerPenalty) * 10) / 10)),
+              bailsCount: s.mockStats.bailsCount + 1,
+            },
+          }));
+        }
         get().removeChat(chatId);
         return ok(undefined);
       }

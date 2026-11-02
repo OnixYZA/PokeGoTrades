@@ -54,6 +54,7 @@ function makeEvent(partial: Partial<LockEvent> = {}): LockEvent {
     chatId: 'chat-1',
     sellerConfirmedAt: null,
     buyerConfirmedAt: null,
+    lockedAt: iso(0),
     updatedAt: iso(1),
     ...partial,
   };
@@ -159,7 +160,7 @@ describe('applyLockEvent', () => {
 
     const patch = applyLockEvent(state, event, 2);
 
-    expect(patch.lockConfirmations?.['chat-1']).toEqual({ sellerConfirmedAt: iso(2), buyerConfirmedAt: null });
+    expect(patch.lockConfirmations?.['chat-1']).toEqual({ lockedAt: iso(0), sellerConfirmedAt: iso(2), buyerConfirmedAt: null });
     expect(patch.lockEventVersion?.['chat-1']).toEqual(version(iso(2), 2));
     expect(patch.lockByListing?.['listing-1']).toBe('chat-1');
   });
@@ -194,7 +195,7 @@ describe('applyLockEvent', () => {
   it('a release applies even when older than the stored version, and clears the chat', () => {
     const state = makeSlice({
       lockByListing: { 'listing-1': 'chat-1' },
-      lockConfirmations: { 'chat-1': { sellerConfirmedAt: iso(2), buyerConfirmedAt: iso(2) } },
+      lockConfirmations: { 'chat-1': { lockedAt: iso(0), sellerConfirmedAt: iso(2), buyerConfirmedAt: iso(2) } },
       lockEventVersion: { 'chat-1': version(iso(5), 1) }, // newer than the release event's updatedAt below
       handshakeRequest: 'chat-1',
     });
@@ -226,7 +227,7 @@ describe('applyLockEvent', () => {
 
     const patch = applyLockEvent(state, event, 2);
 
-    expect(patch.lockConfirmations?.['chat-1']).toEqual({ sellerConfirmedAt: iso(1), buyerConfirmedAt: null });
+    expect(patch.lockConfirmations?.['chat-1']).toEqual({ lockedAt: iso(0), sellerConfirmedAt: iso(1), buyerConfirmedAt: null });
     expect(patch.lockByListing?.['listing-1']).toBe('chat-1');
     // No server token travelled with the event, so the one already stored is kept — but `seq` still
     // advances, because this device did just learn something.
@@ -278,7 +279,7 @@ describe('lockSnapshot', () => {
   it('a lock learned after the read began survives, unoverruled by the snapshot row', () => {
     const state = makeSlice({
       lockEventVersion: { 'chat-1': version(iso(5), 11) }, // seq 11: learned while the read was in flight
-      lockConfirmations: { 'chat-1': { sellerConfirmedAt: null, buyerConfirmedAt: iso(5) } },
+      lockConfirmations: { 'chat-1': { lockedAt: iso(0), sellerConfirmedAt: null, buyerConfirmedAt: iso(5) } },
     });
     const readSeq = 10; // the read was issued at seq 10, before that confirmation was learned
     const staleRow = makeLock({
@@ -290,14 +291,14 @@ describe('lockSnapshot', () => {
 
     const snapshot = lockSnapshot(state, [staleRow], [], readSeq);
 
-    expect(snapshot.lockConfirmations['chat-1']).toEqual({ sellerConfirmedAt: null, buyerConfirmedAt: iso(5) });
+    expect(snapshot.lockConfirmations['chat-1']).toEqual({ lockedAt: iso(0), sellerConfirmedAt: null, buyerConfirmedAt: iso(5) });
     expect(snapshot.lockEventVersion['chat-1']).toEqual(version(iso(5), 11));
   });
 
   it('a lock last learned before the read began is replaced by the snapshot row', () => {
     const state = makeSlice({
       lockEventVersion: { 'chat-2': version(iso(0), 3) }, // seq 3: learned well before the read
-      lockConfirmations: { 'chat-2': { sellerConfirmedAt: null, buyerConfirmedAt: null } },
+      lockConfirmations: { 'chat-2': { lockedAt: iso(0), sellerConfirmedAt: null, buyerConfirmedAt: null } },
     });
     const readSeq = 10;
     const freshRow = makeLock({
@@ -309,7 +310,7 @@ describe('lockSnapshot', () => {
 
     const snapshot = lockSnapshot(state, [freshRow], [], readSeq);
 
-    expect(snapshot.lockConfirmations['chat-2']).toEqual({ sellerConfirmedAt: null, buyerConfirmedAt: iso(5) });
+    expect(snapshot.lockConfirmations['chat-2']).toEqual({ lockedAt: iso(0), sellerConfirmedAt: null, buyerConfirmedAt: iso(5) });
     // Rows from this read carry the read's own sequence number.
     expect(snapshot.lockEventVersion['chat-2']).toEqual(version(iso(5), readSeq));
   });
@@ -320,7 +321,7 @@ describe('lockSnapshot', () => {
   it('preserves a locally-learned lock even when its server timestamp is the older one', () => {
     const state = makeSlice({
       lockEventVersion: { 'chat-1': version(iso(1), 11) }, // OLDER server token, but learned after the read
-      lockConfirmations: { 'chat-1': { sellerConfirmedAt: null, buyerConfirmedAt: iso(1) } },
+      lockConfirmations: { 'chat-1': { lockedAt: iso(0), sellerConfirmedAt: null, buyerConfirmedAt: iso(1) } },
     });
     const rowWithNewerTimestamp = makeLock({ chat_id: 'chat-1', buyer_confirmed_at: null, updated_at: iso(99) });
 
@@ -333,7 +334,7 @@ describe('lockSnapshot', () => {
   it('replaces a stale local entry even when its server timestamp is the newer one', () => {
     const state = makeSlice({
       lockEventVersion: { 'chat-1': version(iso(99), 3) }, // NEWER server token, but learned before the read
-      lockConfirmations: { 'chat-1': { sellerConfirmedAt: null, buyerConfirmedAt: iso(99) } },
+      lockConfirmations: { 'chat-1': { lockedAt: iso(0), sellerConfirmedAt: null, buyerConfirmedAt: iso(99) } },
     });
     const rowWithOlderTimestamp = makeLock({ chat_id: 'chat-1', buyer_confirmed_at: null, updated_at: iso(1) });
 
@@ -368,5 +369,30 @@ describe('applyListingStatus', () => {
     const result = applyListingStatus(state, 'listing-1', 'open');
 
     expect(result.lockByListing).not.toHaveProperty('listing-1');
+  });
+});
+
+describe('lockedAt', () => {
+  it('is stored from a lock frame, and kept when a later frame omits it', () => {
+    const first = applyLockEvent(makeSlice(), makeEvent({ op: 'insert', lockedAt: iso(3), updatedAt: iso(3) }), 1);
+    expect(first.lockConfirmations?.['chat-1']?.lockedAt).toBe(iso(3));
+    const second = applyLockEvent(
+      makeSlice({ lockConfirmations: first.lockConfirmations, lockEventVersion: first.lockEventVersion }),
+      makeEvent({ lockedAt: null, updatedAt: iso(4), buyerConfirmedAt: iso(4) }),
+      2,
+    );
+    expect(second.lockConfirmations?.['chat-1']?.lockedAt).toBe(iso(3));
+  });
+  it('is dropped with the lock on release', () => {
+    const patch = applyLockEvent(
+      makeSlice({ lockConfirmations: { 'chat-1': { lockedAt: iso(3), sellerConfirmedAt: null, buyerConfirmedAt: null } } }),
+      makeEvent({ op: 'delete', released: true, lockedAt: null }),
+      2,
+    );
+    expect(patch.lockConfirmations?.['chat-1']).toBeUndefined();
+  });
+  it('comes from trade_locks.locked_at on a snapshot', () => {
+    const snapshot = lockSnapshot(makeSlice(), [makeLock({ locked_at: iso(7) })], [], 5);
+    expect(snapshot.lockConfirmations['chat-1']?.lockedAt).toBe(iso(7));
   });
 });

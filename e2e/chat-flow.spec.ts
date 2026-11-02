@@ -10,6 +10,8 @@ import {
   DRIFTCORAL,
   MINTRUNNER,
   removeListingFixture,
+  snapshotReputation,
+  type ReputationSnapshot,
   sessionStorageKey,
   signIn,
   type ListingFixture,
@@ -113,14 +115,16 @@ async function openListing(page: Page, marker: string): Promise<void> {
 
 let admin: SupabaseClient;
 let fixture: ListingFixture | undefined;
+let reputation: ReputationSnapshot | undefined;
 
 test.beforeAll(async () => {
   admin = adminClient();
+  reputation = await snapshotReputation(admin, [DRIFTCORAL, MINTRUNNER]);
   fixture = await createListingFixture(admin, DRIFTCORAL, runId);
 });
 
 test.afterAll(async () => {
-  if (fixture) await removeListingFixture(admin, fixture.id, [DRIFTCORAL, MINTRUNNER]);
+  if (fixture) await removeListingFixture(admin, fixture.id, [DRIFTCORAL, MINTRUNNER], reputation);
 });
 
 test.afterEach(async ({}, testInfo) => {

@@ -17,6 +17,8 @@ export const LOCK_HELD_ELSEWHERE = '__elsewhere__' as const;
 
 /** Each side's confirmation timestamp for the chat that holds a listing's lock (D2). */
 export interface LockConfirmations {
+  /** `trade_locks.locked_at`: when the lock was taken. Starts the anti-bail grace period (lib/reputation.ts). Null when unknown. */
+  lockedAt: string | null;
   sellerConfirmedAt: string | null;
   buyerConfirmedAt: string | null;
 }
@@ -116,6 +118,8 @@ export function applyLockEvent(state: LockSlice, event: LockEvent, seq: number):
   } else {
     lockByListing[event.listingId] = event.chatId;
     lockConfirmations[event.chatId] = {
+      // A frame from a server that predates the payload field keeps whatever we already knew.
+      lockedAt: event.lockedAt ?? state.lockConfirmations[event.chatId]?.lockedAt ?? null,
       sellerConfirmedAt: event.sellerConfirmedAt,
       buyerConfirmedAt: event.buyerConfirmedAt,
     };
@@ -164,6 +168,7 @@ export function lockSnapshot(
   for (const lock of locks) {
     if (lock.chat_id in lockConfirmations) continue; // a newer local observation already won
     lockConfirmations[lock.chat_id] = {
+      lockedAt: lock.locked_at,
       sellerConfirmedAt: lock.seller_confirmed_at,
       buyerConfirmedAt: lock.buyer_confirmed_at,
     };

@@ -86,6 +86,7 @@ export function buildPublicTrainerProfile(handle: string): Trainer {
     trades: 8 + (seed % 250),
     rep: Math.round((3.5 + ((seed % 15) / 10)) * 10) / 10,
     streak: seed % 45,
+    bailsCount: seed % 7 === 0 ? 1 : 0,
     arsenal,
     wishlist,
     tradeHistory,

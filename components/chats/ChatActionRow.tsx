@@ -7,6 +7,7 @@ import { BailBlockModal } from '@/components/modals/BailBlockModal';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SURFACE } from '@/constants/theme';
+import { evaluateUnlockOutcome, REP_PENALTY_POST_GRACE_BAIL } from '@/lib/reputation';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
 interface ChatActionRowProps {
@@ -32,6 +33,7 @@ const IDLE = { backgroundColor: '#101728', borderWidth: 1, borderColor: '#1e2436
  */
 export function ChatActionRow({ chatId, partner, onOpenHandshake, onReviewOffer, onBailed }: ChatActionRowProps) {
   const view = useTradeStore(useShallow((s) => selectTradeView(s, chatId)));
+  const confirmations = useTradeStore((s) => s.lockConfirmations[chatId]);
   const unlockChat = useTradeStore((s) => s.unlockChat);
   const [showBail, setShowBail] = useState(false);
   const [confirmUnlock, setConfirmUnlock] = useState(false);
@@ -47,6 +49,16 @@ export function ChatActionRow({ chatId, partner, onOpenHandshake, onReviewOffer,
     await unlockChat(chatId);
     setBusy(false);
   };
+
+  // Same pure rule unlock_trade applies server-side, so the warning matches what will happen. Evaluated when the
+  // confirm dialog is open (the clock is read then, not on every render).
+  const lateUnlock = confirmUnlock
+    ? evaluateUnlockOutcome({
+        lockedAtIso: confirmations?.lockedAt ?? null,
+        sellerConfirmed: !!confirmations?.sellerConfirmedAt,
+        buyerConfirmed: !!confirmations?.buyerConfirmedAt,
+      }).sellerPenalty > 0
+    : false;
 
   return (
     <View className="flex-row gap-2">
@@ -78,6 +90,12 @@ export function ChatActionRow({ chatId, partner, onOpenHandshake, onReviewOffer,
           chatId={chatId}
           partnerName={partner}
           role={view.live ? view.role : undefined}
+          // `lockedAt` is stored with the confirmations (trade_locks.locked_at, kept current by the lock frame). A
+          // locked chat whose lock time is somehow not loaded yet passes `undefined` (unknown: the modal makes no
+          // Rep claim); a chat that is certainly not locked passes `null`.
+          lockedAt={view.phase === 'locked' ? (confirmations?.lockedAt ?? undefined) : null}
+          callerConfirmed={!!(view.role === 'seller' ? confirmations?.sellerConfirmedAt : confirmations?.buyerConfirmedAt)}
+          partnerConfirmed={!!(view.role === 'seller' ? confirmations?.buyerConfirmedAt : confirmations?.sellerConfirmedAt)}
           onDone={() => {
             setShowBail(false);
             onBailed();
@@ -89,7 +107,9 @@ export function ChatActionRow({ chatId, partner, onOpenHandshake, onReviewOffer,
       <ConfirmModal
         visible={confirmUnlock}
         title="Unlock this trade?"
-        message="This will re-open competing offers for this listing and clear any confirmation."
+        message={`This will re-open competing offers for this listing and clear any confirmation.${
+          lateUnlock ? ` -${REP_PENALTY_POST_GRACE_BAIL} Rep late-unlock penalty applies: the buyer already confirmed.` : ''
+        }`}
         confirmLabel="Unlock"
         destructive
         onConfirm={() => void unlock()}

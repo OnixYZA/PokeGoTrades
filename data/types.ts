@@ -203,6 +203,8 @@ export interface Trainer {
   trades: number;
   rep: number;
   streak: number;
+  /** Bails that cost this trainer's partner a trade (server-written `profiles.bails_count`). */
+  bailsCount?: number;
   arsenal: CreatureRef[];
   wishlist: CreatureRef[];
   tradeHistory: TradeHistoryEntry[];

@@ -311,7 +311,7 @@ export default function ProfileScreen() {
     body = (
       <>
         <ProfileHero trainer={trainer} />
-        <RepStats trainer={trainer} />
+        <RepStats trainer={trainer} bailsCount={trainer.bailsCount} />
         <ArsenalGrid arsenal={MOCK_ARSENAL} />
         <WishlistGrid wishlist={MOCK_WISHLIST} />
         <ShareTradeListButton onPress={() => setShareVisible(true)} />

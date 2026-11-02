@@ -120,6 +120,7 @@ export async function removeListingFixture(
   admin: SupabaseClient,
   listingId: string,
   trainers: Trainer[],
+  reputation?: ReputationSnapshot,
 ): Promise<void> {
   // Count before deleting: this is how much *this* fixture added, which is what we have to take back.
   const { data: trades, error } = await admin.from('completed_trades').select('id').eq('listing_id', listingId);
@@ -129,6 +130,7 @@ export async function removeListingFixture(
   await admin.from('completed_trades').delete().eq('listing_id', listingId);
   await admin.from('listings').delete().eq('id', listingId);
   if (added > 0) await Promise.all(trainers.map((t) => decrementTrades(admin, t.id, added)));
+  if (reputation) await restoreReputation(admin, reputation);
 }
 
 /**
@@ -166,6 +168,38 @@ async function decrementTrades(admin: SupabaseClient, id: string, by: number, at
     if (updated && updated.length > 0) return;
   }
   throw new Error(`Could not restore trades_count for ${id}: it kept changing under ${attempts} attempts`);
+}
+
+/** The reputation columns `confirm_trade` / `bail_and_block` move besides `trades_count`. */
+const REPUTATION_COLUMNS = ['rep', 'streak_days', 'last_trade_at', 'bails_count'] as const;
+export type ReputationSnapshot = Record<string, Record<(typeof REPUTATION_COLUMNS)[number], unknown>>;
+
+/**
+ * Reads the reputation columns for the test accounts so `removeListingFixture` can put them back.
+ *
+ * Unlike `trades_count` (undone relatively, see `decrementTrades`), these cannot be undone by subtraction:
+ * `rep` is clamped, `streak_days` depends on `last_trade_at`, and the streak rule is a function of the date.
+ * So they are snapshotted in `beforeAll` and written back absolutely. The ratchet that `decrementTrades`
+ * documents (a run killed before teardown leaves the changed value as the next baseline) applies here; the
+ * damage is bounded because `rep` caps at 5.0 and the test accounts start there.
+ */
+export async function snapshotReputation(admin: SupabaseClient, trainers: Trainer[]): Promise<ReputationSnapshot> {
+  const { data, error } = await admin
+    .from('profiles')
+    .select(`id, ${REPUTATION_COLUMNS.join(', ')}`)
+    .in('id', trainers.map((t) => t.id));
+  if (error) throw new Error(`Could not snapshot reputation: ${error.message}`);
+  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+  return Object.fromEntries(
+    rows.map((row) => [row.id as string, Object.fromEntries(REPUTATION_COLUMNS.map((c) => [c, row[c]]))]),
+  ) as ReputationSnapshot;
+}
+
+async function restoreReputation(admin: SupabaseClient, snapshot: ReputationSnapshot): Promise<void> {
+  for (const [id, columns] of Object.entries(snapshot)) {
+    const { error } = await admin.from('profiles').update(columns).eq('id', id);
+    if (error) throw new Error(`Could not restore reputation for ${id}: ${error.message}`);
+  }
 }
 
 export async function tradesCounts(admin: SupabaseClient, trainers: Trainer[]): Promise<Record<string, number>> {

@@ -28,6 +28,11 @@ export interface MyProfile {
   handleIsPlaceholder: boolean;
   team: Team | null;
   friendCode: string | null;
+  /** Server-written reputation stats (`confirm_trade` / `bail_and_block`); see lib/reputation.ts. */
+  rep: number;
+  trades: number;
+  streak: number;
+  bailsCount: number;
 }
 
 /** A problem with the profile form that should be shown next to a field. */
@@ -71,7 +76,7 @@ export async function fetchMyProfile(): Promise<MyProfile> {
   const id = await currentUserId();
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, handle, handle_is_placeholder, team, profile_private(friend_code)')
+    .select('id, handle, handle_is_placeholder, team, rep, trades_count, streak_days, bails_count, profile_private(friend_code)')
     .eq('id', id)
     .single();
   if (error) throw new ProfileError('form', error.message);
@@ -81,6 +86,10 @@ export async function fetchMyProfile(): Promise<MyProfile> {
     handleIsPlaceholder: data.handle_is_placeholder,
     team: data.team,
     friendCode: data.profile_private?.friend_code ?? null,
+    rep: data.rep,
+    trades: data.trades_count,
+    streak: data.streak_days,
+    bailsCount: data.bails_count,
   };
 }
 
