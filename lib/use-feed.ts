@@ -39,13 +39,14 @@ function withMarketSignals(listings: Listing[], signals: Map<string, MarketSigna
 function useMockFeed(loc: string): Feed {
   const all = useTradeStore(useShallow((s) => Object.values(s.listings)));
   const filters = useTradeStore((s) => s.listingFilters);
+  const searchPokemonId = useTradeStore((s) => s.searchPokemonId);
   const listings = useMemo(() => {
-    const spec = compileFilter(filters);
+    const spec = compileFilter(filters, searchPokemonId);
     const matched = all
       .filter((l) => l.loc === loc && matchesFilter(l, spec))
       .sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
     return withMarketSignals(matched, MOCK_MARKET_MAP);
-  }, [all, loc, filters]);
+  }, [all, loc, filters, searchPokemonId]);
   return { listings, isLoading: false, error: null, refresh: noopRefresh };
 }
 
@@ -61,8 +62,9 @@ function useSupabaseFeed(loc: string): Feed {
   const userId = user?.id;
   const upsertListings = useTradeStore((s) => s.upsertListings);
   const filters = useTradeStore((s) => s.listingFilters);
+  const searchPokemonId = useTradeStore((s) => s.searchPokemonId);
 
-  const spec = useMemo(() => compileFilter(filters), [filters]);
+  const spec = useMemo(() => compileFilter(filters, searchPokemonId), [filters, searchPokemonId]);
   const fKey = useMemo(() => filterKey(spec), [spec]);
   // `load` (below) must not change identity when only the filter changes — see the debounce effect —
   // so it reads the current spec/key through refs instead of closing over them directly.

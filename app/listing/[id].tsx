@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { BlurView } from 'expo-blur';
-import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Send, Trophy, X } from 'lucide-react-native';
+import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Ruler, Send, Trophy, X, Zap } from 'lucide-react-native';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -31,7 +31,7 @@ import { demandTier, marketLabel } from '@/constants/market';
 import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, formatCp } from '@/lib/format';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
@@ -211,6 +211,9 @@ export default function ListingDetailScreen() {
 
         <ScrollView contentContainerStyle={{ padding: 22 }} showsVerticalScrollIndicator={false}>
           <View className="mb-[18px] flex-row gap-2">
+            {listing.cp != null && (
+              <StatTile label="CP" value={formatCp(listing.cp).replace('CP ', '')} color="#f5c518" icon={<Zap size={12} color="#f5c518" />} radius={12} valueSize={18} />
+            )}
             <StatTile label="PvP Rank" value={listing.pvp} color="#4fb3ff" icon={<Bolt size={12} color="#4fb3ff" />} radius={12} valueSize={18} />
             <StatTile
               label="Top Traded"
@@ -244,6 +247,7 @@ export default function ListingDetailScreen() {
             <View className="flex-row flex-wrap gap-2">
               <LogisticsChip icon={<Car size={12} color="#4fb3ff" />} label={listing.willTravel ? 'Will Travel' : 'Local Only'} />
               <LogisticsChip icon={<Clock size={12} color="#4fb3ff" />} label={TRADE_TIMELINE_LABELS[listing.tradeTimeline]} />
+              {listing.sizeClass && <LogisticsChip icon={<Ruler size={12} color="#4fb3ff" />} label={`Size: ${listing.sizeClass}`} />}
               {listing.pokeball && (
                 <LogisticsChip icon={<CircleDot size={12} color="#4fb3ff" />} label={POKEBALL_LABELS[listing.pokeball]} />
               )}

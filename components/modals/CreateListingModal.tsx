@@ -31,15 +31,17 @@ import { useTradeStore } from '@/store/trade-store';
 import { findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
 import { appendDistinctCreature, creatureRefFromPick } from '@/lib/creature-pick';
-import { creatureFormLabel, creatureFullName } from '@/lib/format';
+import { CP_MAX, CP_MIN, creatureFormLabel, creatureFullName, dexLabel, parseCp } from '@/lib/format';
 import {
   LISTING_TAGS,
   POKEBALLS,
   POKEBALL_LABELS,
+  POKEMON_SIZES,
   TRADE_TIMELINES,
   TRADE_TIMELINE_LABELS,
   type ListingTag,
   type Pokeball,
+  type PokemonSize,
   type TradeTimeline,
 } from '@/constants/listing-attributes';
 import {
@@ -133,6 +135,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [costume, setCostume] = useState(false);
   const [willTravel, setWillTravel] = useState(false);
   const [pokeball, setPokeball] = useState<Pokeball | null>(null);
+  // Seller-declared; null leaves it to an appraisal screenshot to tag.
+  const [sizeClass, setSizeClass] = useState<PokemonSize | null>(null);
+  // CP is typed text, parsed by the one shared rule (`parseCp`); the draft only ever sees the parsed number.
+  const [cpText, setCpText] = useState('');
   const [tradeTimeline, setTradeTimeline] = useState<TradeTimeline>('flexible');
   // `iv_atk`/`iv_def`/`iv_sta` are seller-declared (migration …000200_tables.sql:
   // `listings_iv_all_or_none`), read straight off the trainer's in-game Appraise screen — not
@@ -180,8 +186,11 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const verifyExited = useRef(false);
 
   /** Exactly what gets inserted: only the fields a trainer supplies (see `NewListingInput`). */
+  const cpResult = useMemo(() => parseCp(cpText), [cpText]);
   const draft = useMemo<NewListingInput | null>(() => {
-    if (!selectedCreature) return null;
+    // CP is required: with no creature or no valid CP there is no draft, so nothing downstream (preview,
+    // publish) can run without them.
+    if (!selectedCreature || !cpResult.ok) return null;
     const bg: NewListingInput['bg'] = shiny ? 'shiny' : specialBackground ? 'legacy' : 'meta';
     const tradeType: TradeType = shiny ? 'Unregistered (Shiny/Legendary)' : 'Unregistered (Standard)';
     // `wanted` is already shaped as `CreatureRef[]` (see `handlePickPokemon` below), so no re-mapping.
@@ -211,6 +220,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       // itself (like `purified`) rather than inferred from the background, so it gets its own toggle.
       costume,
       pokeball,
+      sizeClass,
+      cp: cpResult.cp,
       willTravel,
       tradeTimeline,
     };
@@ -223,6 +234,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     specialBackground,
     costume,
     pokeball,
+    sizeClass,
+    cpResult,
     willTravel,
     tradeTimeline,
     knowsIv,
@@ -245,8 +258,6 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         seller: 'You',
         dist: USE_SUPABASE ? undefined : 0,
         pvp: 'NEW',
-        // Service-role only (migration …000100) — a freshly drafted listing has no size yet.
-        sizeClass: null,
         screenshots: uploads.map((u) => u.image.filename),
       },
     [draft, uploads]
@@ -333,7 +344,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   };
 
   const goToPreview = () => {
-    if (!selectedCreature) return;
+    if (!draft) return; // a creature AND a valid CP
     setStep('preview');
   };
 
@@ -577,6 +588,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           // Keyed by species so the picker's refusal notice never outlives the species it was about.
           <FormPicker key={selectedCreature.pokemonId} pokemonId={selectedCreature.pokemonId} formCode={formCode} onChange={handlePickForm} />
         )}
+        <CpSection cpText={cpText} onChangeCp={setCpText} />
         <AttributesCard
           shiny={shiny}
           onToggleShiny={() => setShiny((v) => !v)}
@@ -602,6 +614,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         <LogisticsSection
           pokeball={pokeball}
           onSelectPokeball={setPokeball}
+          sizeClass={sizeClass}
+          onSelectSize={setSizeClass}
           tradeTimeline={tradeTimeline}
           onSelectTimeline={setTradeTimeline}
         />
@@ -616,7 +630,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         />
         <WantedInReturn wanted={wanted} onAddWanted={openWantedPicker} onRemoveWanted={removeWanted} />
       </ScrollView>
-      <Footer onContinue={goToPreview} disabled={!selectedCreature} bottomInset={insets.bottom} />
+      <Footer onContinue={goToPreview} disabled={!draft} bottomInset={insets.bottom} />
       <PokemonPickerModal
         visible={pickerFor !== null}
         title={pickerFor === 'wanted' ? 'Add to Looking For' : 'Choose your Pokémon'}
@@ -687,9 +701,6 @@ function ProgressBar({ filled }: { filled: number }) {
     </View>
   );
 }
-
-/** dex label as `#<padded id>` — matches PokemonPickerModal's own `PokedexRow` formatting. */
-const dexLabel = (pokemonId: number) => `#${String(pokemonId).padStart(3, '0')}`;
 
 function CreatureSelector({
   selected,
@@ -1144,14 +1155,105 @@ function TimelinePicker({ timeline, onSelect }: { timeline: TradeTimeline; onSel
   );
 }
 
+/** Seller-declared size. "None" is a real choice (null), not an unset state: the segmented control always shows
+ *  one selected option. Modelled on `TimelinePicker`. */
+function SizePicker({ size, onSelect }: { size: PokemonSize | null; onSelect: (size: PokemonSize | null) => void }) {
+  const options: (PokemonSize | null)[] = [null, ...POKEMON_SIZES];
+  return (
+    <View>
+      <Text className="font-mono mb-1.5" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
+        SIZE (OPTIONAL)
+      </Text>
+      <View accessibilityRole="radiogroup" accessibilityLabel="Size" className="flex-row overflow-hidden rounded-[14px] border" style={{ borderColor: C.borderDefault }}>
+        {options.map((option, i) => {
+          const selected = option === size;
+          const label = option ?? 'None';
+          return (
+            <Pressable
+              key={label}
+              onPress={() => onSelect(option)}
+              accessibilityRole="radio"
+              accessibilityLabel={option ? `Size ${option}` : 'No size'}
+              accessibilityState={{ selected }}
+              className="flex-1 items-center justify-center py-2.5 active:opacity-80"
+              style={{
+                backgroundColor: selected ? C.gold : C.bgCard,
+                borderLeftWidth: i === 0 ? 0 : 1,
+                borderLeftColor: C.borderDefault,
+              }}
+            >
+              <Text className="font-display-semi" style={{ fontSize: 11, color: selected ? '#0a0a0f' : C.textMuted }}>
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text className="mt-1.5" style={{ fontSize: 12, lineHeight: 18, color: C.textDim }}>
+        Leave it as None and an appraisal screenshot can still tag the size automatically.
+      </Text>
+    </View>
+  );
+}
+
+/** Required Combat Power. Feedback is deliberately quiet while the field is empty and untouched (no nagging on
+ *  arrival), and appears as soon as something invalid is typed or the field is left empty after being focused. */
+function CpSection({ cpText, onChangeCp }: { cpText: string; onChangeCp: (value: string) => void }) {
+  const [touched, setTouched] = useState(false);
+  const result = parseCp(cpText);
+  const error = result.ok
+    ? null
+    : result.reason === 'empty'
+      ? touched
+        ? 'Enter your Pokémon’s CP.'
+        : null
+      : result.reason === 'not_a_number'
+        ? 'CP can only contain digits.'
+        : `CP must be between ${CP_MIN} and ${CP_MAX.toLocaleString('en-US')}.`;
+  return (
+    <View>
+      <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+        COMBAT POWER (CP)
+      </Text>
+      <TextInput
+        value={cpText}
+        onChangeText={onChangeCp}
+        onBlur={() => setTouched(true)}
+        keyboardType="number-pad"
+        maxLength={5}
+        placeholder="e.g. 2841"
+        placeholderTextColor={C.textDim}
+        accessibilityLabel="Combat power, required"
+        accessibilityHint={`A whole number from ${CP_MIN} to ${CP_MAX}`}
+        className="rounded-[14px] border px-4 py-3.5"
+        style={{
+          backgroundColor: C.bgCard,
+          borderColor: error ? C.danger : C.borderDefault,
+          color: C.textPrimary,
+          fontSize: 16,
+        }}
+      />
+      {error ? (
+        <Text accessibilityRole="alert" accessibilityLiveRegion="polite" className="mt-1.5" style={{ fontSize: 12, color: C.danger }}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function LogisticsSection({
   pokeball,
   onSelectPokeball,
+  sizeClass,
+  onSelectSize,
   tradeTimeline,
   onSelectTimeline,
 }: {
   pokeball: Pokeball | null;
   onSelectPokeball: (pokeball: Pokeball | null) => void;
+  sizeClass: PokemonSize | null;
+  onSelectSize: (size: PokemonSize | null) => void;
   tradeTimeline: TradeTimeline;
   onSelectTimeline: (timeline: TradeTimeline) => void;
 }) {
@@ -1163,10 +1265,7 @@ function LogisticsSection({
       <View className="gap-3">
         <PokeballPicker pokeball={pokeball} onSelect={onSelectPokeball} />
         <TimelinePicker timeline={tradeTimeline} onSelect={onSelectTimeline} />
-        {/* size_class is service-role only (constants/listing-attributes.ts) — no control here ever. */}
-        <Text style={{ fontSize: 12, lineHeight: 18, color: C.textDim }}>
-          XXL/XXS is added automatically when your appraisal proof verifies.
-        </Text>
+        <SizePicker size={sizeClass} onSelect={onSelectSize} />
       </View>
     </View>
   );

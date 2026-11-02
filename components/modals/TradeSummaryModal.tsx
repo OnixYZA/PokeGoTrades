@@ -8,10 +8,10 @@ import { isOfferLucky } from '@/components/chats/FormalOfferCard';
 import { Chip } from '@/components/ui/Chip';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { TypeBadge } from '@/components/ui/TypeBadge';
-import { TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
+import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
 import { FRIENDSHIP_LEVELS } from '@/constants/theme';
 import { TRADE_COST_MATRIX, type ChatMessage, type ChatRole, type CreatureRef, type FormalOffer, type Listing } from '@/data/types';
-import { creatureDisplayName, creatureFormLabel, fmtDust } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, fmtDust, formatCp } from '@/lib/format';
 import { offerAvailability, type OfferBlock } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
@@ -54,6 +54,9 @@ function listingPills(listing: Listing): Pill[] {
   if (form) pills.push({ label: form });
   if (listing.purified) pills.push({ label: 'Purified' });
   if (listing.costume) pills.push({ label: 'Costume' });
+  if (listing.cp != null) pills.push({ label: formatCp(listing.cp) });
+  if (listing.sizeClass) pills.push({ label: `Size ${listing.sizeClass}` });
+  if (listing.pokeball) pills.push({ label: POKEBALL_LABELS[listing.pokeball] });
   if (listing.iv) pills.push({ label: `IV ${listing.iv}` });
   if (listing.pvp) pills.push({ label: `PvP ${listing.pvp}` });
   if (listing.year) pills.push({ label: `Caught ${listing.year}` });

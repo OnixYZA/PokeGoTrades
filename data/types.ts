@@ -85,8 +85,11 @@ export interface Listing extends CreatureRef {
   /** Event / costume variant. */
   costume: boolean;
   pokeball: Pokeball | null;
-  /** Service-role only (migration …000100_listing_attributes) — the seller never sets this. Null
-   *  until a future OCR pass reads it off an appraisal screenshot. */
+  /** Combat Power the seller declares (10..10000). Required when creating a listing; absent/null only on
+   *  listings that predate the column (migration …20261103000200). */
+  cp?: number | null;
+  /** Seller-declared in-game size label (migration …20261103000200 reversed the old service-role-only rule);
+   *  the OCR pass only fills it while null. */
   sizeClass: PokemonSize | null;
   willTravel: boolean;
   tradeTimeline: TradeTimeline;

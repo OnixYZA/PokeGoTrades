@@ -28,7 +28,7 @@ import {
   type LockConfirmations,
   type LockVersion,
 } from './lock-state';
-import { cycleFilter, type FilterKey, type FilterState } from './listing-filters';
+import { cycleFilter, setFilterMode, type FilterKey, type FilterMode, type FilterState } from './listing-filters';
 import { offerAvailability } from './offer-state';
 
 // The lock rules live in ./lock-state so they can be tested without the Expo/Supabase module graph.
@@ -214,7 +214,13 @@ interface TradeState {
    *  Not persisted — a fresh app open starts with every chip neutral. */
   listingFilters: FilterState;
   cycleListingFilter: (key: FilterKey) => void;
+  /** Sets one chip directly to include / exclude / neutral (`'none'`); idempotent, unlike the cycle. */
+  setListingFilter: (key: FilterKey, mode: FilterMode | 'none') => void;
   clearListingFilters: () => void;
+  /** Feed species filter set by the search: only listings of this `pokemonId` (all forms). Not persisted;
+   *  `clearListingFilters` resets it too. */
+  searchPokemonId: number | null;
+  setSearchPokemonId: (id: number | null) => void;
 
   // ——— listings ———
   /** Appends a fully-formed listing — including its `screenshots` (multi-image proof) and
@@ -517,7 +523,10 @@ export const useTradeStore = create<TradeState>((set, get) => {
     setFriendship: (level) => set({ friendship: level }),
     listingFilters: {},
     cycleListingFilter: (key) => set((state) => ({ listingFilters: cycleFilter(state.listingFilters, key) })),
-    clearListingFilters: () => set({ listingFilters: {} }),
+    setListingFilter: (key, mode) => set((state) => ({ listingFilters: setFilterMode(state.listingFilters, key, mode) })),
+    clearListingFilters: () => set({ listingFilters: {}, searchPokemonId: null }),
+    searchPokemonId: null,
+    setSearchPokemonId: (id) => set({ searchPokemonId: id }),
 
     addListing: (listing) => set((state) => ({ listings: { [listing.id]: listing, ...state.listings } })),
     upsertListings: (incoming) => set((state) => ({ listings: { ...state.listings, ...byId(incoming) } })),

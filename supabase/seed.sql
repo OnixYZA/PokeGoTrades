@@ -146,6 +146,15 @@ insert into public.listings (
 update public.listings set costume  = true where id = 'b0000000-0000-4000-8000-000000000002';
 update public.listings set purified = true where id in ('b0000000-0000-4000-8000-000000000004',
                                                          'b0000000-0000-4000-8000-000000000006');
+-- Combat Power (data/listings.ts carries the same values; data/listings.test.ts fails if they drift). Plausible
+-- level-40-ish GO values for each species, not exact calculator output. `cp` freezes once a chat exists
+-- (guard_listing_update), so these run here, before the c1-c5 chats are inserted below.
+update public.listings set cp = 3250 where id = 'b0000000-0000-4000-8000-000000000001';
+update public.listings set cp = 4698 where id = 'b0000000-0000-4000-8000-000000000002';
+update public.listings set cp = 3980 where id = 'b0000000-0000-4000-8000-000000000003';
+update public.listings set cp = 3640 where id = 'b0000000-0000-4000-8000-000000000004';
+update public.listings set cp = 3798 where id = 'b0000000-0000-4000-8000-000000000005';
+update public.listings set cp = 3602 where id = 'b0000000-0000-4000-8000-000000000006';
 -- l5's "Frostmoves" was never a form, so it cannot be form_code; it is the seller's own remark (data/listings.ts
 -- carries it as `notes` too). `notes` is outside guard_listing_update's frozen columns, so order does not matter.
 update public.listings set notes = 'Frostmoves' where id = 'b0000000-0000-4000-8000-000000000005';

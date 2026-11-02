@@ -14,7 +14,7 @@
 -- 'VoidQuill', friend code '100000000007') attempts to steal AzureRift's (a…0002) handle 'AzureRift' for the
 -- handle_taken path.
 begin;
-select plan(18);
+select plan(25);
 
 create function pg_temp.act_as(p_uid uuid, p_anonymous boolean default false) returns void language sql as $$
   select set_config('request.jwt.claims',
@@ -141,6 +141,31 @@ select is(
   (select ocr_extracted from public.profile_proofs where id = 'f0000000-0000-4000-8000-000000000005'),
   jsonb_build_object('reason', 'handle_taken', 'handle', 'AzureRift', 'friendCode', '246813579024'),
   'recording the reason and both attempted values, for the app''s manual fallback form');
+
+-- ——— no accidental default grants (migration ...20261103000100) ———
+-- TRUNCATE ignores RLS, so neither client role may hold it; and with no UPDATE/DELETE policy AND no privilege,
+-- a trainer's write is a loud 42501, not a silent 0-row no-op.
+select ok(not has_table_privilege('anon', 'public.profile_proofs', 'TRUNCATE'),
+  'anon holds no TRUNCATE on profile_proofs');
+select ok(not has_table_privilege('authenticated', 'public.profile_proofs', 'TRUNCATE'),
+  'authenticated holds no TRUNCATE on profile_proofs');
+select ok(not has_any_column_privilege('authenticated', 'public.profile_proofs', 'UPDATE'),
+  'authenticated holds no UPDATE on profile_proofs');
+select ok(not has_table_privilege('authenticated', 'public.profile_proofs', 'DELETE'),
+  'authenticated holds no DELETE on profile_proofs');
+select ok(not has_any_column_privilege('anon', 'public.profile_proofs', 'SELECT'),
+  'anon holds no SELECT on profile_proofs');
+
+select pg_temp.act_as('a0000000-0000-4000-8000-000000000003');
+set local role authenticated;
+select throws_ok(
+  $$ update public.profile_proofs set ocr_status = 'verified'
+      where id = 'f0000000-0000-4000-8000-000000000002' $$,
+  '42501', null, 'authenticated cannot update a profile proof, even its own');
+select throws_ok(
+  $$ delete from public.profile_proofs where id = 'f0000000-0000-4000-8000-000000000002' $$,
+  '42501', null, 'nor delete one');
+reset role;
 
 select * from finish();
 rollback;

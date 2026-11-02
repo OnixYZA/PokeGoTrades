@@ -33,6 +33,14 @@ describe('mock listings', () => {
     expect(creatureFormLabel(byId.get('l2')!)).toBe('Armored');
   });
 
+  it('give every listing an integer CP inside listings_cp_range (10..10000)', () => {
+    for (const listing of listings) {
+      expect(Number.isInteger(listing.cp), `${listing.id} cp`).toBe(true);
+      expect(listing.cp!, `${listing.id} cp`).toBeGreaterThanOrEqual(10);
+      expect(listing.cp!, `${listing.id} cp`).toBeLessThanOrEqual(10000);
+    }
+  });
+
   // The rule is `isPokemonUntradable`, the client copy of `public.is_creature_untradable`. The seeded database
   // refuses an untradable listing or wanted creature (listings_tradable_guard) and an untradable offer
   // (chat_messages_tradable_offer), so a mock that names one is a mock the database cannot reproduce.
@@ -100,5 +108,13 @@ describe('mock listings vs supabase/seed.sql', () => {
       return { id, pokemonId: listing.pokemonId, formCode: listing.formCode ?? null, year: listing.year };
     });
     expect(rows).toEqual(mock);
+  });
+
+  it('seeds the same CP as the mock, listing by listing (cp is set by update statements, before any chat)', () => {
+    const seeded = [...seed.matchAll(/update public\.listings set cp = (\d+) where id = 'b0000000-0000-4000-8000-00000000000(\d)';/g)].map(
+      ([, cp, n]) => ({ id: `l${n}`, cp: Number(cp) }),
+    );
+    expect(seeded.map((row) => row.id)).toEqual(listings.map((listing) => listing.id));
+    expect(seeded).toEqual(listings.map((listing) => ({ id: listing.id, cp: listing.cp })));
   });
 });

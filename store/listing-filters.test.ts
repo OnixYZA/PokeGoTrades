@@ -9,7 +9,7 @@ import type { Listing } from '@/data/types';
 
 import { FILTER_ATTRIBUTES, TYPE_CHIP_ORDER } from '../constants/listing-attributes';
 import { POKEMON_TYPES } from '../constants/pokedex';
-import { compileFilter, cycleFilter, filterKey, matchesFilter, type FilterKey, type FilterState } from './listing-filters';
+import { compileFilter, cycleFilter, filterKey, matchesFilter, setFilterMode, type FilterKey, type FilterState } from './listing-filters';
 
 function makeListing(partial: Partial<Listing> = {}): Listing {
   return {
@@ -54,6 +54,26 @@ describe('cycleFilter', () => {
   it('does not disturb other chips', () => {
     const state = cycleFilter({ lucky: 'include' }, 'shiny');
     expect(state).toEqual({ lucky: 'include', shiny: 'include' });
+  });
+});
+
+describe('setFilterMode', () => {
+  it('sets include from neutral', () => {
+    expect(setFilterMode({}, 'type:Fire', 'include')).toEqual({ 'type:Fire': 'include' });
+  });
+
+  it('sets include from exclude', () => {
+    expect(setFilterMode({ 'type:Fire': 'exclude' }, 'type:Fire', 'include')).toEqual({ 'type:Fire': 'include' });
+  });
+
+  it('is idempotent when already included (does not toggle off)', () => {
+    expect(setFilterMode({ 'type:Fire': 'include' }, 'type:Fire', 'include')).toEqual({ 'type:Fire': 'include' });
+  });
+
+  it("removes the key for 'none' and leaves other chips alone", () => {
+    const out = setFilterMode({ 'type:Fire': 'include', lucky: 'exclude' }, 'type:Fire', 'none');
+    expect(out).toEqual({ lucky: 'exclude' });
+    expect('type:Fire' in out).toBe(false);
   });
 });
 
@@ -219,7 +239,7 @@ describe('compileFilter / matchesFilter — types', () => {
 describe('compileFilter — empty state', () => {
   it('compiles to an empty spec that matches everything', () => {
     const spec = compileFilter({});
-    expect(spec).toEqual({ flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {}, typesAny: [], typesNone: [] });
+    expect(spec).toEqual({ flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {}, typesAny: [], typesNone: [], pokemonId: null });
     expect(matchesFilter(makeListing(), spec)).toBe(true);
     expect(matchesFilter(makeListing({ shiny: true, lucky: true, tags: ['Level 1'] }), spec)).toBe(true);
   });
@@ -263,5 +283,35 @@ describe('filterKey', () => {
     const b = filterKey(compileFilter({ shiny: 'exclude' }));
     const c = filterKey(compileFilter({}));
     expect(new Set([a, b, c]).size).toBe(3);
+  });
+});
+
+describe('species filter (pokemonId)', () => {
+  it('compileFilter defaults to null and carries the id', () => {
+    expect(compileFilter({}).pokemonId).toBeNull();
+    expect(compileFilter({}, 246).pokemonId).toBe(246);
+  });
+
+  it('matchesFilter rejects other species and matches every form of the species', () => {
+    const spec = compileFilter({}, 246);
+    expect(matchesFilter(makeListing({ pokemonId: 246 }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ pokemonId: 246, formCode: 'ALOLA' }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ pokemonId: 247 }), spec)).toBe(false);
+    expect(matchesFilter(makeListing({ pokemonId: 247 }), compileFilter({}))).toBe(true);
+  });
+
+  it('combines with other chips', () => {
+    const state: FilterState = { shiny: 'include' };
+    const spec = compileFilter(state, 246);
+    expect(matchesFilter(makeListing({ pokemonId: 246, shiny: true }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ pokemonId: 246, shiny: false }), spec)).toBe(false);
+    expect(matchesFilter(makeListing({ pokemonId: 247, shiny: true }), spec)).toBe(false);
+  });
+
+  it('filterKey changes with pokemonId and is stable otherwise', () => {
+    expect(filterKey(compileFilter({}, 246))).not.toBe(filterKey(compileFilter({})));
+    expect(filterKey(compileFilter({}, 246))).not.toBe(filterKey(compileFilter({}, 247)));
+    expect(filterKey(compileFilter({}, 246))).toBe(filterKey(compileFilter({}, 246)));
+    expect(filterKey(compileFilter({}))).toBe(filterKey(compileFilter({}, null)));
   });
 });

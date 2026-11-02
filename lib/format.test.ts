@@ -18,8 +18,13 @@ import {
   creatureForm,
   creatureFormLabel,
   creatureFullName,
+  CP_MAX,
+  CP_MIN,
+  formatCp,
+  parseCp,
   spriteAltText,
   describeTypes,
+  dexLabel,
   fmtDust,
   formCodeLabel,
   speciesName,
@@ -524,5 +529,55 @@ describe('spriteAltText', () => {
   it('falls back to the stored name, then the dex number, for an id outside the dex', () => {
     expect(spriteAltText({ pokemonId: 999_999, name: 'Mystery' })).toBe('Mystery sprite');
     expect(spriteAltText({ pokemonId: 999_999 })).toBe('Pokémon #999999 sprite');
+  });
+});
+
+describe('parseCp', () => {
+  it('accepts whole numbers in range, bounds included', () => {
+    expect(parseCp('2841')).toEqual({ ok: true, cp: 2841 });
+    expect(parseCp(String(CP_MIN))).toEqual({ ok: true, cp: 10 });
+    expect(parseCp(String(CP_MAX))).toEqual({ ok: true, cp: 10_000 });
+    expect(parseCp(' 500 ')).toEqual({ ok: true, cp: 500 });
+  });
+
+  it('reports empty input', () => {
+    expect(parseCp('')).toEqual({ ok: false, reason: 'empty' });
+    expect(parseCp('   ')).toEqual({ ok: false, reason: 'empty' });
+  });
+
+  it('rejects anything that is not plain digits', () => {
+    for (const bad of ['abc', '12.5', '1e3', '-50', '+50', '2,841', '1 000', '０５００']) {
+      expect(parseCp(bad)).toEqual({ ok: false, reason: 'not_a_number' });
+    }
+  });
+
+  it('rejects out-of-range numbers', () => {
+    for (const bad of ['0', '9', '10001', '99999']) {
+      expect(parseCp(bad)).toEqual({ ok: false, reason: 'out_of_range' });
+    }
+  });
+
+  it('treats leading zeros as the number they spell', () => {
+    expect(parseCp('0500')).toEqual({ ok: true, cp: 500 });
+    expect(parseCp('0000')).toEqual({ ok: false, reason: 'out_of_range' });
+  });
+});
+
+describe('formatCp', () => {
+  it('prefixes CP and groups thousands deterministically', () => {
+    expect(formatCp(2841)).toBe('CP 2,841');
+    expect(formatCp(10_000)).toBe('CP 10,000');
+    expect(formatCp(999)).toBe('CP 999');
+    expect(formatCp(10)).toBe('CP 10');
+    expect(formatCp(1000)).toBe('CP 1,000');
+  });
+});
+
+describe('dexLabel', () => {
+  it('zero-pads to three digits and leaves longer numbers alone', () => {
+    expect(dexLabel(1)).toBe('#001');
+    expect(dexLabel(25)).toBe('#025');
+    expect(dexLabel(150)).toBe('#150');
+    expect(dexLabel(1025)).toBe('#1025');
   });
 });

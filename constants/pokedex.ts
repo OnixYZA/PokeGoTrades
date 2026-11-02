@@ -310,10 +310,43 @@ function numericQuery(raw: string): string | null {
 
 const DEFAULT_SEARCH_LIMIT = 30;
 
+/** Shortest prefix of a type name that counts as naming it ("drag" -> Dragon, "fi" is too ambiguous). */
+const MIN_TYPE_PREFIX = 3;
+
+/**
+ * The type a search query names: an exact (case-insensitive) type name, or a prefix of at least 3
+ * characters ("drag" -> Dragon). `null` for anything else. The UI uses it to offer "all Dragon-type
+ * listings"; `searchPokedex` uses the same rule for its type ranks.
+ */
+export function matchPokemonType(query: string): PokemonType | null {
+  const key = searchKey(query);
+  if (key.length === 0) return null;
+  const exact = POKEMON_TYPES.find((type) => type.toLowerCase() === key);
+  if (exact) return exact;
+  if (key.length < MIN_TYPE_PREFIX) return null;
+  return POKEMON_TYPES.find((type) => type.toLowerCase().startsWith(key)) ?? null;
+}
+
+/** Species with this type in their default typing OR in any form's typing (see `typeMembership`). */
+const TYPE_SPECIES_IDS = new Map<PokemonType, ReadonlySet<number>>();
+function speciesWithType(type: PokemonType): ReadonlySet<number> {
+  let ids = TYPE_SPECIES_IDS.get(type);
+  if (!ids) {
+    const m = typeMembership(type);
+    ids = new Set([...m.allForms, ...m.exceptForms.map((e) => e.pokemonId), ...m.onlyForms.map((e) => e.pokemonId)]);
+    TYPE_SPECIES_IDS.set(type, ids);
+  }
+  return ids;
+}
+
 /**
  * Ranked search over the whole dex: numeric queries match the dex number (exact, then prefix);
  * text queries match the name (exact, then prefix, then anywhere), all case/diacritic/punctuation
- * -insensitive. An empty query returns the start of the dex, so callers don't need a separate branch
+ * -insensitive; a query naming a type ("fire", or a 3+ char prefix like "drag") then matches every species
+ * with that type in its default typing or any form's (ranks 5 exact / 6 prefix, below every name rank). Ties
+ * within a rank sort by dex number. `limit` caps the TOTAL result, so a broad type ("Water", 150+ species)
+ * is truncated to its first `limit` by dex number; callers wanting the full set should filter by type
+ * (`typeMembership`) rather than list search results. An empty query returns the start of the dex, so callers don't need a separate branch
  * for "nothing typed yet" (see PokemonPickerModal's empty state).
  */
 export function searchPokedex(query: string, limit = DEFAULT_SEARCH_LIMIT): PokedexEntry[] {
@@ -322,6 +355,10 @@ export function searchPokedex(query: string, limit = DEFAULT_SEARCH_LIMIT): Poke
 
   const digits = numericQuery(trimmed);
   const key = searchKey(trimmed);
+
+  const namedType = matchPokemonType(trimmed);
+  const typeIds = namedType ? speciesWithType(namedType) : null;
+  const typeRank = namedType && namedType.toLowerCase() === key ? 5 : 6;
 
   const ranked: { entry: PokedexEntry; rank: number }[] = [];
   for (const entry of POKEDEX) {
@@ -337,6 +374,7 @@ export function searchPokedex(query: string, limit = DEFAULT_SEARCH_LIMIT): Poke
       else if (nameKey.startsWith(key)) rank = Math.min(rank, 3);
       else if (nameKey.includes(key)) rank = Math.min(rank, 4);
     }
+    if (typeIds?.has(entry.pokemonId)) rank = Math.min(rank, typeRank);
     if (rank !== Infinity) ranked.push({ entry, rank });
   }
 

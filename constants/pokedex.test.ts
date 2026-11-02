@@ -20,6 +20,7 @@ import {
   isPokemonUntradable,
   POKEDEX,
   POKEMON_TYPES,
+  matchPokemonType,
   searchPokedex,
   TYPE_HUE,
   typeMembership,
@@ -797,5 +798,87 @@ describe('creatureHue', () => {
       }
     }
     expect(retinted).toBeGreaterThan(0);
+  });
+});
+
+describe('searchPokedex — dex number forms', () => {
+  it.each(['150', '#0150', '0150', ' #150 '])('"%s" finds Mewtwo first', (q) => {
+    expect(searchPokedex(q)[0]?.pokemonId).toBe(150);
+  });
+  it('ranks an exact dex number before prefix matches', () => {
+    expect(searchPokedex('15', 5).map((r) => r.pokemonId).slice(0, 2)).toEqual([15, 150]);
+  });
+});
+
+describe('searchPokedex — names', () => {
+  it('finds by full name and by prefix', () => {
+    expect(searchPokedex('Mewtwo')[0]?.pokemonId).toBe(150);
+    expect(searchPokedex('ray').map((r) => r.name)).toContain('Rayquaza');
+  });
+});
+
+describe('searchPokedex — type matching', () => {
+  const ids = (q: string) => searchPokedex(q, 2000).map((r) => r.pokemonId);
+
+  it('matches species by exact type name, case-insensitively', () => {
+    for (const [q, id] of [['Fire', 4], ['Dragon', 149], ['Fairy', 35], ['fire', 6]] as const) {
+      expect(ids(q)).toContain(id);
+    }
+  });
+  it('matches by a 3+ char prefix', () => {
+    expect(ids('drag')).toContain(149);
+    expect(new Set(ids('drag'))).toEqual(new Set(ids('dragon')));
+  });
+  it('finds a dual-type species under its second type', () => {
+    expect(ids('Flying')).toContain(6); // Charizard
+  });
+  it('finds form-only members', () => {
+    expect(ids('Fire')).toContain(479); // Rotom (HEAT)
+    expect(ids('Ice')).toContain(37); // Vulpix (ALOLA)
+  });
+  it('agrees with typeMembership', () => {
+    const m = typeMembership('Dragon');
+    const expected = new Set([...m.allForms, ...m.exceptForms.map((e) => e.pokemonId), ...m.onlyForms.map((e) => e.pokemonId)]);
+    expect(new Set(ids('Dragon'))).toEqual(expected);
+  });
+  it('orders by rank, then pokemonId', () => {
+    // "fire" also hits names containing it (rank 2-4); those lead, and each rank block ascends by id.
+    const results = searchPokedex('Fire', 2000);
+    const nameHits = results.filter((r) => r.name.toLowerCase().includes('fire')).map((r) => r.pokemonId);
+    const typeOnly = results.filter((r) => !r.name.toLowerCase().includes('fire')).map((r) => r.pokemonId);
+    expect(results.slice(0, nameHits.length).map((r) => r.pokemonId)).toEqual(nameHits);
+    expect(typeOnly).toEqual([...typeOnly].sort((a, b) => a - b));
+  });
+  it('ranks names above types (prefix "fai" = Fairy type, name hits first)', () => {
+    const results = searchPokedex('fai', 2000);
+    const firstTypeOnly = results.findIndex((r) => !r.name.toLowerCase().includes('fai'));
+    const lastNameHit = results.map((r) => r.name.toLowerCase().includes('fai')).lastIndexOf(true);
+    if (firstTypeOnly !== -1) expect(lastNameHit).toBeLessThan(firstTypeOnly);
+  });
+  it('limit caps the total, taking the lowest dex numbers of a type', () => {
+    const r = searchPokedex('Water', 10).map((x) => x.pokemonId);
+    expect(r).toHaveLength(10);
+    expect(r).toEqual([...r].sort((a, b) => a - b));
+  });
+  it('does not type-match numeric queries', () => {
+    expect(searchPokedex('150', 50).every((r) => String(r.pokemonId).startsWith('150'))).toBe(true);
+  });
+});
+
+describe('matchPokemonType', () => {
+  it('matches exact names case-insensitively', () => {
+    expect(matchPokemonType('Dragon')).toBe('Dragon');
+    expect(matchPokemonType(' fire ')).toBe('Fire');
+  });
+  it('matches a prefix of 3+ chars', () => {
+    expect(matchPokemonType('drag')).toBe('Dragon');
+    expect(matchPokemonType('fai')).toBe('Fairy');
+  });
+  it('rejects too-short prefixes and non-types', () => {
+    expect(matchPokemonType('dr')).toBeNull();
+    expect(matchPokemonType('f')).toBeNull();
+    expect(matchPokemonType('')).toBeNull();
+    expect(matchPokemonType('Mewtwo')).toBeNull();
+    expect(matchPokemonType('150')).toBeNull();
   });
 });

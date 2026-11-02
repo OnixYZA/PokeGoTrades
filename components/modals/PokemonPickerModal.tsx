@@ -21,7 +21,7 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { hueBadgeStyle } from '@/constants/theme';
 import { creatureHue, formatTypes, POKEDEX, searchPokedex, typesOf, type PokedexEntry } from '@/constants/pokedex';
-import { creatureDisplayName, creatureFullName, describeTypes } from '@/lib/format';
+import { creatureDisplayName, creatureFullName, describeTypes, dexLabel } from '@/lib/format';
 import {
   addedFormsOf,
   buildPick,
@@ -393,7 +393,7 @@ function PokedexRow({
   hasForms: boolean;
   onPress: () => void;
 }) {
-  const dex = `#${String(entry.pokemonId).padStart(3, '0')}`;
+  const dex = dexLabel(entry.pokemonId);
   const displayName = creatureDisplayName({ pokemonId: entry.pokemonId, shiny });
   const untradable = state === 'untradable';
   const added = state === 'added';
@@ -509,7 +509,7 @@ function FormStep({
   const fullName = creatureFullName({ pokemonId, shiny, formCode });
   const types = typesOf({ pokemonId, formCode }) ?? entry.types;
   const hue = creatureHue({ pokemonId, formCode, hue: entry.hue });
-  const dex = `#${String(pokemonId).padStart(3, '0')}`;
+  const dex = dexLabel(pokemonId);
   return (
     <View className="flex-1">
       <ScrollView

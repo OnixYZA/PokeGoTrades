@@ -124,7 +124,7 @@ export function listingErrorMessage(error: unknown): string {
  * reads 'NEW' live) in favor of the `pokemon_market_demand` view, fetched separately in `lib/use-feed.ts`.
  */
 const LISTING_COLUMNS =
-  'id, seller_id, status, name, pokemon_id, form_code, costume_code, catch_year, lucky, shiny, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
+  'id, seller_id, status, name, pokemon_id, form_code, costume_code, catch_year, lucky, shiny, cp, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
 
 function selectListings() {
   return supabase.from('listings').select(LISTING_COLUMNS);
@@ -173,6 +173,7 @@ export function toListing(row: ListingRow): Listing {
     purified: row.purified,
     costume: row.costume,
     pokeball: row.pokeball,
+    ...(row.cp !== null ? { cp: row.cp } : {}),
     sizeClass: row.size_class,
     willTravel: row.will_travel,
     tradeTimeline: row.trade_timeline,
@@ -205,6 +206,10 @@ interface DynamicColumnFilter {
  */
 export function applyFilterSpec(query: ListingsQuery, spec: FilterSpec): ListingsQuery {
   const dynamic = query as unknown as DynamicColumnFilter;
+
+  // Species filter: `pokemon_id` alone, so every form of the species matches (twin of matchesFilter's
+  // `listing.pokemonId !== spec.pokemonId` check, which also ignores `formCode`).
+  if (spec.pokemonId !== null) query.eq('pokemon_id', spec.pokemonId);
 
   for (const field of Object.keys(spec.flags) as FilterFlagField[]) {
     dynamic.eq(FLAG_DB_COLUMNS[field], spec.flags[field]!);
@@ -268,9 +273,9 @@ export async function fetchListingsByIds(ids: string[]): Promise<Listing[]> {
  * (migration …000200_lock_lucky_to_service_role). PostgREST turns every key in the body into a column,
  * so sending it here — even as `false` — would now fail the insert with 42501. It is absent on purpose.
  *
- * `sizeClass` is likewise absent on purpose: it is service-role only (migration …000100's comment on
- * `listings.size_class`), so a trainer never supplies it — it is always `null` until a future OCR pass
- * fills it in server-side.
+ * `cp` (required) and `sizeClass` (a size label, or `null` for none) are seller-declared (migration
+ * …20261103000200 grants both and reverses …000100's service-role-only rule for `size_class`). The OCR pass
+ * may still fill `size_class`, but only while it is null.
  *
  * `formCode` is the listing's form and the ONLY way to state one (`CreatureRef.formCode`: omitted or `null` is
  * the species' default form). There is no free-text `form` input, and the client never reads or writes the
@@ -298,7 +303,10 @@ export type NewListingInput = Pick<
   | 'pokeball'
   | 'willTravel'
   | 'tradeTimeline'
+  | 'sizeClass'
 > & {
+  /** Combat Power, 10..10000 (`listings_cp_range`). */
+  cp: number;
   bg: Exclude<BackgroundHint, 'shadow'>;
   tags: ListingTag[];
   notes?: string;
@@ -318,6 +326,8 @@ function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
     pokemon_id: input.pokemonId,
     form_code: input.formCode ?? null,
     catch_year: input.year,
+    cp: input.cp,
+    size_class: input.sizeClass,
     shiny: input.shiny,
     hue: input.hue,
     accent: input.accent,

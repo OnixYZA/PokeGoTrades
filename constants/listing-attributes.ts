@@ -176,9 +176,9 @@ type Expect<T extends true> = T;
 type _TypeChipOrderIsComplete = Expect<[PokemonType] extends [(typeof TYPE_CHIP_ORDER)[number]] ? true : false>;
 
 /**
- * Every filter chip the feed can show, in display order. `size_class` deliberately only surfaces its
- * two extremes (XXS, XXL) — the mid sizes are not interesting to filter on — while `pokeball` and
- * `trade_timeline` surface every value, and the 18 Pokémon types follow in `TYPE_CHIP_ORDER`. No Shadow entry exists anywhere in this file: Shadow Pokémon
+ * Every filter chip the feed can show, in display order. `size_class` surfaces every
+ * size now that sellers declare it (XXS, XS, XL, XXL, in `POKEMON_SIZES` order), and so do `pokeball` and
+ * `trade_timeline` for every value; then the 18 Pokémon types follow in `TYPE_CHIP_ORDER`. No Shadow entry exists anywhere in this file: Shadow Pokémon
  * are untradable and must never appear as a listing attribute or filter (AGENTS.md).
  */
 export const FILTER_ATTRIBUTES = [
@@ -188,8 +188,7 @@ export const FILTER_ATTRIBUTES = [
   flagAttribute('costume', 'Costume'),
   flagAttribute('willTravel', 'Will Travel'),
 
-  enumAttribute('sizeClass', 'XXS', 'XXS', 'Size'),
-  enumAttribute('sizeClass', 'XXL', 'XXL', 'Size'),
+  ...POKEMON_SIZES.map((size) => enumAttribute('sizeClass', size, size, 'Size')),
 
   ...POKEBALLS.map((ball) => enumAttribute('pokeball', ball, POKEBALL_LABELS[ball], 'Poké Ball')),
 

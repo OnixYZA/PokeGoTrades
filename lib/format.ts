@@ -11,6 +11,38 @@ export function fmtDust(n: number): string {
   return String(n);
 }
 
+/** Combat Power bounds a listing may declare. 10 is the game's floor for any Pokémon; 10,000 is a generous
+ *  ceiling above every real CP. The server enforces the same range (a CHECK on `listings.cp`); this is the
+ *  one client-side copy, so the form, its feedback and any later validation can't drift apart. */
+export const CP_MIN = 10;
+export const CP_MAX = 10_000;
+
+export type CpParse = { ok: true; cp: number } | { ok: false; reason: 'empty' | 'not_a_number' | 'out_of_range' };
+
+/** The one CP validation rule: digits only (no sign, decimal point, separator or exponent), a whole number in
+ *  `CP_MIN..CP_MAX`. Surrounding whitespace is ignored; anything else is `not_a_number`, so "12.5", "1e3",
+ *  "2,841" and "-5" can never reach the draft. */
+export function parseCp(text: string): CpParse {
+  const t = text.trim();
+  if (t === '') return { ok: false, reason: 'empty' };
+  if (!/^\d+$/.test(t)) return { ok: false, reason: 'not_a_number' };
+  const cp = Number(t);
+  if (cp < CP_MIN || cp > CP_MAX) return { ok: false, reason: 'out_of_range' };
+  return { ok: true, cp };
+}
+
+/** "CP 2,841". The thousands separator is inserted by hand: `toLocaleString` differs between Hermes, JSC and
+ *  browsers, and a CP must read the same on every screen. */
+export function formatCp(cp: number): string {
+  return `CP ${String(Math.trunc(cp)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+}
+
+/** The national dex number as shown in lists and pills: `#150`, `#025`, `#1025` (zero-padded to three digits).
+ *  The one place that format is decided — the pickers, Create Listing and the feed's search pill all call it. */
+export function dexLabel(pokemonId: number): string {
+  return `#${String(pokemonId).padStart(3, '0')}`;
+}
+
 /** What `speciesName` accepts: the creature's identity (`pokemonId`, required) and, optionally, whatever
  *  name was stored beside it. Structural, so a `CreatureRef`, a `Listing`, a `FormalOffer`, a `PokedexEntry`
  *  or an ad-hoc literal all fit. */

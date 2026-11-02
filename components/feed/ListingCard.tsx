@@ -13,7 +13,7 @@ import { TypeBadge } from '@/components/ui/TypeBadge';
 import { creatureHue } from '@/constants/pokedex';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { Listing } from '@/data/types';
-import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, formatCp } from '@/lib/format';
 
 /** At most this many attribute/tag badges render before the row collapses the rest into "+N" — keeps
  *  a listing with every attribute set (and a full 5 tags) from overflowing a 360pt-wide card. */
@@ -26,9 +26,9 @@ function attributeBadges(listing: Listing): { key: string; label: string }[] {
   const badges: { key: string; label: string }[] = [];
   if (listing.purified) badges.push({ key: 'purified', label: 'Purified' });
   if (listing.costume) badges.push({ key: 'costume', label: 'Costume' });
-  // Service-role only, set once an appraisal proof verifies it (constants/listing-attributes.ts) — the
-  // "✓" marks it as OCR-confirmed rather than a seller's own (unverifiable) claim.
-  if (listing.sizeClass) badges.push({ key: 'size', label: `${listing.sizeClass} ✓` });
+  // No "✓": since migration 20261103000200 a seller may declare the size themselves, and nothing records
+  // whether a given size was declared or read off an appraisal proof, so a check mark would claim more than we know.
+  if (listing.sizeClass) badges.push({ key: 'size', label: listing.sizeClass });
   for (const tag of listing.tags) badges.push({ key: `tag:${tag}`, label: tag });
   return badges;
 }
@@ -47,6 +47,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
       <Pressable
         onPress={() => router.push(`/listing/${listing.id}`)}
         accessibilityRole="button"
+        accessibilityLabel={[creatureDisplayName(listing), listing.cp != null ? formatCp(listing.cp) : null].filter(Boolean).join(', ')}
         accessibilityHint="View listing details"
         style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 }}
       />
@@ -77,9 +78,16 @@ export function ListingCard({ listing }: { listing: Listing }) {
         <TypeBadge creature={listing} size="sm" />
         {/* The form is the structured `formCode`, labelled by `creatureFormLabel`, and absent for the default form:
          *  joining only the parts that exist means no form never leaves a dangling "· 2024". */}
-        <Text className="font-mono text-text-subtle" style={{ fontSize: 12, pointerEvents: 'none' }}>
+        <Text numberOfLines={1} className="font-mono text-text-subtle" style={{ fontSize: 12, pointerEvents: 'none' }}>
           {[creatureFormLabel(listing), String(listing.year)].filter(Boolean).join(' · ')}
         </Text>
+        {/* CP gets its own line, in the primary color, so it reads as a headline stat; absent for a listing
+         *  that predates the field (`cp` null), where nothing renders rather than "CP null". */}
+        {listing.cp != null && (
+          <Text numberOfLines={1} className="font-display-semi text-text-primary" style={{ fontSize: 13, pointerEvents: 'none' }}>
+            {formatCp(listing.cp)}
+          </Text>
+        )}
 
         <View className="mt-0.5 flex-row flex-wrap items-center gap-1.5" style={{ pointerEvents: 'none' }}>
           <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />

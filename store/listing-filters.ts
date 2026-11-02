@@ -56,6 +56,10 @@ export interface FilterSpec {
    *  known typing (an id outside the dex) is never dropped: like a NULL enum value, "no type" is not an
    *  excluded type. */
   typesNone: PokemonType[];
+  /** Species filter (the feed search): when set, only listings of this `pokemonId` match, in ALL forms
+   *  (regional, costume, ... — `formCode` is deliberately not compared; both engines filter on the
+   *  `pokemon_id` column alone). `null` = no constraint. */
+  pokemonId: number | null;
 }
 
 const CYCLE_NEXT: Record<'none' | FilterMode, FilterMode | 'none'> = {
@@ -72,8 +76,16 @@ export function cycleFilter(state: FilterState, key: FilterKey): FilterState {
   return next === 'none' ? rest : { ...rest, [key]: next };
 }
 
+/** Sets one chip straight to `mode` (`'none'` removes it), whatever it was before. Unlike `cycleFilter` this is
+ *  idempotent — "show these" actions (a search type banner) must not toggle an already-included chip off.
+ *  Returns a new state (immutable). */
+export function setFilterMode(state: FilterState, key: FilterKey, mode: FilterMode | 'none'): FilterState {
+  const { [key]: _dropped, ...rest } = state;
+  return mode === 'none' ? rest : { ...rest, [key]: mode };
+}
+
 function emptySpec(): FilterSpec {
-  return { flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {}, typesAny: [], typesNone: [] };
+  return { flags: {}, tagsAll: [], tagsNone: [], enumIn: {}, enumNotIn: {}, typesAny: [], typesNone: [], pokemonId: null };
 }
 
 /**
@@ -81,8 +93,9 @@ function emptySpec(): FilterSpec {
  * against. Always iterates `FILTER_ATTRIBUTES` (fixed registry order) rather than `Object.keys(state)`,
  * so the result — and therefore `filterKey` — never depends on the order the chips were toggled in.
  */
-export function compileFilter(state: FilterState): FilterSpec {
+export function compileFilter(state: FilterState, pokemonId: number | null = null): FilterSpec {
   const spec = emptySpec();
+  spec.pokemonId = pokemonId;
   for (const attr of FILTER_ATTRIBUTES) {
     const mode = state[attr.key];
     if (!mode) continue;
@@ -105,6 +118,8 @@ export function compileFilter(state: FilterState): FilterSpec {
  * the two in sync (see the file banner).
  */
 export function matchesFilter(listing: Listing, spec: FilterSpec): boolean {
+  if (spec.pokemonId !== null && listing.pokemonId !== spec.pokemonId) return false;
+
   for (const column of Object.keys(spec.flags) as FilterFlagField[]) {
     if (listing[column] !== spec.flags[column]) return false;
   }
@@ -157,5 +172,6 @@ export function filterKey(spec: FilterSpec): string {
     enumNotIn,
     [...spec.typesAny].sort(),
     [...spec.typesNone].sort(),
+    spec.pokemonId,
   ]);
 }
