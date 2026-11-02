@@ -21,6 +21,7 @@ import {
   COSTUME_FORMS_KEPT_AS_FORMS,
   csvRecords,
   gigantamaxSpeciesIds,
+  gameMasterDefaultStats,
   gameMasterDefaultTypes,
   parseAssetFormTokens,
   parseCsv,
@@ -1105,5 +1106,136 @@ describe('renderDataFile', () => {
     const out = text([species(83, 'Farfetch’d', ['Normal', 'Flying']), species(84, "O'Brien\\", ['Normal'])], []);
     expect(out).toContain("[83, 'Farfetch’d', ['Normal', 'Flying']],");
     expect(out).toContain("[84, 'O\\'Brien\\\\', ['Normal']],");
+  });
+});
+
+// ——— base stats ———
+// Fixture numbers are made up: they are test INPUTS, not shipped data. Only the relationships matter.
+
+describe('base stats', () => {
+  type StatLine = readonly [atk: number, def: number, sta: number];
+  const withStats = (template: GameMasterTemplate, [atk, def, sta]: StatLine, evoStats?: StatLine): GameMasterTemplate => {
+    const settings = template.data!.pokemonSettings!;
+    return {
+      ...template,
+      data: {
+        pokemonSettings: {
+          ...settings,
+          stats: { baseStamina: sta, baseAttack: atk, baseDefense: def },
+          ...(evoStats && settings.tempEvoOverrides
+            ? { tempEvoOverrides: settings.tempEvoOverrides.map((o) => ({ ...o, stats: { baseStamina: evoStats[2], baseAttack: evoStats[0], baseDefense: evoStats[1] } })) }
+            : {}),
+        },
+      },
+    };
+  };
+  const build = (rows: SpeciesRow[], templates: GameMasterTemplate[], baseFormCodes: Record<number, string> = {}, files: string[] = []) =>
+    buildPokedexData({
+      species: rows,
+      gameMaster: parseGameMaster(templates),
+      gameMasterForms: parseGameMasterForms(templates),
+      assetTokens: parseAssetFormTokens(files),
+      baseFormCodes,
+      tradabilityRules: RULES,
+    });
+
+  const VULPIX_STATS = [
+    withStats(VULPIX[0], [100, 90, 80]),
+    withStats(VULPIX[1], [100, 90, 80]),
+    withStats(VULPIX[2], [110, 70, 85]),
+    VULPIX[3],
+  ];
+
+  it('reads per-form stats and keeps only forms that differ from the default', () => {
+    const { stats, statOverrides } = build([VULPIX_ROW], VULPIX_STATS, {}, ['pm37.fALOLA.icon.png']);
+    expect(stats).toEqual([{ pokemonId: 37, atk: 100, def: 90, sta: 80 }]);
+    expect(statOverrides).toEqual([{ pokemonId: 37, formCode: 'ALOLA', atk: 110, def: 70, sta: 85 }]);
+  });
+
+  it('uses the same form-code spelling as the typing overrides', () => {
+    const { overrides, statOverrides } = build([VULPIX_ROW], VULPIX_STATS, {}, ['pm37.fALOLA.icon.png']);
+    expect(statOverrides.map((o) => o.formCode)).toEqual(overrides.map((o) => o.formCode));
+  });
+
+  it('takes the default from the first-listed form, not the formless template (Zacian)', () => {
+    const templates = [
+      withStats(ZACIAN[0], [300, 300, 300]), // the formless template carries Crowned Sword's typing, and here its stats
+      withStats(ZACIAN[1], [200, 200, 200]),
+      withStats(ZACIAN[2], [300, 300, 300]),
+      ZACIAN[3],
+    ];
+    expect(gameMasterDefaultStats(parseGameMaster(templates).get(888)!)).toEqual({ atk: 200, def: 200, sta: 200 });
+    const { stats, statOverrides } = build([ZACIAN_ROW], templates);
+    expect(stats).toEqual([{ pokemonId: 888, atk: 200, def: 200, sta: 200 }]);
+    expect(statOverrides).toEqual([{ pokemonId: 888, formCode: 'CROWNED_SWORD', atk: 300, def: 300, sta: 300 }]);
+  });
+
+  it('prefers the BASE_FORM_CODES form over the first-listed one as the default, and lists the first-listed as an override', () => {
+    const zygarde = [
+      withStats(pokemonTemplate(718, 'ZYGARDE', undefined, ['Dragon', 'Ground']), [150, 150, 150]),
+      withStats(pokemonTemplate(718, 'ZYGARDE', 'ZYGARDE_TEN_PERCENT', ['Dragon', 'Ground']), [180, 100, 100]),
+      withStats(pokemonTemplate(718, 'ZYGARDE', 'ZYGARDE_FIFTY_PERCENT', ['Dragon', 'Ground']), [150, 150, 150]),
+      formsTemplate(718, 'ZYGARDE', ['ZYGARDE_TEN_PERCENT', 'ZYGARDE_FIFTY_PERCENT']),
+    ];
+    const zygardeRow = species(718, 'Zygarde', ['Dragon', 'Ground']);
+    const withBase = build([zygardeRow], zygarde, { 718: 'FIFTY_PERCENT' });
+    expect(withBase.stats).toEqual([{ pokemonId: 718, atk: 150, def: 150, sta: 150 }]);
+    expect(withBase.statOverrides).toEqual([{ pokemonId: 718, formCode: 'TEN_PERCENT', atk: 180, def: 100, sta: 100 }]);
+    const withoutBase = build([zygardeRow], zygarde);
+    expect(withoutBase.stats).toEqual([{ pokemonId: 718, atk: 180, def: 100, sta: 100 }]);
+  });
+
+  it('falls back to the formless template when the species has no form templates', () => {
+    const { stats, statOverrides } = build([PALKIA_ROW], [withStats(pokemonTemplate(484, 'PALKIA', undefined, ['Water', 'Dragon']), [120, 110, 100])]);
+    expect(stats).toEqual([{ pokemonId: 484, atk: 120, def: 110, sta: 100 }]);
+    expect(statOverrides).toEqual([]);
+  });
+
+  it('omits a species with no stats, and one missing from the game master, rather than guessing', () => {
+    const noStats = [pokemonTemplate(37, 'VULPIX', undefined, ['Fire']), pokemonTemplate(37, 'VULPIX', 'VULPIX_NORMAL', ['Fire']), VULPIX[3]];
+    const basculegion = species(902, 'Basculegion', ['Water', 'Ghost']);
+    const { stats, statOverrides, report } = build([VULPIX_ROW, basculegion], noStats);
+    expect(stats).toEqual([]);
+    expect(statOverrides).toEqual([]);
+    expect(report.missingStats.map((m) => m.pokemonId)).toEqual([37, 902]);
+  });
+
+  it('never emits Mega/Primal stats, even when tempEvoOverrides carry them', () => {
+    const charizard = [
+      withStats(CHARIZARD[0], [200, 150, 150], [300, 250, 150]),
+      withStats(CHARIZARD[1], [200, 150, 150], [300, 250, 150]),
+      CHARIZARD[2],
+    ];
+    const { stats, statOverrides } = build([CHARIZARD_ROW], charizard, {}, ['pm6.fMEGA_X.icon.png']);
+    expect(stats).toEqual([{ pokemonId: 6, atk: 200, def: 150, sta: 150 }]);
+    expect(statOverrides).toEqual([]);
+  });
+
+  it('rejects a partial stats block instead of shipping half a line', () => {
+    const broken = pokemonTemplate(37, 'VULPIX', undefined, ['Fire']);
+    broken.data!.pokemonSettings!.stats = { baseAttack: 100, baseDefense: 90 };
+    expect(() => parseGameMaster([broken])).toThrow(/incomplete or invalid base stats/);
+  });
+
+  it('refuses two game master forms that collapse to one code with different stats', () => {
+    const clash = [
+      withStats(pokemonTemplate(37, 'VULPIX', undefined, ['Fire']), [100, 90, 80]),
+      withStats(pokemonTemplate(37, 'VULPIX', 'VULPIX_NORMAL', ['Fire']), [100, 90, 80]),
+      withStats(pokemonTemplate(37, 'VULPIX', 'VULPIX_ALOLA', ['Fire']), [110, 70, 85]),
+      withStats(pokemonTemplate(37, 'VULPIX', 'ALOLA', ['Fire']), [120, 70, 85]),
+      formsTemplate(37, 'VULPIX', ['VULPIX_NORMAL', 'VULPIX_ALOLA', 'ALOLA']),
+    ];
+    expect(() => build([VULPIX_ROW], clash)).toThrow(/collapse to one code with different base stats/);
+  });
+
+  it('renders POKEDEX_STATS and FORM_STAT_OVERRIDES as typed tuple tables', () => {
+    const provenance: Provenance = {
+      pokeApi: `PokeAPI/pokeapi@${'a'.repeat(40)}`,
+      gameMaster: `PokeMiners/game_masters@${'b'.repeat(40)}`,
+      spriteAssets: `PokeMiners/pogo_assets@${'c'.repeat(40)}`,
+    };
+    const out = renderDataFile(build([VULPIX_ROW], VULPIX_STATS, {}, ['pm37.fALOLA.icon.png']), provenance);
+    expect(out).toContain('export const POKEDEX_STATS: readonly (readonly [pokemonId: number, atk: number, def: number, sta: number])[] = [\n  [37, 100, 90, 80],\n];');
+    expect(out).toContain("[pokemonId: number, formCode: string, atk: number, def: number, sta: number])[] = [\n  [37, 'ALOLA', 110, 70, 85],\n];");
   });
 });

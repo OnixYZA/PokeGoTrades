@@ -19,7 +19,12 @@ import {
   formatTypes,
   formsOf,
   isPokemonUntradable,
+  maxCpOf,
+  META_TIER_DISCLAIMER,
+  metaRanksOf,
   POKEDEX,
+  statsOf,
+  type MetaTier,
   POKEMON_TYPES,
   matchPokemonType,
   searchPokedex,
@@ -33,7 +38,7 @@ import {
 } from './pokedex';
 import { creatureFormLabel } from '../lib/format';
 import { BASE_FORM_CODES } from './base-form-codes';
-import { FORM_TYPE_OVERRIDES, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS, POKEDEX_GIGANTAMAX_IDS } from './pokedex-data';
+import { FORM_STAT_OVERRIDES, FORM_TYPE_OVERRIDES, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS, POKEDEX_GIGANTAMAX_IDS, POKEDEX_STATS } from './pokedex-data';
 import { isPokemonUntradable as isPokemonUntradableLeaf, UNTRADABLE_FORM_COMBINATIONS as UNTRADABLE_FORM_COMBINATIONS_LEAF } from './untradable';
 
 describe('findPokemon', () => {
@@ -903,5 +908,150 @@ describe('matchPokemonType', () => {
     expect(matchPokemonType('')).toBeNull();
     expect(matchPokemonType('Mewtwo')).toBeNull();
     expect(matchPokemonType('150')).toBeNull();
+  });
+});
+
+// ——— base stats, max CP and meta tiers ———
+// Values are read from the generated tables (constants/pokedex-data.ts); only relationships are asserted.
+
+describe('statsOf', () => {
+  const statRow = (id: number) => POKEDEX_STATS.find(([pokemonId]) => pokemonId === id)!;
+
+  it('returns the generated default-form stats for a species, with a maxCp', () => {
+    const [, atk, def, sta] = statRow(6);
+    expect(statsOf({ pokemonId: 6 })).toEqual({ atk, def, sta, maxCp: maxCpOf({ atk, def, sta }) });
+  });
+
+  it('treats a null/absent form code and a form with no override as the species default', () => {
+    expect(statsOf({ pokemonId: 6, formCode: null })).toEqual(statsOf({ pokemonId: 6 }));
+    expect(statsOf({ pokemonId: 6, formCode: 'NOT_A_FORM' })).toEqual(statsOf({ pokemonId: 6 }));
+  });
+
+  it('is form-aware: Origin Giratina differs from Altered/default, and matches its override row', () => {
+    const origin = statsOf({ pokemonId: 487, formCode: 'ORIGIN' })!;
+    const row = FORM_STAT_OVERRIDES.find(([id, code]) => id === 487 && code === 'ORIGIN')!;
+    expect(origin).toMatchObject({ atk: row[2], def: row[3], sta: row[4] });
+    expect(origin).not.toEqual(statsOf({ pokemonId: 487 }));
+    expect(statsOf({ pokemonId: 487, formCode: 'ALTERED' })).toEqual(statsOf({ pokemonId: 487 }));
+  });
+
+  it('gives Armored Mewtwo (A) its own stats when the data has an override for it', () => {
+    const row = FORM_STAT_OVERRIDES.find(([id, code]) => id === 150 && code === 'A');
+    if (!row) return; // the data decides; no override means the form shares Mewtwo's stats
+    expect(statsOf({ pokemonId: 150, formCode: 'A' })).toMatchObject({ atk: row[2], def: row[3], sta: row[4] });
+    expect(statsOf({ pokemonId: 150, formCode: 'A' })).not.toEqual(statsOf({ pokemonId: 150 }));
+  });
+
+  it('uses the app default form, not the first-listed one (Zygarde: null is Fifty Percent)', () => {
+    const ten = FORM_STAT_OVERRIDES.find(([id, code]) => id === 718 && code === 'TEN_PERCENT');
+    expect(ten).toBeDefined();
+    expect(statsOf({ pokemonId: 718 })).not.toMatchObject({ atk: ten![2], def: ten![3], sta: ten![4] });
+  });
+
+  it('is undefined for an unknown id and for Basculegion (#902, no game master stats)', () => {
+    expect(statsOf({ pokemonId: 0 })).toBeUndefined();
+    expect(statsOf({ pokemonId: 99999 })).toBeUndefined();
+    expect(statsOf({ pokemonId: 902 })).toBeUndefined();
+    expect(statsOf({ pokemonId: 902, formCode: 'FEMALE' })).toBeUndefined();
+    expect(findPokemon(902)).toBeDefined();
+  });
+
+  it('covers every other species, and every override row is for a species with default stats', () => {
+    const missing = POKEDEX.filter((e) => !statsOf({ pokemonId: e.pokemonId })).map((e) => e.pokemonId);
+    expect(missing).toEqual([902]);
+    for (const [id] of FORM_STAT_OVERRIDES) expect(statsOf({ pokemonId: id })).toBeDefined();
+  });
+
+  it('never lists a form override equal to its species default, nor a Mega/Primal form', () => {
+    for (const [id, code, atk, def, sta] of FORM_STAT_OVERRIDES) {
+      const base = statRow(id);
+      expect([atk, def, sta]).not.toEqual([base[1], base[2], base[3]]);
+      expect(code).not.toMatch(/^(MEGA|PRIMAL)/);
+    }
+  });
+});
+
+describe('maxCpOf', () => {
+  it('matches the level-50 15/15/15 formula for the generated stats', () => {
+    for (const [id, atk, def, sta] of POKEDEX_STATS) {
+      const expected = Math.max(10, Math.floor(((atk + 15) * Math.sqrt(def + 15) * Math.sqrt(sta + 15) * 0.84029999 ** 2) / 10));
+      expect(statsOf({ pokemonId: id })!.maxCp).toBe(expected);
+    }
+  });
+
+  it('is monotonic in each stat', () => {
+    const base = { atk: 150, def: 150, sta: 150 };
+    expect(maxCpOf({ ...base, atk: 151 })).toBeGreaterThanOrEqual(maxCpOf(base));
+    expect(maxCpOf({ ...base, atk: 250 })).toBeGreaterThan(maxCpOf(base));
+    expect(maxCpOf({ ...base, def: 250 })).toBeGreaterThan(maxCpOf(base));
+    expect(maxCpOf({ ...base, sta: 250 })).toBeGreaterThan(maxCpOf(base));
+  });
+
+  it('never goes below the game minimum of 10', () => {
+    expect(maxCpOf({ atk: 0, def: 0, sta: 0 })).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe('metaRanksOf', () => {
+  const MODES = ['pve', 'greatLeague', 'ultraLeague', 'masterLeague'] as const;
+  const TIER_VALUE: Record<MetaTier, number> = { C: 0, B: 1, A: 2, S: 3, 'S+': 4 };
+
+  it('is undefined exactly when statsOf is', () => {
+    expect(metaRanksOf({ pokemonId: 902 })).toBeUndefined();
+    expect(metaRanksOf({ pokemonId: 0 })).toBeUndefined();
+    expect(metaRanksOf({ pokemonId: 6 })).toBeDefined();
+  });
+
+  it('is deterministic', () => {
+    expect(metaRanksOf({ pokemonId: 150 })).toEqual(metaRanksOf({ pokemonId: 150 }));
+  });
+
+  it('buckets the default-form population by the documented percentile thresholds', () => {
+    const ids = POKEDEX_STATS.map(([id]) => id);
+    for (const mode of MODES) {
+      const counts: Record<MetaTier, number> = { 'S+': 0, S: 0, A: 0, B: 0, C: 0 };
+      for (const id of ids) counts[metaRanksOf({ pokemonId: id })![mode]]++;
+      const n = ids.length;
+      // Ties can push a boundary by a few species, so allow a small slack around each exact bucket size.
+      const slack = Math.ceil(n * 0.02);
+      expect(Math.abs(counts['S+'] - n * 0.05)).toBeLessThanOrEqual(slack);
+      expect(Math.abs(counts.S - n * 0.1)).toBeLessThanOrEqual(slack);
+      expect(Math.abs(counts.A - n * 0.2)).toBeLessThanOrEqual(slack);
+      expect(Math.abs(counts.B - n * 0.3)).toBeLessThanOrEqual(slack);
+      expect(counts['S+'] + counts.S + counts.A + counts.B + counts.C).toBe(n);
+      expect(counts['S+']).toBeLessThan(counts.C);
+    }
+  });
+
+  it('never ranks a strictly better stat line lower in Master League or PvE', () => {
+    const lines = POKEDEX_STATS.map(([id, atk, def, sta]) => ({ id, atk, def, sta }));
+    let checked = 0;
+    for (const a of lines) {
+      for (const b of lines) {
+        if (a.atk > b.atk && a.def > b.def && a.sta > b.sta) {
+          checked++;
+          const ra = metaRanksOf({ pokemonId: a.id })!;
+          const rb = metaRanksOf({ pokemonId: b.id })!;
+          expect(TIER_VALUE[ra.masterLeague]).toBeGreaterThanOrEqual(TIER_VALUE[rb.masterLeague]);
+          expect(TIER_VALUE[ra.pve]).toBeGreaterThanOrEqual(TIER_VALUE[rb.pve]);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('scores a form with its own stats (Origin Giratina is not forced to Altered\'s tiers by id)', () => {
+    expect(metaRanksOf({ pokemonId: 487, formCode: 'ORIGIN' })).toBeDefined();
+    expect(metaRanksOf({ pokemonId: 487, formCode: 'ALTERED' })).toEqual(metaRanksOf({ pokemonId: 487 }));
+  });
+
+  it('penalises species whose max CP is far below a league cap relative to ones that reach it', () => {
+    const weakest = [...POKEDEX_STATS].sort((x, y) => statsOf({ pokemonId: x[0] })!.maxCp - statsOf({ pokemonId: y[0] })!.maxCp)[0][0];
+    expect(metaRanksOf({ pokemonId: weakest })!.masterLeague).toBe('C');
+    expect(metaRanksOf({ pokemonId: weakest })!.ultraLeague).toBe('C');
+  });
+
+  it('has a disclaimer that says the tiers are estimates', () => {
+    expect(META_TIER_DISCLAIMER.toLowerCase()).toContain('base stats');
   });
 });

@@ -15,6 +15,11 @@
 import { FORM_TYPE_OVERRIDES, POKEDEX_DATA, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS, POKEDEX_GIGANTAMAX_IDS } from './pokedex-data';
 import { POKEMON_TYPES, formatTypes, type PokemonType, type PokemonTypes } from './pokemon-types';
 
+// Base stats, max CP and the stat-based meta tiers live in a sibling leaf module (it reads the generated stat
+// tables and never imports this file); re-exported so app code has one import site for the dex.
+export { META_TIER_DISCLAIMER, maxCpOf, metaRanksOf, statsOf } from './pokedex-meta';
+export type { CreatureStats, MetaRanks, MetaTier } from './pokedex-meta';
+
 // The type vocabulary lives in a leaf module (the generator and the generated data import it without
 // importing the dex). Import it from HERE in app code, so there is one import site.
 export { POKEMON_TYPES, formatTypes };

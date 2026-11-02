@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import { useSegments } from 'expo-router';
 import { Tabs, TabList, TabSlot, TabTrigger } from 'expo-router/ui';
-import { House, MessageCircle, User } from 'lucide-react-native';
+import { BookOpen, House, MessageCircle, User } from 'lucide-react-native';
 import { View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -52,6 +52,9 @@ export default function TabLayout() {
 
           <TabTrigger name="home" href="/" asChild>
             <TabBarButton label="Feed" icon={(color) => <House size={22} color={color} />} />
+          </TabTrigger>
+          <TabTrigger name="dex" href="/dex" asChild>
+            <TabBarButton label="Dex" icon={(color) => <BookOpen size={22} color={color} />} />
           </TabTrigger>
           <TabTrigger name="chats" href="/chats" asChild>
             <TabBarButton

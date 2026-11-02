@@ -186,8 +186,11 @@ export interface GameMasterTemplate {
        *  on untradable ones: in the pinned file 2387 of the 2472 species/form templates carry it, none with any
        *  other value. It is per TEMPLATE, so per form: `ZACIAN_HERO` has it and `ZACIAN_CROWNED_SWORD` does not. */
       isTradable?: boolean;
-      /** Mega/Primal evolutions: only the entries with a `typeOverride1` change typing. */
-      tempEvoOverrides?: { tempEvoId?: string; typeOverride1?: string; typeOverride2?: string }[];
+      /** Base stats of THIS template (per form, like typing). Absent on a few stub templates. */
+      stats?: { baseStamina?: number; baseAttack?: number; baseDefense?: number };
+      /** Mega/Primal evolutions: only the entries with a `typeOverride1` change typing. Their own `stats` are
+       *  deliberately NOT read: Mega/Primal are not stored forms in this app (see `parseGameMaster`). */
+      tempEvoOverrides?: { tempEvoId?: string; typeOverride1?: string; typeOverride2?: string; stats?: { baseStamina?: number; baseAttack?: number; baseDefense?: number } }[];
     };
     formSettings?: {
       /** The species enum again, e.g. `ZACIAN`. Present even on species with no `pokemonSettings` (Basculegion). */
@@ -203,6 +206,26 @@ export interface GameMasterTemplate {
   };
 }
 
+/** Pokémon GO base stats, as the game master carries them (attack, defense, stamina). */
+export interface BaseStats {
+  atk: number;
+  def: number;
+  sta: number;
+}
+
+const sameStats = (a: BaseStats, b: BaseStats): boolean => a.atk === b.atk && a.def === b.def && a.sta === b.sta;
+
+/** `pokemonSettings.stats` -> `BaseStats`, `undefined` when the template has none. Throws on a partial or
+ *  non-positive block rather than shipping half a stat line. */
+function gmStats(stats: { baseStamina?: number; baseAttack?: number; baseDefense?: number } | undefined, where: string): BaseStats | undefined {
+  if (!stats) return undefined;
+  const { baseAttack: atk, baseDefense: def, baseStamina: sta } = stats;
+  if (!Number.isInteger(atk) || !Number.isInteger(def) || !Number.isInteger(sta) || atk! <= 0 || def! <= 0 || sta! <= 0) {
+    throw new Error(`${where}: incomplete or invalid base stats ${JSON.stringify(stats)}`);
+  }
+  return { atk: atk!, def: def!, sta: sta! };
+}
+
 export interface GmSpecies {
   pokemonId: number;
   /** The species enum used in form names, e.g. `ZACIAN`. */
@@ -210,6 +233,10 @@ export interface GmSpecies {
   /** Types on the formless `V####_POKEMON_<NAME>` template. NOT always the default form's typing: Zacian's
    *  formless template carries the Crowned Sword typing. */
   bare: PokemonTypes;
+  /** Base stats on the formless template, if it carries any. */
+  bareStats: BaseStats | undefined;
+  /** Full form enum -> base stats, for the form templates that carry them (same keys as `forms` minus any without). */
+  formStats: Map<string, BaseStats>;
   /** Full form enum -> types, from the `V####_POKEMON_<NAME>_<FORM>` templates. */
   forms: Map<string, PokemonTypes>;
   /** First form in the species' `FORMS_V####_POKEMON_<NAME>` list, which is the default form, or null. */
@@ -248,6 +275,10 @@ function gmTypes(type: string | undefined, type2: string | undefined, where: str
 export function parseGameMaster(templates: readonly GameMasterTemplate[]): Map<number, GmSpecies> {
   const defaultForms = new Map<number, string | null>();
   const building = new Map<number, Omit<GmSpecies, 'bare' | 'bareTradable' | 'defaultForm'> & { bare: PokemonTypes | undefined; bareTradable: boolean }>();
+  // Mega/Primal `tempEvoOverrides[].stats` are intentionally ignored: those are battle-only transformations,
+  // not stored forms (the app's `formCode` never holds them for stats), and emitting them would make
+  // `statsOf({MEGA_X})` answer for a form no listing can be. Their TYPES are kept (FORM_TYPE_OVERRIDES) for
+  // historical reasons; stats are not.
 
   for (const template of templates) {
     const formsMatch = FORMS_TEMPLATE.exec(template.templateId);
@@ -266,7 +297,7 @@ export function parseGameMaster(templates: readonly GameMasterTemplate[]): Map<n
 
     let entry = building.get(pokemonId);
     if (!entry) {
-      entry = { pokemonId, enumName: settings.pokemonId, bare: undefined, bareTradable: false, forms: new Map(), formTradable: new Map(), tempEvos: new Map() };
+      entry = { pokemonId, enumName: settings.pokemonId, bare: undefined, bareStats: undefined, formStats: new Map(), bareTradable: false, forms: new Map(), formTradable: new Map(), tempEvos: new Map() };
       building.set(pokemonId, entry);
     } else if (entry.enumName !== settings.pokemonId) {
       throw new Error(`${where}: species enum ${settings.pokemonId} contradicts ${entry.enumName} on #${pokemonId}`);
@@ -276,10 +307,13 @@ export function parseGameMaster(templates: readonly GameMasterTemplate[]): Map<n
       if (entry.forms.has(settings.form)) throw new Error(`${where}: form ${settings.form} is defined twice`);
       entry.forms.set(settings.form, types);
       entry.formTradable.set(settings.form, settings.isTradable === true);
+      const formStats = gmStats(settings.stats, where);
+      if (formStats) entry.formStats.set(settings.form, formStats);
     } else {
       if (entry.bare) throw new Error(`${where}: a second formless template for #${pokemonId}`);
       entry.bare = types;
       entry.bareTradable = settings.isTradable === true;
+      entry.bareStats = gmStats(settings.stats, where);
     }
 
     for (const override of settings.tempEvoOverrides ?? []) {
@@ -308,6 +342,14 @@ export function parseGameMaster(templates: readonly GameMasterTemplate[]): Map<n
 export function gameMasterDefaultTypes(entry: GmSpecies): { types: PokemonTypes; via: 'form' | 'formless' } {
   const formTypes = entry.defaultForm ? entry.forms.get(entry.defaultForm) : undefined;
   return formTypes ? { types: formTypes, via: 'form' } : { types: entry.bare, via: 'formless' };
+}
+
+/** The species' default-form base stats by the game master's own order, like `gameMasterDefaultTypes`
+ *  (first-listed form's template, else the formless one). `undefined` when neither carries stats.
+ *  `buildPokedexData` prefers the BASE_FORM_CODES form over this when the table names one. */
+export function gameMasterDefaultStats(entry: GmSpecies): BaseStats | undefined {
+  const formStats = entry.defaultForm ? entry.formStats.get(entry.defaultForm) : undefined;
+  return formStats ?? (entry.defaultForm && entry.forms.has(entry.defaultForm) ? undefined : entry.bareStats);
 }
 
 /** One entry of a species' `FORMS_V####_POKEMON_*` list. */
@@ -801,6 +843,14 @@ export interface FormOverride {
   confirmed: boolean;
 }
 
+export interface StatRow extends BaseStats {
+  pokemonId: number;
+}
+
+export interface FormStatOverride extends StatRow {
+  formCode: string;
+}
+
 export interface Disagreement {
   pokemonId: number;
   name: string;
@@ -823,6 +873,10 @@ export interface BuildReport {
   defaultFromFormless: number;
   overridesFromForms: number;
   overridesFromTempEvolutions: number;
+  /** Species left out of POKEDEX_STATS because the game master gave no stats for their default form. */
+  missingStats: { pokemonId: number; name: string }[];
+  /** Forms whose stats differ from their species' default (= `statOverrides.length`). */
+  statOverrides: number;
   /** Sprite art exists for these (species, form token) pairs, but the game master has no typing for them,
    *  so they resolve to the species default. May include cosmetic tokens (costumes) that never change typing. */
   assetFormsWithoutTypes: { pokemonId: number; token: string }[];
@@ -834,6 +888,10 @@ export interface BuildReport {
 export interface PokedexData {
   species: SpeciesRow[];
   overrides: FormOverride[];
+  /** Default-form base stats, id order; a species with no stats is absent (never guessed). */
+  stats: StatRow[];
+  /** Forms whose stats differ from the default's, keyed by the same `formCode` resolution as `overrides`. */
+  statOverrides: FormStatOverride[];
   /** Species with at least one selectable non-default form, in id order. */
   forms: FormCatalogEntry[];
   /** Species with Gigantamax sprite art, sorted; see `gigantamaxSpeciesIds`. */
@@ -856,6 +914,9 @@ export function buildPokedexData(input: {
   const disagreements: Disagreement[] = [];
   const formlessDisagreements: Disagreement[] = [];
   const overrides: FormOverride[] = [];
+  const stats: StatRow[] = [];
+  const statOverrides: FormStatOverride[] = [];
+  const missingStats: BuildReport['missingStats'] = [];
   let defaultFromFormless = 0;
   let overridesFromForms = 0;
   let overridesFromTempEvolutions = 0;
@@ -865,6 +926,7 @@ export function buildPokedexData(input: {
     const entry = gameMaster.get(row.id);
     if (!entry) {
       missingFromGameMaster.push({ pokemonId: row.id, name: row.name });
+      missingStats.push({ pokemonId: row.id, name: row.name });
       continue;
     }
 
@@ -897,16 +959,40 @@ export function buildPokedexData(input: {
     for (const [form, types] of entry.forms) consider(form, types, false);
     for (const [code, types] of entry.tempEvos) consider(code, types, true);
 
+    // Stats. The default is the form `formCode: null` MEANS in the app, i.e. the form the catalog treats as the
+    // default (`buildFormCatalog`): the BASE_FORM_CODES form when the table names one the game master lists,
+    // else the first-listed form (else the formless template). It matters: the game master lists Zygarde Ten
+    // Percent and Toxtricity Low Key first, but the app's null is Fifty Percent / Amped, and their stats differ.
+    // Form codes use the same `resolveFormCode` as the typing overrides. Mega/Primal are not read at all.
+    const statForms = [...entry.formStats].map(([form, formStats]) => ({ code: resolveFormCode(entry.enumName, form, tokens).code, formStats }));
+    const baseCode = baseFormCodes[row.id];
+    const defaultStats = (baseCode === undefined ? undefined : statForms.find((f) => f.code === baseCode)?.formStats) ?? gameMasterDefaultStats(entry);
+    if (defaultStats) {
+      stats.push({ pokemonId: row.id, ...defaultStats });
+      const seenStatCodes = new Map<string, BaseStats>();
+      for (const { code, formStats } of statForms) {
+        if (sameStats(formStats, defaultStats)) continue;
+        const earlier = seenStatCodes.get(code);
+        if (earlier && sameStats(earlier, formStats)) continue;
+        if (earlier) throw new Error(`#${row.id} ${code}: two game master forms collapse to one code with different base stats`);
+        seenStatCodes.set(code, formStats);
+        statOverrides.push({ pokemonId: row.id, formCode: code, ...formStats });
+      }
+    } else missingStats.push({ pokemonId: row.id, name: row.name });
+
     for (const token of tokens ?? []) if (!claimed.has(token)) assetFormsWithoutTypes.push({ pokemonId: row.id, token });
   }
 
   overrides.sort((a, b) => a.pokemonId - b.pokemonId || (a.formCode < b.formCode ? -1 : a.formCode > b.formCode ? 1 : 0));
+  statOverrides.sort((a, b) => a.pokemonId - b.pokemonId || (a.formCode < b.formCode ? -1 : a.formCode > b.formCode ? 1 : 0));
   assetFormsWithoutTypes.sort((a, b) => a.pokemonId - b.pokemonId || (a.token < b.token ? -1 : 1));
   const catalog = buildFormCatalog({ species, gameMasterForms, assetTokens, baseFormCodes });
   const tradability = checkTradability({ species, gameMaster, assetTokens, rules: tradabilityRules });
   return {
     species: [...species],
     overrides,
+    stats,
+    statOverrides,
     forms: catalog.entries,
     gigantamaxIds: gigantamaxSpeciesIds(assetTokens),
     report: {
@@ -918,6 +1004,8 @@ export function buildPokedexData(input: {
       defaultFromFormless,
       overridesFromForms,
       overridesFromTempEvolutions,
+      missingStats,
+      statOverrides: statOverrides.length,
       assetFormsWithoutTypes,
       formCatalog: catalog.report,
       tradability,
@@ -1017,7 +1105,8 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
  *     latest/latest.json (Pokémon GO's own data). Per-form types, for FORM_TYPE_OVERRIDES; a cross-check of
  *     every species' default typing against PokeAPI's; each species' list of forms (the FORMS_
  *     templates), for POKEDEX_FORMS; and a cross-check of every species' and form's isTradable flag
- *     against the app's untradable rules (nothing from it is written to this file).
+ *     against the app's untradable rules; and each species' and form's base stats (\`pokemonSettings.stats\`),
+ *     for POKEDEX_STATS and FORM_STAT_OVERRIDES.
  *   ${provenance.spriteAssets}
  *     "Images/Pokemon - 256x256/Addressable Assets" (file listing only). The form-token spelling the app
  *     stores in \`formCode\`, so overrides and the form catalog are keyed exactly as listings carry them,
@@ -1045,6 +1134,9 @@ export function renderDataFile(data: PokedexData, provenance: Provenance): strin
      ? `, ${report.formCatalog.excludedUnflaggedCostumes.length} event forms the game master does not flag (${unflaggedText})`
      : ''
  }, and ${report.formCatalog.excludedStatus.length} shadow-marker forms${statusText}.
+ *   - Base stats (POKEDEX_STATS, FORM_STAT_OVERRIDES): ${data.stats.length} of ${report.species} species have stats${
+   report.missingStats.length > 0 ? `; none for ${report.missingStats.map((m) => `#${m.pokemonId} ${m.name}`).join(', ')} (left out, never guessed)` : ''
+ }; ${data.statOverrides.length} forms differ from their species' default. Mega/Primal stats are not emitted (not stored forms).
  *   - Tradability, game master isTradable vs the app's untradable rules (constants/untradable.ts): ${report.tradability.checked} species and form entries compared; ${
    report.tradability.overridden.length > 0
      ? `all agree except ${report.tradability.overridden.length} documented override${report.tradability.overridden.length === 1 ? '' : 's'}: ${overrideText}`
@@ -1129,6 +1221,28 @@ export const POKEDEX_DEFAULT_FORMS: readonly (readonly [pokemonId: number, formC
  */
 export const POKEDEX_GIGANTAMAX_IDS: readonly number[] = [`);
   for (let i = 0; i < data.gigantamaxIds.length; i += 16) lines.push(`  ${data.gigantamaxIds.slice(i, i + 16).join(', ')},`);
+  lines.push('];');
+
+  lines.push(`
+/**
+ * \`[pokemonId, attack, defense, stamina]\`: Pokémon GO base stats of each species' DEFAULT form (the form
+ * \`formCode: null\` means: constants/base-form-codes.ts when it names one, else the first the game master lists),
+ * straight from the game master's \`pokemonSettings.stats\`, id order. A
+ * species the game master has no stats for is absent (never guessed). Read through \`statsOf\` in
+ * constants/pokedex.ts.
+ */
+export const POKEDEX_STATS: readonly (readonly [pokemonId: number, atk: number, def: number, sta: number])[] = [`);
+  for (const r of data.stats) lines.push(`  [${r.pokemonId}, ${r.atk}, ${r.def}, ${r.sta}],`);
+  lines.push('];');
+
+  lines.push(`
+/**
+ * \`[pokemonId, formCode, attack, defense, stamina]\` for every form whose base stats differ from its species'
+ * default in POKEDEX_STATS, in the same \`formCode\` spelling as FORM_TYPE_OVERRIDES, sorted by id then code.
+ * Mega and Primal evolutions are not listed: they are not stored forms. Read through \`statsOf\`.
+ */
+export const FORM_STAT_OVERRIDES: readonly (readonly [pokemonId: number, formCode: string, atk: number, def: number, sta: number])[] = [`);
+  for (const o of data.statOverrides) lines.push(`  [${o.pokemonId}, ${quote(o.formCode)}, ${o.atk}, ${o.def}, ${o.sta}],`);
   lines.push('];', '');
   return lines.join('\n');
 }
