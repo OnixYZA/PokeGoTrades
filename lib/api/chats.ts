@@ -1,4 +1,4 @@
-import type { Chat, ChatMessage, ChatRole, ChatStatus, CreatureRef, FormalOffer, ListingStatus } from '@/data/types';
+import type { Chat, ChatMessage, ChatRole, ChatStatus, FormalOffer, ListingStatus } from '@/data/types';
 import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
 import type { Database, Json } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
@@ -75,21 +75,9 @@ export function offerToJson(offer: FormalOffer): Json {
   };
 }
 
-// Not built from `creatureRefToJson`/`parseCreatureRef`: those parse or serialize the jsonb *wire*
-// shape (`Json`, values widened to `Json | undefined`), while this converts one already-typed client
-// shape (`CreatureRef`) to another (`FormalOffer`) — reusing them here would need an unsafe cast to
-// undo that widening, which is worse than the few duplicated lines.
-export function creatureToOffer(creature: CreatureRef): FormalOffer {
-  return {
-    name: creature.name,
-    pokemonId: creature.pokemonId,
-    hue: creature.hue,
-    ...(creature.shiny ? { shiny: true } : {}),
-    ...(creature.lucky ? { lucky: true } : {}),
-    ...(creature.formCode != null ? { formCode: creature.formCode } : {}),
-    ...(creature.costumeCode != null ? { costumeCode: creature.costumeCode } : {}),
-  };
-}
+// `creatureToOffer` (a `CreatureRef` -> `FormalOffer`, form included) lives beside the jsonb pair it feeds, in
+// `lib/api/creature-ref.ts`, so vitest can cover it; re-exported so the chat screens keep importing it from here.
+export { creatureToOffer } from '@/lib/api/creature-ref';
 
 /** `role` has no meaning on the wire ('me' is a different person on the other device), so it is derived here. */
 export function toChatMessage(row: MessageRow, meId: string | null): ChatMessage {

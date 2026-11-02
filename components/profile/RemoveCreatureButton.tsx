@@ -3,7 +3,7 @@ import type { ViewStyle } from 'react-native';
 
 import { IconButton } from '@/components/ui/IconButton';
 import type { CreatureRef } from '@/data/types';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureFullName } from '@/lib/format';
 
 interface RemoveCreatureButtonProps {
   creature: CreatureRef;
@@ -20,13 +20,16 @@ interface RemoveCreatureButtonProps {
  * never finds it, and the tiles have no tap action of their own for a button to compete with. Kept small
  * and muted (the red lives in the confirmation, not on every tile) with `IconButton`'s built-in 44pt
  * hit slop, so it is easy to hit without reading as a loud second action on each Pokémon.
+ *
+ * Its label names the creature in full (`creatureFullName`, "Remove Alolan Vulpix from Wishlist"): a list can hold
+ * Vulpix and Alolan Vulpix side by side, and a screen reader hears only this label, not the tile around it.
  */
 export function RemoveCreatureButton({ creature, listLabel, onPress, placement }: RemoveCreatureButtonProps) {
   return (
     <IconButton
       size={22}
       radius={8}
-      accessibilityLabel={`Remove ${creatureDisplayName(creature)} from ${listLabel}`}
+      accessibilityLabel={`Remove ${creatureFullName(creature)} from ${listLabel}`}
       onPress={onPress}
       style={{ position: 'absolute', ...placement }}
     >

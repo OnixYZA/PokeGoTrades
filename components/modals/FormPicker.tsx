@@ -5,8 +5,8 @@ import { Ban, Check } from 'lucide-react-native';
 import { defaultFormOf, formsOf, isPokemonUntradable } from '@/constants/pokedex';
 import { creatureFormLabel, creatureFullName } from '@/lib/format';
 
-import { UntradableNotice } from './PokemonPickerModal';
 import { MODAL_COLORS } from './tokens';
+import { UntradableNotice } from './UntradableNotice';
 
 const C = MODAL_COLORS;
 
@@ -21,11 +21,18 @@ const CHIP_ON = 'rgba(251,191,36,0.2)';
 
 interface FormPickerProps {
   pokemonId: number;
-  /** The chosen form, as `CreatureRef.formCode`. `null` is the species' default form. */
-  formCode: string | null;
-  /** Called with the form's code, or `null` for the default. Never called with an untradable form: the chip
-   *  explains the refusal instead (see `FormChip`). */
+  /** The chosen form, as `CreatureRef.formCode`. `null` is the species' default form. `undefined` is "none
+   *  chosen" (no chip selected), for the picker sheet when every form is already added; the Create Listing flow
+   *  always has a form. */
+  formCode: string | null | undefined;
+  /** Called with the form's code, or `null` for the default. Never called with an untradable form (the chip
+   *  explains the refusal instead, see `FormChip`) or an added one (the chip is disabled). */
   onChange: (formCode: string | null) => void;
+  /** Forms that are already on the list being added to (`null` is the default form): shown dimmed, marked
+   *  "ADDED" and not selectable. Only the Pokémon picker sheet passes it; with none, no form is ever added and
+   *  the row is exactly what the Create Listing flow shows. The caller decides what "added" means (it depends
+   *  on the shiny setting, which this row knows nothing about); an untradable form is refused, never "added". */
+  addedForms?: readonly (string | null)[];
 }
 
 /**
@@ -49,9 +56,13 @@ interface FormPickerProps {
  * White Kyurem would otherwise find no White Kyurem and list it as a plain Kyurem. The rule is
  * `isPokemonUntradable`, the one the species picker and the database use; nothing here decides tradability.
  *
+ * ALREADY-ADDED FORMS (`addedForms`, passed by the picker sheet only) are dimmed and marked "ADDED" like a row in
+ * the species list, and tapping one does nothing, so a trainer can see which forms of a species they already have
+ * and can not add one twice.
+ *
  * The parent should `key` this by `pokemonId`, which resets the refusal notice when the species changes.
  */
-export function FormPicker({ pokemonId, formCode, onChange }: FormPickerProps) {
+export function FormPicker({ pokemonId, formCode, onChange, addedForms }: FormPickerProps) {
   const forms = formsOf(pokemonId);
   const [refused, setRefused] = useState<string | null>(null);
 
@@ -88,6 +99,7 @@ export function FormPicker({ pokemonId, formCode, onChange }: FormPickerProps) {
               isDefault={option.isDefault}
               selected={option.code === formCode}
               untradable={untradable}
+              added={!untradable && (addedForms?.includes(option.code) ?? false)}
               onPress={() => {
                 if (untradable) {
                   setRefused(option.code);
@@ -117,6 +129,7 @@ function FormChip({
   isDefault,
   selected,
   untradable,
+  added,
   onPress,
 }: {
   label: string;
@@ -124,27 +137,33 @@ function FormChip({
   selected: boolean;
   /** Dimmed and marked; a press explains the refusal rather than selecting. */
   untradable: boolean;
+  /** Dimmed and marked "ADDED"; not pressable. Never together with `untradable` or `selected`. */
+  added: boolean;
   onPress: () => void;
 }) {
   const accessibilityLabel = untradable
     ? `${label}, can’t be traded in Pokémon GO`
-    : isDefault
-      ? `${label}, the default form`
-      : label;
+    : added
+      ? `${label}, already added`
+      : isDefault
+        ? `${label}, the default form`
+        : label;
   return (
     <Pressable
-      onPress={onPress}
+      onPress={added ? undefined : onPress}
+      disabled={added}
       accessibilityRole="radio"
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={untradable ? 'Explains why it can’t be listed' : undefined}
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled: added }}
       hitSlop={4}
-      className={`flex-row items-center gap-1 rounded-full px-3.5 py-2.5 ${untradable ? 'opacity-50' : 'active:opacity-80'}`}
+      className={`flex-row items-center gap-1 rounded-full px-3.5 py-2.5 ${untradable || added ? 'opacity-50' : 'active:opacity-80'}`}
       // `maxWidth` so one long name ("Galarian Standard Mode") shrinks and ellipsizes instead of overflowing a ~335pt row.
       style={{ backgroundColor: selected ? CHIP_ON : CHIP_OFF, maxWidth: '100%' }}
     >
       {selected && <Check size={12} color={C.gold} strokeWidth={2.5} />}
       {untradable && <Ban size={12} color={C.danger} strokeWidth={2.5} />}
+      {added && <Check size={12} color={C.success} strokeWidth={3} />}
       <Text
         numberOfLines={1}
         className="font-mono-semi shrink uppercase"
@@ -152,6 +171,11 @@ function FormChip({
       >
         {label}
       </Text>
+      {added && (
+        <Text className="font-mono-bold shrink-0" style={{ fontSize: 9, color: C.success, letterSpacing: 0.6 }}>
+          ADDED
+        </Text>
+      )}
     </Pressable>
   );
 }

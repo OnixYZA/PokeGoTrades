@@ -11,7 +11,7 @@
  * (`../format` -> `../../constants/pokedex`) is plain TypeScript with relative imports of its own.
  */
 import type { Json } from '../database.types';
-import type { CreatureRef } from '../../data/types';
+import type { CreatureRef, FormalOffer } from '../../data/types';
 import { speciesName } from '../format';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,5 +92,30 @@ export function creatureRefToJson(ref: CreatureRef): JsonObject {
     ...(ref.lucky ? { lucky: true } : {}),
     ...(ref.formCode != null ? { formCode: ref.formCode } : {}),
     ...(ref.costumeCode != null ? { costumeCode: ref.costumeCode } : {}),
+  };
+}
+
+/**
+ * A creature of the trainer's own (an Arsenal entry, a listing's wanted creature) as the `FormalOffer` they send
+ * for it: the same identity fields, with a falsy `shiny` / `lucky` and an absent / null `formCode` /
+ * `costumeCode` left off so the offer equals what `parseCreatureRef` reads back out of `chat_messages.offer`.
+ *
+ * It lives HERE, with the jsonb pair, rather than in `lib/api/chats.ts` (which re-exports it), because the form
+ * is exactly what a hand-rolled copy of a creature's fields forgets: an Arsenal entry that carries
+ * `formCode: 'ALOLA'` must reach the offer card and the Trade Summary as Alolan, and `chats.ts` cannot be loaded
+ * by vitest to prove it does. It is a plain `CreatureRef` -> `FormalOffer` mapping, not a jsonb one, so it does
+ * not go through `creatureRefToJson` / `parseCreatureRef` (their `Json` values would need an unsafe cast to undo
+ * the widening); `offerToJson` serializes the result through `creatureRefToJson` afterwards, which is where the
+ * stored `name` is normalized to the dex species.
+ */
+export function creatureToOffer(creature: CreatureRef): FormalOffer {
+  return {
+    name: creature.name,
+    pokemonId: creature.pokemonId,
+    hue: creature.hue,
+    ...(creature.shiny ? { shiny: true } : {}),
+    ...(creature.lucky ? { lucky: true } : {}),
+    ...(creature.formCode != null ? { formCode: creature.formCode } : {}),
+    ...(creature.costumeCode != null ? { costumeCode: creature.costumeCode } : {}),
   };
 }

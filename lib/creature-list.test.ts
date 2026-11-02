@@ -16,9 +16,9 @@ import {
   type TrainerCreature,
 } from './creature-list';
 
-const entry = (id: string, pokemonId = 1, shiny = false): TrainerCreature => ({
+const entry = (id: string, pokemonId = 1, shiny = false, formCode?: string): TrainerCreature => ({
   id,
-  creature: { name: `Mon${pokemonId}`, pokemonId, hue: 100, ...(shiny ? { shiny } : {}) },
+  creature: { name: `Mon${pokemonId}`, pokemonId, hue: 100, ...(shiny ? { shiny } : {}), ...(formCode ? { formCode } : {}) },
 });
 
 const run = (state: CreatureListsState, ...actions: CreatureListsAction[]): CreatureListsState =>
@@ -47,6 +47,38 @@ describe('toReadOnlyEntries', () => {
 
   it('is empty for an empty list', () => {
     expect(toReadOnlyEntries([])).toEqual([]);
+  });
+});
+
+describe('forms of one species', () => {
+  // Vulpix (37) and Alolan Vulpix (37, ALOLA): one species, two creatures. Row ids are the only identity the
+  // lists use, so the two never collide and removing one leaves the other, form intact.
+  const vulpix = () => entry('plain', 37);
+  const alolan = () => entry('alolan', 37, false, 'ALOLA');
+
+  it('keeps both on the list, each with its own formCode', () => {
+    const state = run(EMPTY_CREATURE_LISTS, { type: 'loaded', arsenal: [vulpix(), alolan()], wishlist: [] });
+    expect(shownArsenal(state)).toEqual(['plain', 'alolan']);
+    expect(state.arsenal.map((e) => e.creature.formCode)).toEqual([undefined, 'ALOLA']);
+  });
+
+  it('removing one form masks that row only, leaving the other form on the list', () => {
+    const state = run(
+      EMPTY_CREATURE_LISTS,
+      { type: 'loaded', arsenal: [vulpix(), alolan()], wishlist: [] },
+      { type: 'removalStarted', id: 'alolan' },
+    );
+    expect(shownArsenal(state)).toEqual(['plain']);
+    expect(visibleEntries(state.arsenal, state.removed)[0].creature.formCode).toBeUndefined();
+
+    const failed = run(state, { type: 'removalFailed', id: 'alolan' });
+    expect(failed.arsenal.find((e) => e.id === 'alolan')?.creature.formCode).toBe('ALOLA');
+  });
+
+  it('gives read-only wrappers their own ids without touching the form', () => {
+    const wrapped = toReadOnlyEntries([vulpix().creature, alolan().creature]);
+    expect(new Set(ids(wrapped)).size).toBe(2);
+    expect(wrapped.map((w) => w.creature.formCode)).toEqual([undefined, 'ALOLA']);
   });
 });
 

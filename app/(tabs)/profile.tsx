@@ -3,7 +3,7 @@ import { ChevronLeft, LogOut, Share2, UserRound } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
-import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
+import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
 import { ShareTradeListModal } from '@/components/modals/ShareTradeListModal';
 import { ArsenalGrid } from '@/components/profile/ArsenalGrid';
 import { LiveIdentityCard } from '@/components/profile/LiveIdentityCard';
@@ -14,7 +14,6 @@ import { TradeHistoryGrid } from '@/components/profile/TradeHistoryGrid';
 import { WishlistGrid } from '@/components/profile/WishlistGrid';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
-import { findPokemon } from '@/constants/pokedex';
 import { trainer } from '@/data/trainer';
 import type { TradeHistoryEntry } from '@/data/types';
 import {
@@ -37,7 +36,7 @@ import {
   type TrainerCreature,
 } from '@/lib/creature-list';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureFullName } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
@@ -256,20 +255,22 @@ export default function ProfileScreen() {
     const { list, entry } = removal;
     setRemoval(null); // close before any toast — see lib/toast.ts on modals and their own ToastHost
     live.removeCreature(list, entry.id).catch(() => {
-      toast(`Couldn't remove ${creatureDisplayName(entry.creature)} from your ${LIST_LABEL[list]}. Try again.`, 'error');
+      toast(`Couldn't remove ${creatureFullName(entry.creature)} from your ${LIST_LABEL[list]}. Try again.`, 'error');
     });
   };
 
-  /** Shared by both grids' pickers: add the chosen Pokémon, refresh in place, then toast. Errors
-   *  (an unknown id, a full list, a lost race on the last free slot) surface the same way. */
-  const addPokemon = async (list: CreatureListKind, pokemonId: number, shiny: boolean) => {
+  /** Shared by both grids' pickers: add the chosen creature, refresh in place, then toast. Errors
+   *  (an unknown id or form, a full list, a lost race on the last free slot) surface the same way.
+   *  The pick is passed through whole — species, shiny AND form — because the form is half of what the trainer
+   *  chose: the toast names it (`creatureFullName`, "Shiny Alolan Vulpix") and `addToArsenal` / `addToWishlist`
+   *  store it, so the confirmation can never describe a different creature than the row that was written. */
+  const addPokemon = async (list: CreatureListKind, pick: PickedCreature) => {
     if (addingCreature) return;
-    const entry = findPokemon(pokemonId);
     const listLabel = LIST_LABEL[list];
-    const displayName = entry ? creatureDisplayName({ pokemonId: entry.pokemonId, shiny }) : 'That Pokémon';
+    const displayName = creatureFullName(pick);
     setAddingCreature(true);
     try {
-      await (list === 'arsenal' ? addToArsenal(pokemonId, shiny) : addToWishlist(pokemonId, shiny));
+      await (list === 'arsenal' ? addToArsenal(pick) : addToWishlist(pick));
       await live.refresh();
       toast(`${displayName} added to your ${listLabel}`, 'success');
     } catch (reason) {
@@ -279,14 +280,16 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleSelectPokemon = (pokemonId: number, shiny: boolean) => {
+  const handleSelectPokemon = (pick: PickedCreature) => {
     const list = pickerFor;
     setPickerFor(null); // close before the toast — see lib/toast.ts on modals and their own ToastHost
-    if (list) void addPokemon(list, pokemonId, shiny);
+    if (list) void addPokemon(list, pick);
   };
 
   // The grids hold entries (creature + row id); the share image and the picker's "already added" check
-  // only want the creatures. Memoized on the entries so a re-render doesn't hand them fresh arrays.
+  // only want the creatures. Memoized on the entries so a re-render doesn't hand them fresh arrays. Each
+  // creature still carries its `formCode` (`parseCreatureRef`), which is what lets the picker tell an Alolan
+  // Vulpix already on the list from the plain Vulpix still to add.
   const arsenalCreatures = useMemo(() => live.arsenal.map((entry) => entry.creature), [live.arsenal]);
   const wishlistCreatures = useMemo(() => live.wishlist.map((entry) => entry.creature), [live.wishlist]);
 
@@ -434,7 +437,7 @@ export default function ProfileScreen() {
         <ConfirmModal
           visible
           title={`Remove from ${LIST_LABEL[removal.list]}?`}
-          message={`${creatureDisplayName(removal.entry.creature)} will be removed from your ${LIST_LABEL[removal.list]}. You can add it again any time.`}
+          message={`${creatureFullName(removal.entry.creature)} will be removed from your ${LIST_LABEL[removal.list]}. You can add it again any time.`}
           confirmLabel="Remove"
           destructive
           onConfirm={confirmRemoval}

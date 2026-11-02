@@ -6,7 +6,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
 import { RemoveCreatureButton } from '@/components/profile/RemoveCreatureButton';
 import { SURFACE } from '@/constants/theme';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureFullName } from '@/lib/format';
 import type { TrainerCreature } from '@/lib/creature-list';
 
 interface WishlistGridProps {
@@ -53,15 +53,21 @@ export function WishlistGrid({ wishlist, onEdit, onRemove }: WishlistGridProps) 
           >
             <Chip creature={entry.creature} size={44} />
             <View className="min-w-0 flex-1">
-              <Text numberOfLines={1} className="font-display-semi text-text-primary" style={{ fontSize: 12 }}>
-                {creatureDisplayName(entry.creature)}
+              {/* The FULL name (`creatureFullName`: "Alolan Vulpix"), on up to two lines. Two columns leave only
+               *  ~90px beside the sprite, so one line elided even "Shiny Crabominable" before forms existed here.
+               *  Two lines (28px) plus the caption (~11px) still fit inside the 44px sprite's height, so a form
+               *  does not make its tile taller than the rest. The form is part of the name rather than a line of
+               *  its own because the caption below is the only other line this tile has. */}
+              <Text numberOfLines={2} className="font-display-semi text-text-primary" style={{ fontSize: 12, lineHeight: 14 }}>
+                {creatureFullName(entry.creature)}
               </Text>
               <Text className="font-mono text-accent-blue" style={{ fontSize: 9, letterSpacing: 0.72, marginTop: 2 }}>
                 HUNTING
               </Text>
             </View>
             {/* Bottom-right, not top-right like the Arsenal: here the name runs the full width of the
-             *  tile's upper half, while the short "HUNTING" caption beneath leaves this corner free. */}
+             *  tile's upper half (up to two lines, ending just above this button), while the short "HUNTING"
+             *  caption beneath leaves this corner free. */}
             {onRemove && (
               <RemoveCreatureButton
                 creature={entry.creature}

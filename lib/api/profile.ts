@@ -1,9 +1,9 @@
 import { randomUUID } from 'expo-crypto';
 
-import { findPokemon } from '@/constants/pokedex';
 import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
 import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
 import type { TrainerCreature } from '@/lib/creature-list';
+import { creatureRefFromPick, type CreaturePick, type PickFailure } from '@/lib/creature-pick';
 import type { Database } from '@/lib/database.types';
 import { formatTradeDate } from '@/lib/format';
 import type { PickedProof } from '@/lib/proof-image';
@@ -197,19 +197,31 @@ async function firstFreeSlot(ownerId: string, list: CreatureList): Promise<numbe
  *  retrying forever against a genuinely full list. */
 const ADD_CREATURE_ATTEMPTS = 3;
 
+/** What a refused pick says to the trainer (see `PickFailure`). The picker already stops the last two, so these
+ *  are what a trainer sees only if a caller skipped it. */
+const PICK_FAILURE_MESSAGE: Record<PickFailure, (list: CreatureList) => string> = {
+  unknown_species: () => "That Pokémon isn't in the dex.",
+  unknown_form: () => "That Pokémon doesn't come in that form.",
+  untradable: (list) => `That Pokémon can't be traded in Pokémon GO, so it can't go in your ${CREATURE_LIST_LABEL[list]}.`,
+};
+
 /**
- * Shared by `addToArsenal` / `addToWishlist`. The stored `name` and `hue` are always read back out of
- * the pokedex by `pokemonId` — never taken from the caller — so a trainer's Arsenal/Wishlist entry can
- * never drift from the one source of truth for what a Pokémon is called or how it's colored (AGENTS.md:
- * never hallucinate game data). `shiny` IS caller-supplied: the picker's own toggle (`PokemonPickerModal`),
- * not something the dex can look up — a species has no fixed shiny-ness.
+ * Shared by `addToArsenal` / `addToWishlist`. The ref is built by `creatureRefFromPick` (lib/creature-pick.ts),
+ * which reads the stored `name` and `hue` back out of the pokedex by `pokemonId` — never from the caller — so a
+ * trainer's Arsenal/Wishlist entry can never drift from the one source of truth for what a Pokémon is called or
+ * how it's colored (AGENTS.md: never hallucinate game data). `shiny` and `formCode` ARE caller-supplied: the
+ * picker's own choices (`PokemonPickerModal`), not something the dex can look up — a species has no fixed
+ * shiny-ness or form. The form is half of the creature's identity (`pokemonId` + `formCode`), so dropping it here
+ * would store Vulpix when the trainer picked Alolan Vulpix; `creatureRefToJson` then writes it as `formCode`
+ * (the key `creature_ref_is_valid` accepts on `trainer_creatures.creature`) and `parseCreatureRef` reads it back.
  */
-async function addCreature(list: CreatureList, pokemonId: number, shiny: boolean): Promise<void> {
-  const entry = findPokemon(pokemonId);
-  if (!entry) throw new ProfileError('form', "That Pokémon isn't in the dex.");
-  // `creatureRefToJson` (not a raw object literal): the one place that omits a falsy `shiny` rather
-  // than sending it as `false` — see that function's own comment on why `creature_ref_is_valid` cares.
-  const creature = creatureRefToJson({ name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue, shiny });
+async function addCreature(list: CreatureList, pick: CreaturePick): Promise<void> {
+  const built = creatureRefFromPick(pick);
+  if (!built.ok) throw new ProfileError('form', PICK_FAILURE_MESSAGE[built.reason](list));
+  // `creatureRefToJson` (not a raw object literal): the one place that omits a falsy `shiny` / an absent
+  // `formCode` rather than sending them as `false` / `null` — see that function's own comment on why
+  // `creature_ref_is_valid` cares.
+  const creature = creatureRefToJson(built.ref);
   const ownerId = await currentUserId();
 
   for (let attempt = 1; attempt <= ADD_CREATURE_ATTEMPTS; attempt++) {
@@ -225,14 +237,16 @@ async function addCreature(list: CreatureList, pokemonId: number, shiny: boolean
   }
 }
 
-/** Adds a Pokémon (by national dex id) to the signed-in trainer's Arsenal, in the lowest free slot. */
-export async function addToArsenal(pokemonId: number, shiny = false): Promise<void> {
-  return addCreature('arsenal', pokemonId, shiny);
+/** Adds a creature (national dex id, shiny flag and form — the picker's `PickedCreature` fits) to the signed-in
+ *  trainer's Arsenal, in the lowest free slot. */
+export async function addToArsenal(pick: CreaturePick): Promise<void> {
+  return addCreature('arsenal', pick);
 }
 
-/** Adds a Pokémon (by national dex id) to the signed-in trainer's Wishlist, in the lowest free slot. */
-export async function addToWishlist(pokemonId: number, shiny = false): Promise<void> {
-  return addCreature('wishlist', pokemonId, shiny);
+/** Adds a creature (national dex id, shiny flag and form) to the signed-in trainer's Wishlist, in the lowest
+ *  free slot. */
+export async function addToWishlist(pick: CreaturePick): Promise<void> {
+  return addCreature('wishlist', pick);
 }
 
 /**

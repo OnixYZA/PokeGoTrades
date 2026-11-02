@@ -8,7 +8,10 @@ const CONSTRAINT = ['Any IV', 'Hundo pref.', '96%+ IV'];
 
 export function LookingForRow({ creature, index }: { creature: CreatureRef; index: number }) {
   // The name is the dex species only, so a wanted form ("Origin Palkia", "Primal Groudon") is said here, from
-  // `formCode`, on the line under it instead of being typed into the name.
+  // `formCode`, on the line under it instead of being typed into the name. That is also why the title stays the
+  // SHORT name (`creatureDisplayName`) and not `creatureFullName`: this row has the second line to spare, and
+  // the full name would say the form twice ("Alolan Vulpix" over "Alolan · Any IV"). The sprite beside it is the
+  // form's own: `Chip` resolves it from the creature's `formCode`.
   const detail = [creatureFormLabel(creature), CONSTRAINT[index] ?? 'Any IV'].filter(Boolean).join(' · ');
   return (
     <View className="flex-row items-center gap-3 rounded-xl border border-border bg-bg-card p-2.5">

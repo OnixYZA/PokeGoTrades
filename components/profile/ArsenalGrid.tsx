@@ -7,7 +7,7 @@ import { Chip } from '@/components/ui/Chip';
 import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { RemoveCreatureButton } from '@/components/profile/RemoveCreatureButton';
 import { hueBleed, SURFACE } from '@/constants/theme';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureFullName } from '@/lib/format';
 import type { TrainerCreature } from '@/lib/creature-list';
 
 interface ArsenalGridProps {
@@ -54,13 +54,18 @@ export function ArsenalGrid({ arsenal, onEdit, onRemove }: ArsenalGridProps) {
             <Chip creature={entry.creature} size={52} />
             {/* numberOfLines: 3 narrow columns (Task 1) + the "Shiny " prefix means a name like "Shiny
              *  Crabominable" needs to wrap — capped at 2 lines so a long one still fits its tile instead
-             *  of pushing the row's height around unpredictably. */}
+             *  of pushing the row's height around unpredictably.
+             *
+             *  The FULL name (`creatureFullName`: "Shiny Alolan Vulpix", "Wormadam (Sandy Cloak)"), not the species
+             *  with the form on a line of its own: a tile this narrow has no spare line, a third one would make
+             *  tiles with a form taller than their neighbours, and the label that already knows whether the form
+             *  goes before or after the species is the one place that word order is decided. */}
             <Text
               numberOfLines={2}
               className="text-center font-display-semi text-text-primary"
               style={{ fontSize: 11, lineHeight: 13.2 }}
             >
-              {creatureDisplayName(entry.creature)}
+              {creatureFullName(entry.creature)}
             </Text>
             {entry.creature.lucky && (
               <View className="flex-row items-center gap-0.5">

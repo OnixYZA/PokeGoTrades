@@ -21,7 +21,7 @@ import {
 
 import { ListingCard } from '@/components/feed/ListingCard';
 import { FormPicker } from '@/components/modals/FormPicker';
-import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
+import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { LuckyClover } from '@/components/ui/LuckyBadge';
@@ -30,7 +30,8 @@ import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
 import { findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
-import { creatureDisplayName, creatureFormLabel } from '@/lib/format';
+import { appendDistinctCreature, creatureRefFromPick } from '@/lib/creature-pick';
+import { creatureFormLabel, creatureFullName } from '@/lib/format';
 import {
   LISTING_TAGS,
   POKEBALLS,
@@ -62,6 +63,10 @@ const C = MODAL_COLORS;
  *  "wanted" appends to the "WANTED IN RETURN" list. Mirrors the `pickerFor` pattern
  *  app/(tabs)/profile.tsx uses for its Arsenal/Wishlist "+" buttons. */
 type PickerTarget = 'creature' | 'wanted';
+
+/** The most creatures a listing can ask for in return: the database caps `listings.looking` at this
+ *  (`creature_ref_array_is_valid(looking, 3)`). */
+const MAX_WANTED = 3;
 
 /** The three proof slots, one image each — the same kinds as the `proof_kind` enum, so a listing can
  *  structurally hold at most three (`listing_proofs_one_per_kind`). */
@@ -248,7 +253,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   );
 
   const openWantedPicker = () => {
-    if (wanted.length >= 3) return; // the DB caps `looking` at 3 (creature_ref_array_is_valid(looking, 3))
+    if (wanted.length >= MAX_WANTED) return;
     setPickerFor('wanted');
   };
 
@@ -261,26 +266,33 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
    *  RETURN" list, disambiguated by `pickerFor`. Closes the picker before touching state — same order
    *  as app/(tabs)/profile.tsx's `handleSelectPokemon` (see lib/toast.ts on modals and their own
    *  ToastHost; this flow has no toast, but the close-first order still avoids the picker's own Modal
-   *  re-rendering mid-close). `shiny` is only ever true here for a 'wanted' pick — the picker's own
-   *  Shiny pill is gated off for the 'creature' slot (`allowShiny={pickerFor === 'wanted'}` below),
-   *  since that slot already has its own Shiny toggle in the form. This is the only way into
-   *  `selectedCreature` and `wanted`, so refusing untradable species here means a draft can never hold one.
-   *  The picker already refuses them; the database (`listings_tradable_guard`) is the backstop. */
-  const handlePickPokemon = (pokemonId: number, shiny: boolean) => {
+   *  re-rendering mid-close).
+   *
+   *  The two slots read different parts of the pick. 'creature' uses only the SPECIES: that slot has its own
+   *  Shiny toggle and its own `FormPicker` right under it, so the picker is mounted with `allowShiny` and
+   *  `allowForm` off for it, and the form is whatever `handlePickForm` last set. 'wanted' uses the whole pick,
+   *  shiny and form included, because a wanted entry has no other control: "Alolan Vulpix" and "Vulpix" are
+   *  different creatures (`pokemonId` + `formCode`), and dropping the form here would ask for the wrong one.
+   *
+   *  This is the only way into `selectedCreature` and `wanted`, so refusing untradable creatures here, with
+   *  the form, means a draft can never hold one. The picker already refuses them; the database
+   *  (`listings_tradable_guard`) is the backstop. */
+  const handlePickPokemon = (pick: PickedCreature) => {
     const target = pickerFor;
     setPickerFor(null);
-    const entry = findPokemon(pokemonId);
-    if (!entry || isPokemonUntradable(entry.pokemonId)) return;
     if (target === 'creature') {
+      const entry = findPokemon(pick.pokemonId);
+      if (!entry || isPokemonUntradable(entry.pokemonId)) return;
       // Re-picking the same species keeps its form; a different one starts on its default form.
       if (entry.pokemonId !== selectedCreature?.pokemonId) setFormCode(null);
       setSelectedCreature(entry);
     } else if (target === 'wanted') {
-      const candidate: CreatureRef = { name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue, ...(shiny ? { shiny } : {}) };
-      const candidateKey = spriteVariantKey(spriteVariantOf(candidate));
-      setWanted((prev) =>
-        prev.length >= 3 || prev.some((w) => spriteVariantKey(spriteVariantOf(w)) === candidateKey) ? prev : [...prev, candidate]
-      );
+      // `creatureRefFromPick` is the one place a pick becomes a ref: dex name and hue, the trainer's shiny and
+      // form, and a refusal for an unknown species, a form the species lacks, or an untradable (species, form).
+      const candidate = creatureRefFromPick(pick);
+      if (!candidate.ok) return;
+      // Distinct by `spriteVariantKey` (species + shiny + form + costume), so two forms of one species both fit.
+      setWanted((prev) => appendDistinctCreature(prev, candidate.ref, MAX_WANTED));
     }
   };
 
@@ -611,6 +623,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         onClose={() => setPickerFor(null)}
         onSelect={handlePickPokemon}
         allowShiny={pickerFor === 'wanted'}
+        // Off only for the "CREATURE" slot, which has its own `FormPicker` below the selector. Phrased as
+        // `!== 'creature'` (not `=== 'wanted'`) so closing the picker after a wanted pick, which sets
+        // `pickerFor` to null, leaves the prop where it was instead of flipping it mid fade-out.
+        allowForm={pickerFor !== 'creature'}
         exclude={pickerFor === 'wanted' ? wanted : undefined}
       />
     </View>
@@ -1454,23 +1470,31 @@ function ProofUploadsSection({
 }
 
 function WantedSlot({ creature, onRemove }: { creature: CreatureRef; onRemove?: () => void }) {
+  // The full name, form included ("Alolan Vulpix"): the slot has no line of its own for a form, and without it two
+  // wanted entries of one species would read as the same creature twice. Three squares share the row, so it gets
+  // two lines before it elides, and the padding is a notch tighter than it was to make room for the second.
+  const name = creatureFullName(creature);
   return (
     <View
-      className="relative aspect-square flex-1 items-center justify-center rounded-xl border p-2.5"
+      className="relative aspect-square flex-1 items-center justify-center rounded-xl border p-2"
       style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
     >
       <Pressable
         onPress={onRemove}
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${creatureDisplayName(creature)}`}
+        accessibilityLabel={`Remove ${name}`}
         className="absolute right-1 top-1 h-[18px] w-[18px] items-center justify-center rounded-full border active:opacity-70"
         style={{ backgroundColor: '#0a0a0f', borderColor: C.borderDefault }}
       >
         <X size={10} color={C.textSecondary} strokeWidth={3} />
       </Pressable>
       <Chip creature={creature} size={36} />
-      <Text className="mt-1.5" numberOfLines={1} style={{ fontSize: 11, fontWeight: '600', color: C.textPrimary }}>
-        {creatureDisplayName(creature)}
+      <Text
+        className="mt-1"
+        numberOfLines={2}
+        style={{ fontSize: 11, lineHeight: 13, fontWeight: '600', color: C.textPrimary, textAlign: 'center' }}
+      >
+        {name}
       </Text>
       <Text className="font-mono" style={{ fontSize: 9, color: C.textMuted }}>
         {dexLabel(creature.pokemonId)}
@@ -1487,7 +1511,7 @@ function WantedInReturn({
   wanted: CreatureRef[];
   onAddWanted?: () => void;
   /** Keyed by `spriteVariantKey(spriteVariantOf(...))`, not `pokemonId` — a shiny and non-shiny entry
-   *  for the same species are distinct wanted slots (see `handlePickPokemon`'s dedupe). */
+   *  for the same species, or two forms of it, are distinct wanted slots (see `appendDistinctCreature`). */
   onRemoveWanted?: (variantKey: string) => void;
 }) {
   return (
@@ -1497,7 +1521,7 @@ function WantedInReturn({
           WANTED IN RETURN (OPTIONAL)
         </Text>
         <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>
-          {wanted.length} / 3
+          {wanted.length} / {MAX_WANTED}
         </Text>
       </View>
       {wanted.length === 0 ? (
@@ -1522,7 +1546,7 @@ function WantedInReturn({
             const key = spriteVariantKey(spriteVariantOf(w));
             return <WantedSlot key={key} creature={w} onRemove={() => onRemoveWanted?.(key)} />;
           })}
-          {wanted.length < 3 && (
+          {wanted.length < MAX_WANTED && (
             <Pressable
               onPress={onAddWanted}
               accessibilityRole="button"

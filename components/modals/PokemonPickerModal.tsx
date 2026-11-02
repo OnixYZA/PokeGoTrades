@@ -1,27 +1,46 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
   type ListRenderItemInfo,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ban, Check, Plus, Search, X } from 'lucide-react-native';
+import { Ban, Check, ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { hueBadgeStyle } from '@/constants/theme';
-import { formatTypes, isPokemonUntradable, POKEDEX, searchPokedex, type PokedexEntry } from '@/constants/pokedex';
-import { creatureDisplayName, describeTypes } from '@/lib/format';
-import { spriteVariantKey, spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
+import { formatTypes, POKEDEX, searchPokedex, TYPE_HUE, typesOf, type PokedexEntry } from '@/constants/pokedex';
+import { creatureDisplayName, creatureFullName, describeTypes } from '@/lib/format';
+import {
+  addedFormsOf,
+  buildPick,
+  excludedKeysOf,
+  hasFormStep,
+  resolveFormChoice,
+  resolveTap,
+  speciesRowState,
+  type PickedCreature,
+  type PickerOptions,
+  type SpeciesRowState,
+} from '@/lib/picker-selection';
+import type { SpriteSubject } from '@/lib/sprite-url';
 
+import { FormPicker } from './FormPicker';
 import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
+import { UntradableNotice } from './UntradableNotice';
+
+export type { PickedCreature };
 
 const C = MODAL_COLORS;
 
@@ -34,29 +53,51 @@ interface PokemonPickerModalProps {
   visible: boolean;
   title: string;
   onClose: () => void;
-  /** `shiny` is always `false` when `allowShiny` is off — a caller with its own separate Shiny toggle
-   *  (`CreateListingModal`'s "CREATURE" slot) sets `allowShiny={false}` and ignores this argument. */
-  onSelect: (pokemonId: number, shiny: boolean) => void;
+  /** Called with the creature the trainer picked (see `PickedCreature`). `shiny` is always `false` when
+   *  `allowShiny` is off, and `formCode` is always `null` when `allowForm` is off or the species has no forms;
+   *  `null` is also the species' default form, so a Hero Zacian is `formCode: null`, never `'HERO'`. It is never
+   *  called with an untradable creature: that is refused here, with the notice, and does not reach the caller. */
+  onSelect: (pick: PickedCreature) => void;
   /** Whether this picker offers a Shiny toggle at all. Defaults on: most pickers (Arsenal, Wishlist,
    *  "Wanted in Return") have no shiny toggle of their own elsewhere in the flow. */
   allowShiny?: boolean;
+  /** Whether this picker asks which form, after a species that has forms is tapped. Defaults on. A caller that
+   *  already has its own form control sets `allowForm={false}` and ignores `formCode` (always `null`):
+   *  `CreateListingModal`'s "CREATURE" slot shows a `FormPicker` under the chosen creature, so asking here as well
+   *  would ask twice. With it off, every row picks at once, as the default form. */
+  allowForm?: boolean;
   /** Already on the list this picker is adding to — shown disabled with an "ADDED" badge instead of
    *  being left out, so re-opening the picker still reads as the same dex, just partly checked off.
-   *  Compared by `spriteVariantKey`, so a shiny and non-shiny entry for the same species are distinct:
-   *  a row has no form/costume codes of its own (the dex doesn't carry those), so in practice this only
-   *  ever discriminates on shiny. */
+   *  Compared by `spriteVariantKey`, so a shiny and non-shiny entry, and every form of a species, are distinct
+   *  variants. A species row is "ADDED" only once EVERY form the trainer could still pick is in here (a row can't
+   *  know which form is meant), and the form step marks each added form on its own; see `speciesRowState`.
+   *  Entries with a costume code never match, since nothing picked here carries one. */
   exclude?: readonly SpriteSubject[];
 }
 
 /**
  * Full-dex search sheet shared by the Arsenal and Wishlist "+" buttons (app/(tabs)/profile.tsx) and by
  * CreateListingModal's "CREATURE" and "WANTED IN RETURN" slots. Every one of those is a trade list, so
- * untradable species (`isPokemonUntradable`) are never selectable here. They are still listed, dimmed and
- * marked, and tapping one explains why instead of silently doing nothing. Rows are species only (no form
- * codes), so in practice this catches Mythicals and Zygarde; fused forms cannot be picked here at all. Owns
- * its own native `Modal`, unlike the other components in this folder which are mounted inside a `Modal`
- * by their screen — this one has no screen-specific chrome to coordinate with, so keeping the two
- * together avoids every caller re-declaring the same `Modal` props.
+ * untradable creatures (`isPokemonUntradable`) are never selectable here. A species that is untradable in every
+ * form (Mythicals, Zygarde, Eternatus) is still listed, dimmed and marked, and tapping it explains why instead of
+ * silently doing nothing. Owns its own native `Modal`, unlike the other components in this folder which are
+ * mounted inside a `Modal` by their screen — this one has no screen-specific chrome to coordinate with, so keeping
+ * the two together avoids every caller re-declaring the same `Modal` props.
+ *
+ * ROWS ARE SPECIES, AND A FORM IS A SECOND STEP. Tapping a species with no forms picks it at once, so the great
+ * majority of the dex costs one tap. Tapping one WITH forms (Alolan Vulpix, Origin Palkia, Unown's letters; `formsOf`)
+ * swaps the list for a form step: the species' `FormPicker` chips (the default selected), a preview of exactly what
+ * would be added, and an "Add" button. A trainer who wants the plain form confirms immediately; one who wants Alolan
+ * picks it first. The Shiny setting carries over, and can be flipped in the step. Back (or Android's back button)
+ * returns to the list with its search and scroll position intact.
+ *
+ * TRADABILITY IS PER FORM, and only `isPokemonUntradable` decides it. A species whose default form is tradable but
+ * which has untradable forms (Kyurem, Necrozma, Zacian, Zamazenta) stays pickable; its untradable forms are shown in
+ * the form step, dimmed, and refuse with the same notice. Everything the caller receives is made by `buildPick`,
+ * which can not produce an untradable creature.
+ *
+ * The rules for what is pickable and what is "ADDED" live in `lib/picker-selection.ts` (pure, unit-tested); this
+ * file only draws them.
  */
 export function PokemonPickerModal({
   visible,
@@ -64,20 +105,32 @@ export function PokemonPickerModal({
   onClose,
   onSelect,
   allowShiny = true,
+  allowForm = true,
   exclude,
 }: PokemonPickerModalProps) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const [shiny, setShiny] = useState(false);
+  const [shinyToggle, setShinyToggle] = useState(false);
   /** The untradable row the trainer last tapped, shown as an explanation above the list. */
   const [refused, setRefused] = useState<PokedexEntry | null>(null);
+  /** The species whose form step is open, or `null` while the list is showing. */
+  const [step, setStep] = useState<PokedexEntry | null>(null);
+  /** The form the trainer last tapped in the step (`null`: the default form). What is actually selected is
+   *  `resolveFormChoice` of this, because it can stop being pickable under the trainer (Shiny flipped). */
+  const [requestedForm, setRequestedForm] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
+
+  /** The toggle's state only counts where the toggle is shown: a picker without one is never shiny. */
+  const shiny = allowShiny && shinyToggle;
+  const options = useMemo<PickerOptions>(() => ({ allowShiny, allowForm }), [allowShiny, allowForm]);
 
   useEffect(() => {
     if (!visible) return;
     setQuery(''); // never reopen showing the previous search
-    setShiny(false); // never reopen with the previous open's shiny toggle still on
+    setShinyToggle(false); // never reopen with the previous open's shiny toggle still on
     setRefused(null);
+    setStep(null); // never reopen inside the previous open's form step
+    setRequestedForm(null);
     // The sheet's TextInput mounts into a fresh native Modal host each time `visible` flips true;
     // focusing on the very same tick can race that mount, so defer one frame. (`autoFocus` only ever
     // fires on first mount, not on a later re-open, which is why this manages focus itself instead.)
@@ -85,10 +138,7 @@ export function PokemonPickerModal({
     return () => clearTimeout(timer);
   }, [visible]);
 
-  const excluded = useMemo(
-    () => new Set((exclude ?? []).map((s) => spriteVariantKey(spriteVariantOf(s)))),
-    [exclude],
-  );
+  const excluded = useMemo(() => excludedKeysOf(exclude), [exclude]);
   const results = useMemo(
     () => (query.trim().length === 0 ? POKEDEX : searchPokedex(query, SEARCH_RESULT_LIMIT)),
     [query],
@@ -99,21 +149,40 @@ export function PokemonPickerModal({
     setRefused(null);
   };
 
-  const renderItem = ({ item }: ListRenderItemInfo<PokedexEntry>) => {
-    const untradable = isPokemonUntradable(item.pokemonId);
-    return (
-      <PokedexRow
-        entry={item}
-        shiny={shiny}
-        untradable={untradable}
-        added={excluded.has(spriteVariantKey(spriteVariantOf({ pokemonId: item.pokemonId, shiny })))}
-        onPress={() => (untradable ? setRefused(item) : onSelect(item.pokemonId, allowShiny ? shiny : false))}
-      />
-    );
+  const handleTap = (entry: PokedexEntry) => {
+    const tap = resolveTap(entry.pokemonId, shiny, options);
+    if (tap.kind === 'refuse') {
+      setRefused(entry);
+    } else if (tap.kind === 'pick') {
+      onSelect(tap.pick);
+    } else {
+      Keyboard.dismiss(); // the search field is hidden behind the step, so don't leave its keyboard up
+      setRefused(null);
+      setRequestedForm(null); // every step starts on the default form
+      setStep(entry);
+    }
   };
 
+  const confirmForm = (pick: PickedCreature) => {
+    onSelect(pick);
+    // Back to the list whether or not the caller closes the sheet: a caller that keeps it open for more adds
+    // should show the trainer the row they just added, not the form step they are done with.
+    setStep(null);
+  };
+
+  const renderItem = ({ item }: ListRenderItemInfo<PokedexEntry>) => (
+    <PokedexRow
+      entry={item}
+      shiny={shiny}
+      state={speciesRowState(item.pokemonId, shiny, excluded, allowForm)}
+      hasForms={hasFormStep(item.pokemonId, allowForm)}
+      onPress={() => handleTap(item)}
+    />
+  );
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    // Android's back button steps back out of the form step before it closes the sheet, like the step's own back button.
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={step ? () => setStep(null) : onClose} statusBarTranslucent>
       {/* Full-bleed backdrop: a tap anywhere outside the max-w-md column closes the sheet, same idiom
        *  as components/ui/Dropdown.tsx's outer/inner Pressable pair. */}
       <Pressable
@@ -129,31 +198,49 @@ export function PokemonPickerModal({
               style={{ flex: 1 }}
             >
               <View className="flex-1" style={{ backgroundColor: C.bgSurface, paddingTop: insets.top }}>
-                <Header title={title} onClose={onClose} />
-                <SearchField
-                  query={query}
-                  onChangeQuery={changeQuery}
-                  inputRef={inputRef}
-                  allowShiny={allowShiny}
-                  shiny={shiny}
-                  onToggleShiny={() => setShiny((v) => !v)}
-                />
-                {refused && <UntradableNotice name={refused.name} onDismiss={() => setRefused(null)} />}
-                <FlatList
-                  data={results}
-                  keyExtractor={(item) => String(item.pokemonId)}
-                  renderItem={renderItem}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={{
-                    paddingHorizontal: 16,
-                    paddingTop: 4,
-                    paddingBottom: insets.bottom + 16,
-                    gap: 8,
-                    flexGrow: 1,
-                  }}
-                  ListEmptyComponent={<EmptyState query={query} />}
-                  showsVerticalScrollIndicator={false}
-                />
+                <Header title={title} onClose={onClose} onBack={step ? () => setStep(null) : undefined} />
+                {/* The list stays mounted (hidden, not unmounted) while the form step shows, so going back
+                 *  returns to the same search and scroll position instead of the top of a 1025-row dex. */}
+                <View style={{ flex: 1, display: step ? 'none' : 'flex' }}>
+                  <SearchField
+                    query={query}
+                    onChangeQuery={changeQuery}
+                    inputRef={inputRef}
+                    allowShiny={allowShiny}
+                    shiny={shiny}
+                    onToggleShiny={() => setShinyToggle((v) => !v)}
+                  />
+                  {refused && <UntradableNotice name={refused.name} onDismiss={() => setRefused(null)} />}
+                  <FlatList
+                    data={results}
+                    keyExtractor={(item) => String(item.pokemonId)}
+                    renderItem={renderItem}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{
+                      paddingHorizontal: 16,
+                      paddingTop: 4,
+                      paddingBottom: insets.bottom + 16,
+                      gap: 8,
+                      flexGrow: 1,
+                    }}
+                    ListEmptyComponent={<EmptyState query={query} />}
+                    showsVerticalScrollIndicator={false}
+                  />
+                </View>
+                {step && (
+                  <FormStep
+                    entry={step}
+                    shiny={shiny}
+                    allowShiny={allowShiny}
+                    onToggleShiny={() => setShinyToggle((v) => !v)}
+                    excluded={excluded}
+                    requestedForm={requestedForm}
+                    onChangeForm={setRequestedForm}
+                    onConfirm={confirmForm}
+                    options={options}
+                    bottomInset={insets.bottom}
+                  />
+                )}
               </View>
             </KeyboardAvoidingView>
           </Pressable>
@@ -163,15 +250,31 @@ export function PokemonPickerModal({
   );
 }
 
-function Header({ title, onClose }: { title: string; onClose: () => void }) {
+/** `onBack` is given only inside the form step: a back arrow before the title, to the species list. The close
+ *  button on the right always closes the whole sheet. */
+function Header({ title, onClose, onBack }: { title: string; onClose: () => void; onBack?: () => void }) {
   return (
     <View
-      className="flex-row items-center justify-between border-b px-5 py-4"
+      className="flex-row items-center justify-between gap-3 border-b px-5 py-4"
       style={{ borderBottomColor: C.borderSubtle }}
     >
-      <Text className="font-display" style={{ fontSize: 17, color: C.textPrimary }}>
-        {title}
-      </Text>
+      <View className="min-w-0 flex-1 flex-row items-center gap-3">
+        {onBack && (
+          <IconButton
+            accessibilityLabel="Back to Pokémon list"
+            onPress={onBack}
+            size={36}
+            radius={12}
+            className="border"
+            style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+          >
+            <ChevronLeft size={18} color={C.textPrimary} strokeWidth={2.5} />
+          </IconButton>
+        )}
+        <Text numberOfLines={1} className="shrink font-display" style={{ fontSize: 17, color: C.textPrimary }}>
+          {title}
+        </Text>
+      </View>
       <IconButton
         accessibilityLabel="Close"
         onPress={onClose}
@@ -187,9 +290,10 @@ function Header({ title, onClose }: { title: string; onClose: () => void }) {
 }
 
 /** Beside the search field, not inside it — the picker's own Shiny toggle (Task 2), independent of the
- *  text query. Its icon is the very `ShinyGlint` drawn on `Chip`/`Sprite`, so a trainer already reads
- *  "pink sparkle = shiny" before ever looking at the label. */
-function ShinyToggle({ shiny, onToggle }: { shiny: boolean; onToggle: () => void }) {
+ *  text query — and again beside the form step's "Add" button. Its icon is the very `ShinyGlint` drawn on
+ *  `Chip`/`Sprite`, so a trainer already reads "pink sparkle = shiny" before ever looking at the label.
+ *  `className` is the parent's layout (the gap to its neighbour); the pill's own look is not configurable. */
+function ShinyToggle({ shiny, onToggle, className = '' }: { shiny: boolean; onToggle: () => void; className?: string }) {
   return (
     <Pressable
       onPress={onToggle}
@@ -197,8 +301,8 @@ function ShinyToggle({ shiny, onToggle }: { shiny: boolean; onToggle: () => void
       accessibilityState={{ checked: shiny }}
       accessibilityLabel="Shiny"
       accessibilityHint="Adds the shiny variant of the Pokémon you pick"
-      className="ml-2 flex-row items-center gap-1.5 rounded-[14px] border px-3 active:opacity-80"
-      // No fixed height: the row's default `alignItems: 'stretch'` sizes the pill to the search input.
+      className={`${className} flex-row items-center gap-1.5 rounded-[14px] border px-3 active:opacity-80`}
+      // No fixed height: the row's default `alignItems: 'stretch'` sizes the pill to its neighbour (the search input, or the Add button).
       style={
         shiny
           ? [MODAL_SURFACE.togglePink, { borderColor: C.pink }]
@@ -268,30 +372,7 @@ function SearchField({
           </Pressable>
         )}
       </View>
-      {allowShiny && <ShinyToggle shiny={shiny} onToggle={onToggleShiny} />}
-    </View>
-  );
-}
-
-/** Why the row the trainer just tapped did nothing. Sits between the search field and the list, so it stays
- *  in view however far the list has scrolled. Exported so `FormPicker` refuses a fused form (White Kyurem) with
- *  the very same notice instead of a second copy of the wording that could drift. */
-export function UntradableNotice({ name, onDismiss }: { name: string; onDismiss: () => void }) {
-  return (
-    <View
-      accessibilityRole="alert"
-      className="mx-5 mb-3 flex-row items-start gap-2.5 rounded-[14px] border px-3.5 py-3"
-      style={{ backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.35)' }}
-    >
-      <Ban size={16} color={C.danger} strokeWidth={2.5} style={{ marginTop: 1 }} />
-      <Text className="flex-1" style={{ fontSize: 12.5, lineHeight: 18, color: C.textSecondary }}>
-        <Text style={{ fontWeight: '700', color: C.textPrimary }}>{name}</Text> can’t be traded in Pokémon GO. Mythical
-        Pokémon (except Meltan and Melmetal), Zygarde, Eternatus and special forms like White Kyurem, Ultra Necrozma
-        and Crowned Sword Zacian never change hands, so they can’t be listed, wanted or offered.
-      </Text>
-      <Pressable onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss" hitSlop={8} className="active:opacity-70">
-        <X size={14} color={C.textMuted} strokeWidth={2.5} />
-      </Pressable>
+      {allowShiny && <ShinyToggle shiny={shiny} onToggle={onToggleShiny} className="ml-2" />}
     </View>
   );
 }
@@ -299,26 +380,32 @@ export function UntradableNotice({ name, onDismiss }: { name: string; onDismiss:
 function PokedexRow({
   entry,
   shiny,
-  untradable,
-  added,
+  state,
+  hasForms,
   onPress,
 }: {
   entry: PokedexEntry;
   shiny: boolean;
-  /** Dimmed and marked, and the press explains the refusal (`UntradableNotice`) rather than adding. */
-  untradable: boolean;
-  added: boolean;
+  /** `'untradable'`: dimmed and marked, and the press explains the refusal (`UntradableNotice`) rather than
+   *  adding. `'added'`: dimmed, marked, and not pressable. */
+  state: SpeciesRowState;
+  /** The press opens the form step rather than picking, so the row ends in a chevron instead of a plus. */
+  hasForms: boolean;
   onPress: () => void;
 }) {
   const dex = `#${String(entry.pokemonId).padStart(3, '0')}`;
   const displayName = creatureDisplayName({ pokemonId: entry.pokemonId, shiny });
+  const untradable = state === 'untradable';
+  const added = state === 'added';
   const label = untradable
     ? `${displayName}, ${dex}, can’t be traded in Pokémon GO`
     : added
-      ? `${displayName}, already added`
-      : `Add ${displayName}, ${dex}, ${describeTypes(entry.types)}`;
+      ? `${displayName}, ${hasForms ? 'every form ' : ''}already added`
+      : hasForms
+        ? `Choose a form of ${displayName}, ${dex}, ${describeTypes(entry.types)}`
+        : `Add ${displayName}, ${dex}, ${describeTypes(entry.types)}`;
   // An untradable row stays pressable (the press explains the refusal), so only an added one is disabled.
-  const blocked = added && !untradable;
+  const blocked = added;
   const dimmed = untradable || added;
   return (
     <Pressable
@@ -326,7 +413,7 @@ function PokedexRow({
       disabled={blocked}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={untradable ? 'Explains why it can’t be added' : undefined}
+      accessibilityHint={untradable ? 'Explains why it can’t be added' : hasForms && !added ? 'Opens the forms to choose from' : undefined}
       accessibilityState={{ disabled: blocked }}
       className={`flex-row items-center gap-3 rounded-[14px] border px-3 py-2.5 ${dimmed ? 'opacity-50' : 'active:opacity-80'}`}
       style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
@@ -367,10 +454,119 @@ function PokedexRow({
             ADDED
           </Text>
         </View>
+      ) : hasForms ? (
+        <ChevronRight size={18} color={C.blue} strokeWidth={2.5} />
       ) : (
         <Plus size={18} color={C.blue} strokeWidth={2.5} />
       )}
     </Pressable>
+  );
+}
+
+/**
+ * The second step for a species with forms: which form, then add. Replaces the list under the same header (whose
+ * back arrow returns to it), so the sheet is still one screen with one thing to do.
+ *
+ *   - PREVIEW of exactly what "Add" will add: the form's own sprite, its full name ("Shiny Alolan Vulpix") and its
+ *     typing (Alolan Vulpix is Ice), all of it from the same functions the rest of the app names a creature with.
+ *   - FORM CHIPS: `FormPicker`, so the radiogroup, the labels and the untradable refusal are the Create Listing flow's
+ *     own. The default form is selected to begin with, so confirming at once adds the plain form. Forms already in
+ *     the list for the current shiny setting are dimmed, marked "ADDED" and not selectable.
+ *   - FOOTER: the Shiny toggle (when the picker has one) beside the "Add" button, where the thumb already is. Flipping
+ *     it re-evaluates which forms are added, and the selection moves off one that has just become added.
+ *
+ * "Add" emits only what `buildPick` allows, so an untradable form can not reach the caller from here. It is disabled
+ * with "All added" when every form is already in the list for this shiny setting.
+ */
+function FormStep({
+  entry,
+  shiny,
+  allowShiny,
+  onToggleShiny,
+  excluded,
+  requestedForm,
+  onChangeForm,
+  onConfirm,
+  options,
+  bottomInset,
+}: {
+  entry: PokedexEntry;
+  shiny: boolean;
+  allowShiny: boolean;
+  onToggleShiny: () => void;
+  excluded: ReadonlySet<string>;
+  requestedForm: string | null;
+  onChangeForm: (formCode: string | null) => void;
+  onConfirm: (pick: PickedCreature) => void;
+  options: PickerOptions;
+  bottomInset: number;
+}) {
+  const { pokemonId } = entry;
+  const choice = resolveFormChoice(requestedForm, pokemonId, shiny, excluded);
+  // With nothing left to pick, the preview shows the default form; no chip is selected and "Add" is off.
+  const formCode = choice ? choice.formCode : null;
+  const pick = choice ? buildPick(pokemonId, shiny, choice.formCode, options) : null;
+  const fullName = creatureFullName({ pokemonId, shiny, formCode });
+  const types = typesOf({ pokemonId, formCode }) ?? entry.types;
+  const hue = TYPE_HUE[types[0]];
+  const dex = `#${String(pokemonId).padStart(3, '0')}`;
+  return (
+    <View className="flex-1">
+      <ScrollView
+        style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24, gap: 20 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View
+          accessible
+          accessibilityLabel={`${fullName}, ${dex}, ${describeTypes(types)}`}
+          className="flex-row items-center gap-3.5 rounded-[14px] border p-3.5"
+          style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+        >
+          <Chip creature={{ pokemonId, hue, shiny, formCode }} size={64} />
+          <View className="min-w-0 flex-1">
+            <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: '700', color: C.textPrimary }}>
+              {fullName}
+            </Text>
+            <View className="mt-1.5 flex-row items-center gap-1.5">
+              <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.5 }}>
+                {dex}
+              </Text>
+              <View className="rounded-full border px-2 py-0.5" style={hueBadgeStyle(hue)}>
+                <Text className="font-mono" style={{ fontSize: 9, color: C.textSecondary, letterSpacing: 0.6 }}>
+                  {formatTypes(types).toUpperCase()}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+        {/* Keyed by species so a refusal notice never outlives the species it was about. */}
+        <FormPicker
+          key={pokemonId}
+          pokemonId={pokemonId}
+          formCode={choice ? choice.formCode : undefined}
+          onChange={onChangeForm}
+          addedForms={addedFormsOf(pokemonId, shiny, excluded)}
+        />
+      </ScrollView>
+      <View
+        className="flex-row gap-2 border-t px-5 pt-3"
+        style={{ borderTopColor: C.borderSubtle, paddingBottom: bottomInset + 16 }}
+      >
+        {allowShiny && <ShinyToggle shiny={shiny} onToggle={onToggleShiny} />}
+        <PrimaryButton
+          flex={1}
+          label={pick ? 'Add' : 'All added'}
+          accessibilityLabel={pick ? `Add ${fullName}` : `Every form of ${creatureDisplayName({ pokemonId, shiny })} is already added`}
+          icon={pick ? <Plus size={18} color="#0a0a0f" strokeWidth={2.5} /> : undefined}
+          style={MODAL_SURFACE.ctaGold}
+          textColor="#0a0a0f"
+          disabled={!pick}
+          onPress={() => pick && onConfirm(pick)}
+        />
+      </View>
+    </View>
   );
 }
 

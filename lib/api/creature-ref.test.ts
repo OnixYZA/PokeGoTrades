@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CreatureRef } from '@/data/types';
 
-import { creatureRefToJson, parseCreatureRef, parseCreatureRefs } from './creature-ref';
+import { creatureRefToJson, creatureToOffer, parseCreatureRef, parseCreatureRefs } from './creature-ref';
 
 describe('parseCreatureRef', () => {
   it('parses a minimal valid ref, omitting every optional field', () => {
@@ -169,6 +169,85 @@ describe('creatureRefToJson', () => {
     it('for an id outside the dex, keeps the stored name minus any shiny marker', () => {
       expect(creatureRefToJson({ name: 'Sh. Mystery', pokemonId: 999_999, hue: 1, shiny: true }).name).toBe('Mystery');
       expect(creatureRefToJson({ name: 'Mystery', pokemonId: 999_999, hue: 1 }).name).toBe('Mystery');
+    });
+  });
+});
+
+describe('formCode through the jsonb pair', () => {
+  // A trainer_creatures / looking[] entry is written by `creatureRefToJson` and read back by `parseCreatureRef`;
+  // the form must survive that trip, and a default form must come back as ABSENT, never as an explicit null.
+  const alolanVulpix: CreatureRef = { name: 'Vulpix', pokemonId: 37, hue: 18, formCode: 'ALOLA' };
+  const vulpix: CreatureRef = { name: 'Vulpix', pokemonId: 37, hue: 18 };
+
+  it('round-trips a form, and keeps it alongside shiny', () => {
+    expect(parseCreatureRef(creatureRefToJson(alolanVulpix))).toEqual(alolanVulpix);
+    const shiny: CreatureRef = { ...alolanVulpix, shiny: true };
+    expect(parseCreatureRef(creatureRefToJson(shiny))).toEqual(shiny);
+  });
+
+  it('round-trips a default form as no formCode at all, whether it was null or absent', () => {
+    for (const ref of [vulpix, { ...vulpix, formCode: null }]) {
+      const json = creatureRefToJson(ref);
+      expect(json).not.toHaveProperty('formCode');
+      const parsed = parseCreatureRef(json);
+      expect(parsed).toEqual(vulpix);
+      expect(parsed).not.toHaveProperty('formCode');
+    }
+  });
+
+  it('reads an explicit stored null, an empty string and a non-string formCode as no form', () => {
+    for (const formCode of [null, '', 42, true, {}, []]) {
+      const parsed = parseCreatureRef({ name: 'Vulpix', pokemonId: 37, hue: 18, formCode });
+      expect(parsed, `formCode ${JSON.stringify(formCode)}`).toEqual(vulpix);
+      expect(parsed).not.toHaveProperty('formCode');
+    }
+  });
+
+  it('keeps two forms of one species distinct through a list', () => {
+    const stored = [alolanVulpix, vulpix].map(creatureRefToJson);
+    expect(parseCreatureRefs(stored).map((r) => r.formCode)).toEqual(['ALOLA', undefined]);
+  });
+});
+
+describe('creatureToOffer', () => {
+  // The Arsenal -> formal offer hop (`ArsenalOfferSheet` -> `creatureToOffer` -> `offerToJson`, which spreads
+  // `creatureRefToJson`): a form the trainer's Arsenal entry carries has to reach the offer card and the
+  // Trade Summary, which read it back with `parseCreatureRef`.
+  it('carries formCode, costumeCode, shiny and lucky from the creature', () => {
+    const creature: CreatureRef = {
+      name: 'Vulpix',
+      pokemonId: 37,
+      hue: 18,
+      shiny: true,
+      lucky: true,
+      formCode: 'ALOLA',
+      costumeCode: 'JAN_2020_NOEVOLVE',
+    };
+    expect(creatureToOffer(creature)).toEqual(creature);
+  });
+
+  it('leaves off a null / absent form and falsy flags, as the DB check wants them absent', () => {
+    const offer = creatureToOffer({ name: 'Vulpix', pokemonId: 37, hue: 18, shiny: false, lucky: false, formCode: null, costumeCode: null });
+    expect(offer).toEqual({ name: 'Vulpix', pokemonId: 37, hue: 18 });
+    expect(offer).not.toHaveProperty('formCode');
+    expect(offer).not.toHaveProperty('costumeCode');
+  });
+
+  it('an Arsenal row survives row -> parse -> offer -> offer jsonb -> parse with its form', () => {
+    const arsenalRow = { name: 'Vulpix', pokemonId: 37, hue: 18, shiny: true, formCode: 'ALOLA' };
+    const creature = parseCreatureRef(arsenalRow);
+    expect(creature).not.toBeNull();
+    const offerJson = creatureRefToJson(creatureToOffer(creature!));
+    expect(offerJson).toEqual(arsenalRow);
+    expect(parseCreatureRef(offerJson)?.formCode).toBe('ALOLA');
+  });
+
+  it('does not copy the stored name pollution into the offer jsonb', () => {
+    expect(creatureRefToJson(creatureToOffer({ name: 'Sh. Vulpix', pokemonId: 37, hue: 18, formCode: 'ALOLA' }))).toEqual({
+      name: 'Vulpix',
+      pokemonId: 37,
+      hue: 18,
+      formCode: 'ALOLA',
     });
   });
 });
