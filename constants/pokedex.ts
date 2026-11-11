@@ -277,6 +277,69 @@ export function defaultFormOf(pokemonId: number): string | undefined {
   return DEFAULT_FORM_BY_SPECIES.get(pokemonId);
 }
 
+/**
+ * Canonical form code for storage and comparison: the SAME creature always yields the SAME `formCode`, however
+ * a client, a stored row or an older build spelled it. `null` is the species' default form, which is never
+ * stored under a code of its own (see `defaultFormOf`).
+ *
+ *   - `null`, `undefined` and blank give `null`; anything else is trimmed and upper-cased.
+ *   - `'NORMAL'`, and the species' own default form code (`defaultFormOf`), give `null`: Zacian's `HERO` is
+ *     Hero Zacian, stored as no form at all. It is species-specific on purpose: Palafin's `HERO` is a real,
+ *     NON-default form (its default is `ZERO`, so `defaultFormOf(964)` is not `'HERO'`) and is preserved.
+ *   - A code `formsOf` lists is returned as is.
+ *   - A code prefixed with the species token (`ZACIAN_CROWNED_SWORD`, the game master's spelling) is reduced to
+ *     the shortest `_`-separated suffix that `formsOf` lists, or to `null` when that suffix is `NORMAL` or the
+ *     default form (`ZACIAN_HERO`).
+ *   - Anything else comes back upper-cased and otherwise UNCHANGED. A code is never invented: an unknown code is
+ *     preserved, so a form this build has not heard of is not silently turned into another creature.
+ */
+export function normalizeFormCode(pokemonId: number, code: string | null | undefined): string | null {
+  if (code == null) return null;
+  const upper = code.trim().toUpperCase();
+  if (upper === '') return null;
+  const defaultForm = defaultFormOf(pokemonId);
+  const isDefault = (candidate: string) => candidate === 'NORMAL' || candidate === defaultForm;
+  if (isDefault(upper)) return null;
+  const forms = formsOf(pokemonId);
+  if (forms.includes(upper)) return upper;
+  const tokens = upper.split('_');
+  for (let start = tokens.length - 1; start >= 1; start--) {
+    const suffix = tokens.slice(start).join('_');
+    if (forms.includes(suffix)) return suffix;
+    if (isDefault(suffix)) return null;
+  }
+  return upper;
+}
+
+/**
+ * A species whose Create Listing form picks between its default form and ONE named form with a two-option
+ * toggle instead of the generic form chips: Zacian and Zamazenta, whose Hero of Many Battles and Crowned forms
+ * are the two states of one creature. The data that drives the UI, so no component hard-codes a dex number.
+ *
+ * The default form is `formCode: null` (never `heroCode`: Hero is not stored), and `crownedCode` is the form
+ * `formsOf(pokemonId)` lists. Both forms are listable: the owner's decision of 2026-11-12 to list the Crowned
+ * forms (the game master marks those templates untradable), see `isPokemonUntradable`.
+ */
+export interface CrownedFormToggle {
+  pokemonId: number;
+  /** Label of the default form (`formCode: null`). */
+  heroLabel: string;
+  /** The stored form code of the named form. */
+  crownedCode: string;
+  /** Label of the named form. */
+  crownedLabel: string;
+}
+
+export const CROWNED_FORM_TOGGLES: ReadonlyMap<number, CrownedFormToggle> = new Map([
+  [888, { pokemonId: 888, heroLabel: 'Hero of Many Battles', crownedCode: 'CROWNED_SWORD', crownedLabel: 'Crowned Sword' }],
+  [889, { pokemonId: 889, heroLabel: 'Hero of Many Battles', crownedCode: 'CROWNED_SHIELD', crownedLabel: 'Crowned Shield' }],
+]);
+
+/** The two-option form toggle for this species, or `undefined` when it uses the generic `FormPicker`. */
+export function crownedToggleOf(pokemonId: number): CrownedFormToggle | undefined {
+  return CROWNED_FORM_TOGGLES.get(pokemonId);
+}
+
 const GIGANTAMAX_IDS: ReadonlySet<number> = new Set(POKEDEX_GIGANTAMAX_IDS);
 
 /**
@@ -296,9 +359,11 @@ export function canGigantamax(pokemonId: number): boolean {
 // creature: ask `isPokemonUntradable(pokemonId, formCode)`. The database enforces the same rule
 // (`public.is_creature_untradable`), and `pokedex.test.ts` fails if the two drift apart.
 //
-// The lists agree with the pinned game master's `isTradable` for every species and form, except Pecharunt: the
-// game master calls it tradable and the project deliberately keeps it untradable (see `untradable.ts` and
-// `TRADABILITY_OVERRIDES` in scripts/pokedex-source.ts). The generator fails on any other difference.
+// The lists agree with the pinned game master's `isTradable` for every species and form, except the deliberate
+// overrides: Pecharunt (the game master calls it tradable and the project keeps it untradable) and the Crowned
+// Sword / Crowned Shield forms (the game master marks them untradable and the project lists them, the owner's
+// decision of 2026-11-12). See `untradable.ts` and `TRADABILITY_OVERRIDES` in scripts/pokedex-source.ts. The
+// generator fails on any other difference.
 export { isPokemonUntradable, UNTRADABLE_FORM_COMBINATIONS, UNTRADABLE_MYTHICAL_IDS, UNTRADABLE_SPECIES_IDS } from './untradable';
 
 /**

@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canGigantamax,
+  CROWNED_FORM_TOGGLES,
   creatureHasType,
+  crownedToggleOf,
   creatureHue,
   defaultFormOf,
   findPokemon,
@@ -27,6 +29,7 @@ import {
   type MetaTier,
   POKEMON_TYPES,
   matchPokemonType,
+  normalizeFormCode,
   searchPokedex,
   TYPE_HUE,
   typeMembership,
@@ -172,17 +175,20 @@ describe('isPokemonUntradable', () => {
     expect(isPokemonUntradable(800, null)).toBe(false);
   });
 
-  // Crowned Sword / Crowned Shield / Ultra are the project's rule (2026-10-18), and each matches the game master:
-  // the pinned file carries `isTradable` on ZACIAN_HERO and NECROZMA but not on their Crowned / Ultra forms (the
-  // generator's tradability cross-check keeps it that way). They used to be tradable; a regression to that
-  // fails here and in the database drift test below.
-  it('is true for Crowned Sword Zacian, Crowned Shield Zamazenta and Ultra Necrozma', () => {
-    expect(isPokemonUntradable(888, 'CROWNED_SWORD')).toBe(true);
-    expect(isPokemonUntradable(889, 'CROWNED_SHIELD')).toBe(true);
+  // Ultra Necrozma is the project's rule (2026-10-18) and matches the game master, which carries no `isTradable` on
+  // NECROZMA_ULTRA. Crowned Sword Zacian and Crowned Shield Zamazenta were on the list too and were taken off it on
+  // 2026-11-12, the owner's decision to list them; the game master marks those templates untradable, so they are
+  // documented overrides in TRADABILITY_OVERRIDES.
+  it('is true for Ultra Necrozma', () => {
     expect(isPokemonUntradable(800, 'ULTRA')).toBe(true);
   });
 
-  it('keeps the base forms of Zacian, Zamazenta and Necrozma tradable: only the named form is refused', () => {
+  it('is false for Crowned Sword Zacian and Crowned Shield Zamazenta: the owner lists them', () => {
+    expect(isPokemonUntradable(888, 'CROWNED_SWORD')).toBe(false);
+    expect(isPokemonUntradable(889, 'CROWNED_SHIELD')).toBe(false);
+  });
+
+  it('keeps Zacian and Zamazenta in every form tradable, and Necrozma outside its fused and Ultra forms', () => {
     for (const id of [888, 889]) {
       expect(isPokemonUntradable(id), `#${id}`).toBe(false);
       expect(isPokemonUntradable(id, null), `#${id}`).toBe(false);
@@ -202,7 +208,7 @@ describe('isPokemonUntradable', () => {
     expect(UNTRADABLE_SPECIES_IDS.has(890)).toBe(true); // species-wide, not a form entry: nothing else can be spelled wrong
   });
 
-  // Pecharunt is the one place the rule departs from the game master, which marks it `isTradable: true`. It stays
+  // Pecharunt is a place the rule departs from the game master, which marks it `isTradable: true`. It stays
   // untradable as a Mythical (owner decision), recorded as TRADABILITY_OVERRIDES in scripts/pokedex-source.ts.
   it('keeps Pecharunt untradable, in every form, although the game master calls it tradable', () => {
     expect(UNTRADABLE_MYTHICAL_IDS.has(1025)).toBe(true);
@@ -475,7 +481,7 @@ describe('FORM_TYPE_OVERRIDES', () => {
     }
   });
 
-  it('spells the untradable Necrozma, Zacian and Zamazenta forms exactly as the typing table does', () => {
+  it('spells the untradable Necrozma forms exactly as the typing table does', () => {
     // These codes also key UNTRADABLE_FORM_COMBINATIONS and the is_creature_untradable migration, so a typing
     // under a different spelling would mean one of the two lists is wrong. (Kyurem has no override: the game
     // master types White and Black Kyurem Dragon/Ice, the same as Kyurem.)
@@ -484,8 +490,6 @@ describe('FORM_TYPE_OVERRIDES', () => {
       '800:DAWN_WINGS',
       '800:DUSK_MANE',
       '800:ULTRA',
-      '888:CROWNED_SWORD',
-      '889:CROWNED_SHIELD',
     ]);
     for (const { pokemonId, formCode } of typed) {
       expect(typesOf({ pokemonId, formCode }), formCode).not.toEqual(typesOf({ pokemonId }));
@@ -610,7 +614,7 @@ describe('formsOf', () => {
   });
 
   it('offers every untradable form, so a picker can refuse them rather than hide them', () => {
-    // The fused Kyurem / Necrozma forms, Crowned Sword / Shield Zacian and Zamazenta, and Ultra Necrozma.
+    // The fused Kyurem / Necrozma forms and Ultra Necrozma.
     for (const { pokemonId, formCode } of UNTRADABLE_FORM_COMBINATIONS) {
       expect(formsOf(pokemonId), `#${pokemonId} ${formCode}`).toContain(formCode);
       expect(isPokemonUntradable(pokemonId, formCode)).toBe(true);
@@ -618,9 +622,10 @@ describe('formsOf', () => {
     // ...and the forms of a species that is untradable whole are offered too: Eternamax Eternatus.
     expect(formsOf(890)).toContain('ETERNAMAX');
     expect(isPokemonUntradable(890, 'ETERNAMAX')).toBe(true);
-    // The default forms of the species that have one untradable form are NOT among them, and stay tradable.
+    // The default form of Zacian is NOT among them (it is `formCode: null`), and stays tradable, like Crowned Sword.
     expect(formsOf(888)).not.toContain('HERO');
     expect(isPokemonUntradable(888, 'HERO')).toBe(false);
+    expect(formsOf(888)).toContain('CROWNED_SWORD');
   });
 
   it('is well-formed: dex species in id order, no repeats, a valid form code every time', () => {
@@ -1053,5 +1058,79 @@ describe('metaRanksOf', () => {
 
   it('has a disclaimer that says the tiers are estimates', () => {
     expect(META_TIER_DISCLAIMER.toLowerCase()).toContain('base stats');
+  });
+});
+
+describe('normalizeFormCode', () => {
+  it('keeps a canonical form code', () => {
+    expect(normalizeFormCode(888, 'CROWNED_SWORD')).toBe('CROWNED_SWORD');
+    expect(normalizeFormCode(889, 'CROWNED_SHIELD')).toBe('CROWNED_SHIELD');
+  });
+
+  it('strips the species prefix of the game master spelling', () => {
+    expect(normalizeFormCode(888, 'ZACIAN_CROWNED_SWORD')).toBe('CROWNED_SWORD');
+    expect(normalizeFormCode(889, 'ZAMAZENTA_CROWNED_SHIELD')).toBe('CROWNED_SHIELD');
+  });
+
+  it('turns the default form code into null, prefixed or not', () => {
+    expect(normalizeFormCode(888, 'HERO')).toBeNull();
+    expect(normalizeFormCode(889, 'HERO')).toBeNull();
+    expect(normalizeFormCode(888, 'ZACIAN_HERO')).toBeNull();
+    expect(normalizeFormCode(889, 'ZAMAZENTA_HERO')).toBeNull();
+  });
+
+  it('turns NORMAL into null', () => {
+    expect(normalizeFormCode(37, 'NORMAL')).toBeNull();
+    expect(normalizeFormCode(37, 'VULPIX_NORMAL')).toBeNull();
+  });
+
+  it("keeps Palafin's HERO: it is a real, non-default form there", () => {
+    expect(defaultFormOf(964)).not.toBe('HERO');
+    expect(formsOf(964)).toContain('HERO');
+    expect(normalizeFormCode(964, 'HERO')).toBe('HERO');
+  });
+
+  it('upper-cases and trims, and keeps Alolan Vulpix', () => {
+    expect(normalizeFormCode(888, ' crowned_sword ')).toBe('CROWNED_SWORD');
+    expect(normalizeFormCode(37, 'alola')).toBe('ALOLA');
+    expect(normalizeFormCode(37, 'ALOLA')).toBe('ALOLA');
+  });
+
+  it('preserves an unknown code instead of inventing one', () => {
+    expect(normalizeFormCode(888, 'SOMETHING_NEW')).toBe('SOMETHING_NEW');
+    expect(normalizeFormCode(25, 'MYSTERY')).toBe('MYSTERY');
+  });
+
+  it('gives null for null, undefined and blank', () => {
+    expect(normalizeFormCode(888, null)).toBeNull();
+    expect(normalizeFormCode(888, undefined)).toBeNull();
+    expect(normalizeFormCode(888, '')).toBeNull();
+    expect(normalizeFormCode(888, '   ')).toBeNull();
+  });
+});
+
+describe('CROWNED_FORM_TOGGLES', () => {
+  it('holds exactly Zacian and Zamazenta', () => {
+    expect([...CROWNED_FORM_TOGGLES.keys()].sort()).toEqual([888, 889]);
+    expect(crownedToggleOf(25)).toBeUndefined();
+    expect(crownedToggleOf(888)).toBe(CROWNED_FORM_TOGGLES.get(888));
+  });
+
+  it('is consistent with the generated dex and the untradable rule', () => {
+    for (const [id, toggle] of CROWNED_FORM_TOGGLES) {
+      expect(toggle.pokemonId).toBe(id);
+      expect(formsOf(id)).toContain(toggle.crownedCode);
+      expect(defaultFormOf(id)).toBe('HERO');
+      expect(isPokemonUntradable(id, toggle.crownedCode)).toBe(false);
+      expect(isPokemonUntradable(id, null)).toBe(false);
+      expect(normalizeFormCode(id, toggle.crownedCode)).toBe(toggle.crownedCode);
+    }
+  });
+
+  it('types the two options: Hero is the species typing, the Crowned form adds Steel', () => {
+    expect(typesOf({ pokemonId: 888 })).toEqual(['Fairy']);
+    expect(typesOf({ pokemonId: 888, formCode: 'CROWNED_SWORD' })).toEqual(['Fairy', 'Steel']);
+    expect(typesOf({ pokemonId: 889 })).toEqual(['Fighting']);
+    expect(typesOf({ pokemonId: 889, formCode: 'CROWNED_SHIELD' })).toEqual(['Fighting', 'Steel']);
   });
 });

@@ -233,6 +233,13 @@ export const FORM_LABEL_TABLE: readonly FormLabelEntry[] = [
   [925, 'FAMILY_OF_THREE', 'Family of Three', 'suffix'],
   [925, 'FAMILY_OF_FOUR', 'Family of Four', 'suffix'],
 
+  // Zacian #888 / Zamazenta #889: `HERO` is the default form's code as the sprite pipeline spells it
+  // (`defaultFormOf`), which the form picker uses to name its "default" chip. Re-casing would say "Hero", and the
+  // form is Hero of Many Battles. Species-specific on purpose: Palafin's #964 `HERO` is a different, NON-default
+  // form (Hero Form) and must keep its own label. (The Crowned forms re-case correctly: "Crowned Sword Zacian".)
+  [888, 'HERO', 'Hero of Many Battles', 'suffix'],
+  [889, 'HERO', 'Hero of Many Battles', 'suffix'],
+
   // Dudunsparce #982: the Three-Segment Form's code is the bare number word, which only reads after the species.
   [982, 'THREE', 'Three', 'suffix'],
 ];

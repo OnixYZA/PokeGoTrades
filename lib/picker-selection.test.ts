@@ -27,7 +27,7 @@ const VULPIX = 37; // default + ALOLA
 const MEOWTH = 52; // default + ALOLA + GALARIAN
 const ROTOM = 479; // default + five tradable appliance forms
 const KYUREM = 646; // default tradable; WHITE and BLACK untradable
-const ZACIAN = 888; // default (HERO) tradable; CROWNED_SWORD untradable
+const ZACIAN = 888; // default (HERO) and CROWNED_SWORD both tradable (the owner's decision, 2026-11-12)
 const MEW = 151; // untradable as a whole, no forms
 const DEOXYS = 386; // untradable as a whole, with forms
 
@@ -51,7 +51,7 @@ describe('the dex shapes these tests lean on', () => {
     expect(isPokemonUntradable(DEOXYS)).toBe(true);
     expect(isPokemonUntradable(KYUREM)).toBe(false);
     expect(isPokemonUntradable(KYUREM, 'WHITE')).toBe(true);
-    expect(isPokemonUntradable(ZACIAN, 'CROWNED_SWORD')).toBe(true);
+    expect(isPokemonUntradable(ZACIAN, 'CROWNED_SWORD')).toBe(false);
   });
 });
 
@@ -70,7 +70,7 @@ describe('pickableForms', () => {
 
   it('drops untradable forms but keeps the species pickable', () => {
     expect(pickableForms(KYUREM, true)).toEqual([null]);
-    expect(pickableForms(ZACIAN, true)).toEqual([null]);
+    expect(pickableForms(ZACIAN, true)).toEqual([null, 'CROWNED_SWORD']); // listable now, so offered rather than dropped
   });
 
   it('is empty for a species that is untradable as a whole, forms or not', () => {
@@ -241,7 +241,7 @@ describe('resolveFormChoice', () => {
 
   it('never selects an untradable form, even if asked', () => {
     expect(resolveFormChoice('WHITE', KYUREM, false, keys())).toEqual({ formCode: null });
-    expect(resolveFormChoice('CROWNED_SWORD', ZACIAN, false, keys())).toEqual({ formCode: null });
+    expect(resolveFormChoice('CROWNED_SWORD', ZACIAN, false, keys())).toEqual({ formCode: 'CROWNED_SWORD' }); // tradable: selectable
   });
 
   it('never selects a code that is not one of the species forms (the default stands in)', () => {
@@ -274,9 +274,12 @@ describe('buildPick', () => {
 
   it('refuses an untradable form, and an untradable species', () => {
     expect(buildPick(KYUREM, false, 'WHITE', WITH_FORMS)).toBeNull();
-    expect(buildPick(ZACIAN, false, 'CROWNED_SWORD', WITH_FORMS)).toBeNull();
     expect(buildPick(MEW, false, null, WITH_FORMS)).toBeNull();
     expect(buildPick(DEOXYS, false, 'ATTACK', WITH_FORMS)).toBeNull();
+  });
+
+  it('emits Crowned Sword Zacian: the owner lists it', () => {
+    expect(buildPick(ZACIAN, false, 'CROWNED_SWORD', WITH_FORMS)).toEqual({ pokemonId: ZACIAN, shiny: false, formCode: 'CROWNED_SWORD' });
   });
 
   it('still emits the tradable default of a species with untradable forms', () => {

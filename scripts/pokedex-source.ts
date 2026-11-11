@@ -714,6 +714,12 @@ export interface TradabilityOverride {
  * Pecharunt (#1025): the pinned game master marks it `isTradable: true`, on its formless template and on
  * `PECHARUNT_NORMAL`. The project keeps it untradable, like every Mythical except Meltan and Melmetal
  * (`UNTRADABLE_MYTHICAL_IDS`). That is the project owner's decision (2026-10-18), not a reading of the source.
+ *
+ * Crowned Sword Zacian (#888 `CROWNED_SWORD`) and Crowned Shield Zamazenta (#889 `CROWNED_SHIELD`): the pinned
+ * game master carries no `isTradable` on `ZACIAN_CROWNED_SWORD` or `ZAMAZENTA_CROWNED_SHIELD`, so it marks those
+ * templates untradable. The app lists them anyway, the owner's decision of 2026-11-12 (20261112000400). That is
+ * an override in the opposite direction to Pecharunt's: game master untradable, app tradable. If the game
+ * master ever starts calling them tradable, `checkTradability` throws until these two entries are removed.
  */
 export const TRADABILITY_OVERRIDES: readonly TradabilityOverride[] = [
   {
@@ -721,6 +727,18 @@ export const TRADABILITY_OVERRIDES: readonly TradabilityOverride[] = [
     formCode: null,
     gameMasterTradable: true,
     reason: 'the project treats it as a Mythical, like every Mythical but Meltan and Melmetal; owner decision, 2026-10-18',
+  },
+  {
+    pokemonId: 888,
+    formCode: 'CROWNED_SWORD',
+    gameMasterTradable: false,
+    reason: 'listed although the game master marks the Crowned Sword template untradable; owner decision, 2026-11-12',
+  },
+  {
+    pokemonId: 889,
+    formCode: 'CROWNED_SHIELD',
+    gameMasterTradable: false,
+    reason: 'listed although the game master marks the Crowned Shield template untradable; owner decision, 2026-11-12',
   },
 ];
 

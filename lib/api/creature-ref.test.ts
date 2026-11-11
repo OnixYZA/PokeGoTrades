@@ -251,3 +251,50 @@ describe('creatureToOffer', () => {
     });
   });
 });
+
+describe('formCode is canonical through every path', () => {
+  const base = { name: 'Zacian', pokemonId: 888, hue: 340 };
+
+  it('reads the game master spelling as the stored code', () => {
+    expect(parseCreatureRef({ ...base, formCode: 'ZACIAN_CROWNED_SWORD' })).toEqual({ ...base, formCode: 'CROWNED_SWORD' });
+    expect(parseCreatureRef({ name: 'Zamazenta', pokemonId: 889, hue: 1, formCode: 'ZAMAZENTA_CROWNED_SHIELD' })).toEqual({
+      name: 'Zamazenta',
+      pokemonId: 889,
+      hue: 1,
+      formCode: 'CROWNED_SHIELD',
+    });
+  });
+
+  it('omits the key for the default form, however it is spelled', () => {
+    expect(parseCreatureRef({ name: 'Zamazenta', pokemonId: 889, hue: 1, formCode: 'ZAMAZENTA_HERO' })).toEqual({ name: 'Zamazenta', pokemonId: 889, hue: 1 });
+    expect(parseCreatureRef({ ...base, formCode: 'HERO' })).toEqual(base);
+  });
+
+  it('keeps a real form: Alolan Vulpix', () => {
+    const vulpix = { name: 'Vulpix', pokemonId: 37, hue: 200, formCode: 'ALOLA' };
+    expect(parseCreatureRef(vulpix)).toEqual(vulpix);
+    expect(creatureRefToJson(vulpix)).toMatchObject({ formCode: 'ALOLA' });
+  });
+
+  it('writes the canonical code, in the jsonb and in the offer', () => {
+    expect(creatureRefToJson({ ...base, formCode: 'ZACIAN_CROWNED_SWORD' })).toMatchObject({ formCode: 'CROWNED_SWORD' });
+    expect(creatureRefToJson({ ...base, formCode: 'HERO' })).not.toHaveProperty('formCode');
+    expect(creatureToOffer({ ...base, formCode: 'ZACIAN_CROWNED_SWORD' })).toMatchObject({ formCode: 'CROWNED_SWORD' });
+    expect(creatureToOffer({ ...base, formCode: 'HERO' })).not.toHaveProperty('formCode');
+  });
+
+  it('round-trips: parse(toJson(x)) equals the normalised x', () => {
+    const spellings = [
+      { ...base, formCode: 'ZACIAN_CROWNED_SWORD' },
+      { ...base, formCode: 'CROWNED_SWORD' },
+      { ...base, formCode: 'HERO' },
+      { ...base },
+    ];
+    for (const ref of spellings) {
+      const once = parseCreatureRef(creatureRefToJson(ref));
+      expect(once).not.toBeNull();
+      expect(parseCreatureRef(creatureRefToJson(once!))).toEqual(once);
+    }
+    expect(parseCreatureRef(creatureRefToJson({ ...base, formCode: 'ZACIAN_CROWNED_SWORD' }))).toEqual({ ...base, formCode: 'CROWNED_SWORD' });
+  });
+});

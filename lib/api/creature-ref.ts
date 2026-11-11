@@ -6,12 +6,17 @@
  * pair; a drift between the copies (one of them forgetting to carry `formCode` through, say) would
  * silently drop sprite form data on some paths but not others. This is now the one place.
  *
+ * It is also where `formCode` is made CANONICAL (`normalizeFormCode`): read or written, the same creature
+ * carries the same code however it was spelled ("ZACIAN_CROWNED_SWORD" and "CROWNED_SWORD" are one creature, the
+ * default form's own code "HERO" is no form at all), so the database never holds two spellings of one form.
+ *
  * RELATIVE imports only (no `@/` alias): loaded directly by vitest, the same constraint
  * `lib/sprite-url.ts`'s header comment explains for the mirror script. Everything imported at runtime
  * (`../format` -> `../../constants/pokedex`) is plain TypeScript with relative imports of its own.
  */
 import type { Json } from '../database.types';
 import type { CreatureRef, FormalOffer } from '../../data/types';
+import { normalizeFormCode } from '../../constants/pokedex';
 import { speciesName } from '../format';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -30,6 +35,11 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+/** The canonical form code of a ref (`normalizeFormCode`), `null` for the default form. */
+function formCodeOf(ref: Pick<CreatureRef, 'pokemonId' | 'formCode'>): string | null {
+  return normalizeFormCode(ref.pokemonId, ref.formCode);
+}
+
 /**
  * One creature-ref entry out of jsonb — a `looking` array element, a formal offer, a trainer's
  * Arsenal/Wishlist row, a trade-history `gave`/`got` — or `null` when the value isn't a valid one.
@@ -42,7 +52,7 @@ export function parseCreatureRef(value: Json | unknown): CreatureRef | null {
   const { name, pokemonId, hue, shiny, lucky, formCode, costumeCode } = value;
   if (typeof name !== 'string' || typeof pokemonId !== 'number' || typeof hue !== 'number') return null;
 
-  const parsedFormCode = nonEmptyString(formCode);
+  const parsedFormCode = normalizeFormCode(pokemonId, nonEmptyString(formCode)) ?? undefined;
   const parsedCostumeCode = nonEmptyString(costumeCode);
 
   return {
@@ -90,7 +100,7 @@ export function creatureRefToJson(ref: CreatureRef): JsonObject {
     hue: ref.hue,
     ...(ref.shiny ? { shiny: true } : {}),
     ...(ref.lucky ? { lucky: true } : {}),
-    ...(ref.formCode != null ? { formCode: ref.formCode } : {}),
+    ...(formCodeOf(ref) !== null ? { formCode: formCodeOf(ref) } : {}),
     ...(ref.costumeCode != null ? { costumeCode: ref.costumeCode } : {}),
   };
 }
@@ -115,7 +125,7 @@ export function creatureToOffer(creature: CreatureRef): FormalOffer {
     hue: creature.hue,
     ...(creature.shiny ? { shiny: true } : {}),
     ...(creature.lucky ? { lucky: true } : {}),
-    ...(creature.formCode != null ? { formCode: creature.formCode } : {}),
+    ...(formCodeOf(creature) !== null ? { formCode: formCodeOf(creature) } : {}),
     ...(creature.costumeCode != null ? { costumeCode: creature.costumeCode } : {}),
   };
 }

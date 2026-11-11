@@ -1,11 +1,18 @@
 -- Regression test for supabase/migrations/20261018000100_untradable_crowned_ultra_eternatus.sql.
 --
+-- NOTE (2026-11-12): migration 20261112000400_allow_crowned_zacian_zamazenta.sql LIFTED the Crowned forms again
+-- (the owner's decision to list them; the game master marks those templates untradable). This file runs against
+-- the database after every migration, so its Crowned assertions now describe the NEW behaviour (tradable), and the
+-- staged rows that need an untradable creature use Ultra Necrozma instead. Every Ultra Necrozma, fused-form and
+-- Eternatus assertion is unchanged. supabase/tests/allow_crowned_zacian_zamazenta.test.sql covers the lift itself.
+--
 -- That migration widens `public.is_creature_untradable` (the rule 20260929000100 put behind the listing and offer
 -- triggers) with Zacian `CROWNED_SWORD`, Zamazenta `CROWNED_SHIELD`, Necrozma `ULTRA` and Eternatus (890) as a
--- whole species. Pecharunt (1025) is untradable too: it was already on the Mythical list, and the product
+-- whole species (the two Crowned entries were removed again by 20261112000400).
+-- Pecharunt (1025) is untradable too: it was already on the Mythical list, and the product
 -- deliberately overrides the game master, which marks it tradable. This file checks four things:
---   * the rule: the new entries are untradable, the default forms and the neighbouring species are not, and the
---     entries that were already there still are;
+--   * the rule: the entries that remain (Ultra Necrozma, Eternatus) are untradable, the default forms, the Crowned
+--     forms and the neighbouring species are not, and the entries that were already there still are;
 --   * the guards pick the rule up without being redefined: a new listing, or a looking[] entry, naming one of
 --     them raises PT400, while its tradable twin goes through;
 --   * a row that predates the rule keeps taking unrelated edits (a value that did not change is never
@@ -17,7 +24,8 @@
 --
 -- Fixture (supabase/seed.sql): listing b…001 is DriftCoral's (a…001) default-form Zacian with chats c…001-003,
 -- b…003 is NoxTrainer's (a…004) Rayquaza, locked by chat c…004, and b…004 is EmberVale's (a…005), open, with zero
--- chats. MintRunner (a…008) is the buyer in c…001. Rows that "predate the rule" are staged by switching the guard
+-- chats (staged below as an Ultra Necrozma, the stand-in for "a creature the rule refuses"). MintRunner (a…008) is
+-- the buyer in c…001. Rows that "predate the rule" are staged by switching the guard
 -- triggers off for a moment, the same way untradable_pokemon.test.sql does.
 begin;
 select plan(31);
@@ -51,8 +59,8 @@ begin
 end $$;
 
 -- ——— the rule: what is now untradable ———
-select ok(public.is_creature_untradable(888, 'CROWNED_SWORD'), 'Crowned Sword Zacian is untradable');
-select ok(public.is_creature_untradable(889, 'CROWNED_SHIELD'), 'Crowned Shield Zamazenta is untradable');
+select ok(not public.is_creature_untradable(888, 'CROWNED_SWORD'), 'Crowned Sword Zacian is tradable (lifted by 20261112000400)');
+select ok(not public.is_creature_untradable(889, 'CROWNED_SHIELD'), 'Crowned Shield Zamazenta is tradable (lifted by 20261112000400)');
 select ok(public.is_creature_untradable(800, 'ULTRA'), 'Ultra Necrozma is untradable');
 select is(
   array[public.is_creature_untradable(890), public.is_creature_untradable(890, 'ETERNAMAX'),
@@ -96,20 +104,21 @@ select is(
   array[private.creature_json_is_untradable('{"name":"Zacian","pokemonId":888,"formCode":"CROWNED_SWORD"}'),
         private.creature_json_is_untradable('{"name":"Eternatus","pokemonId":890,"formCode":"ETERNAMAX"}'),
         private.creature_json_is_untradable('{"name":"Zacian","pokemonId":888}')],
-  array[true, true, false],
-  'the creature jsonb check sees the widened rule');
+  array[false, true, false],
+  'the creature jsonb check sees the rule (Crowned Sword passes, Eternamax Eternatus does not)');
 
 -- ——— listings, as EmberVale ———
 select pg_temp.act_as('a0000000-0000-4000-8000-000000000005');
 set local role authenticated;
-select throws_ok(
-  $$ insert into public.listings (name, pokemon_id, form_code, catch_year, hue, loc, trade_type)
-     values ('Zacian', 888, 'CROWNED_SWORD', 2024, 260, 'Adyar', 'Unregistered (Standard)') $$,
-  'PT400', 'untradable_pokemon_listed', 'Crowned Sword Zacian cannot be listed');
-select throws_ok(
-  $$ insert into public.listings (name, pokemon_id, form_code, catch_year, hue, loc, trade_type)
-     values ('Zamazenta', 889, 'CROWNED_SHIELD', 2024, 340, 'Adyar', 'Unregistered (Standard)') $$,
-  'PT400', 'untradable_pokemon_listed', 'nor can Crowned Shield Zamazenta');
+-- Updates rather than inserts for the Crowned forms: the security hardening's rate limits count inserts.
+select lives_ok(
+  $$ update public.listings set pokemon_id = 888, form_code = 'CROWNED_SWORD'
+      where id = 'b0000000-0000-4000-8000-000000000004' $$,
+  'Crowned Sword Zacian can be listed (lifted by 20261112000400)');
+select lives_ok(
+  $$ update public.listings set pokemon_id = 889, form_code = 'CROWNED_SHIELD'
+      where id = 'b0000000-0000-4000-8000-000000000004' $$,
+  'and so can Crowned Shield Zamazenta');
 select throws_ok(
   $$ insert into public.listings (name, pokemon_id, form_code, catch_year, hue, loc, trade_type)
      values ('Necrozma', 800, 'ULTRA', 2024, 40, 'Adyar', 'Unregistered (Standard)') $$,
@@ -125,10 +134,10 @@ select throws_ok(
 select throws_ok(
   $$ insert into public.listings (name, pokemon_id, catch_year, hue, loc, trade_type, looking)
      values ('Pikachu', 25, 2024, 48, 'Adyar', 'Unregistered (Standard)',
-             '[{"name":"Zacian","pokemonId":888,"formCode":"CROWNED_SWORD","hue":260}]') $$,
-  'PT400', 'untradable_pokemon_wanted', 'Crowned Sword Zacian cannot be wanted in return either');
+             '[{"name":"Necrozma","pokemonId":800,"formCode":"ULTRA","hue":40}]') $$,
+  'PT400', 'untradable_pokemon_wanted', 'Ultra Necrozma cannot be wanted in return either');
 select throws_ok(
-  $$ update public.listings set pokemon_id = 888, form_code = 'CROWNED_SWORD'
+  $$ update public.listings set pokemon_id = 800, form_code = 'ULTRA'
       where id = 'b0000000-0000-4000-8000-000000000004' $$,
   'PT400', 'untradable_pokemon_listed', 'and an existing listing cannot be switched to one later');
 select lives_ok(
@@ -140,14 +149,14 @@ reset role;
 
 -- ——— stage rows that predate the rule ———
 -- The guards are switched off just long enough to write them, then back on, so everything below runs through
--- the real triggers. b…001 (three chats) becomes Crowned Sword Zacian, which guard_listing_update would freeze,
+-- the real triggers. b…001 (three chats) becomes Ultra Necrozma, which guard_listing_update would freeze,
 -- so that trigger is off for it too. Each looking[] holds at most 3 entries (creature_ref_array_is_valid).
 alter table public.listings disable trigger listings_guard;
 alter table public.listings disable trigger listings_tradable_guard;
 update public.listings
-   set pokemon_id = 888, form_code = 'CROWNED_SWORD',
+   set pokemon_id = 800, form_code = 'ULTRA',
        looking = '[{"name":"Lugia","pokemonId":249,"hue":25},
-                   {"name":"Zamazenta","pokemonId":889,"formCode":"CROWNED_SHIELD","hue":340},
+                   {"name":"Necrozma","pokemonId":800,"formCode":"ULTRA","hue":40},
                    {"name":"Mewtwo","pokemonId":150,"hue":220,"lucky":true}]'
  where id = 'b0000000-0000-4000-8000-000000000001';
 update public.listings
@@ -162,11 +171,11 @@ update public.listings
 alter table public.listings enable trigger listings_guard;
 alter table public.listings enable trigger listings_tradable_guard;
 
--- An old offer of Crowned Sword Zacian in chat c…001 and an Eternatus on DriftCoral's Wishlist.
+-- An old offer of Ultra Necrozma in chat c…001 and an Eternatus on DriftCoral's Wishlist.
 alter table public.chat_messages disable trigger chat_messages_tradable_offer;
 insert into public.chat_messages (chat_id, sender_id, client_id, kind, offer)
 values ('c0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000008', gen_random_uuid(), 'offer',
-        '{"name":"Zacian","pokemonId":888,"formCode":"CROWNED_SWORD","hue":260}');
+        '{"name":"Necrozma","pokemonId":800,"formCode":"ULTRA","hue":40}');
 alter table public.chat_messages enable trigger chat_messages_tradable_offer;
 insert into public.trainer_creatures (owner_id, list, creature, sort_order)
 values ('a0000000-0000-4000-8000-000000000001', 'wishlist', '{"name":"Eternatus","pokemonId":890,"hue":280}', 9);
@@ -182,11 +191,11 @@ select throws_ok(
       where id = 'b0000000-0000-4000-8000-000000000004' $$,
   'PT400', 'untradable_pokemon_wanted', 'but looking[] cannot be changed to hold an untradable entry');
 reset role;
-select pg_temp.act_as('a0000000-0000-4000-8000-000000000001');   -- DriftCoral, seller of b…001 (Crowned Sword, 3 chats)
+select pg_temp.act_as('a0000000-0000-4000-8000-000000000001');   -- DriftCoral, seller of b…001 (Ultra Necrozma, 3 chats)
 set local role authenticated;
 select lives_ok(
   $$ update public.listings set notes = 'Still here' where id = 'b0000000-0000-4000-8000-000000000001' $$,
-  'and so is a notes edit on an existing Crowned Sword listing that already has chats');
+  'and so is a notes edit on an existing Ultra Necrozma listing that already has chats');
 reset role;
 
 -- ——— the one-time data fix: sections 2 and 3 of the migration, run as the migration runs (superuser, every trigger on) ———
@@ -208,7 +217,7 @@ select is(
 select is(
   (select pokemon_id::text || ':' || form_code || ':' || (select count(*) from public.chats c where c.listing_id = l.id)::text
      from public.listings l where l.id = 'b0000000-0000-4000-8000-000000000001'),
-  '888:CROWNED_SWORD:3', 'the flagged listing keeps its creature and its three chats (it is frozen, only closed to offers)');
+  '800:ULTRA:3', 'the flagged listing keeps its creature and its three chats (it is frozen, only closed to offers)');
 select is(
   (select l.status::text || ':' || (select count(*) from public.trade_locks t where t.listing_id = l.id)::text
      from public.listings l where l.id = 'b0000000-0000-4000-8000-000000000003'),

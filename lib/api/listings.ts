@@ -10,6 +10,7 @@ import {
   type FilterFlagField,
   type PokemonSize,
 } from '@/constants/listing-attributes';
+import { normalizeFormCode } from '@/constants/pokedex';
 import { FEED_STATUSES } from '@/store/listing-lifecycle';
 import type { FilterSpec } from '@/store/listing-filters';
 import type { BackgroundHint, Listing, TradeType } from '@/data/types';
@@ -152,6 +153,7 @@ function parseIv(iv: string): { iv_atk: number; iv_def: number; iv_sta: number }
 
 /** DB row -> the `Listing` shape every component already consumes. `dist` stays unset (D3). */
 export function toListing(row: ListingRow): Listing {
+  const formCode = normalizeFormCode(row.pokemon_id, row.form_code);
   return {
     id: row.id,
     sellerId: row.seller_id,
@@ -159,7 +161,7 @@ export function toListing(row: ListingRow): Listing {
     status: row.status,
     name: row.name,
     pokemonId: row.pokemon_id,
-    ...(row.form_code ? { formCode: row.form_code } : {}),
+    ...(formCode ? { formCode } : {}),
     ...(row.costume_code ? { costumeCode: row.costume_code } : {}),
     year: row.catch_year,
     lucky: row.lucky,
@@ -337,7 +339,7 @@ function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
   return {
     name: speciesName(input),
     pokemon_id: input.pokemonId,
-    form_code: input.formCode ?? null,
+    form_code: normalizeFormCode(input.pokemonId, input.formCode),
     catch_year: input.year,
     cp: input.cp,
     size_class: input.sizeClass,

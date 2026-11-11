@@ -22,6 +22,7 @@ import {
 } from 'lucide-react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
+import { CrownedFormToggle } from '@/components/modals/CrownedFormToggle';
 import { FormPicker } from '@/components/modals/FormPicker';
 import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
@@ -32,7 +33,7 @@ import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import { canGigantamax, findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
+import { canGigantamax, crownedToggleOf, findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
 import { appendDistinctCreature, creatureRefFromPick } from '@/lib/creature-pick';
 import { CP_MAX, CP_MIN, creatureFormLabel, creatureFullName, dexLabel, parseCp } from '@/lib/format';
@@ -612,10 +613,19 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         showsVerticalScrollIndicator={false}
       >
         <CreatureSelector selected={selectedCreature} formCode={formCode} onPress={() => setPickerFor('creature')} />
-        {selectedCreature && (
-          // Keyed by species so the picker's refusal notice never outlives the species it was about.
-          <FormPicker key={selectedCreature.pokemonId} pokemonId={selectedCreature.pokemonId} formCode={formCode} onChange={handlePickForm} />
-        )}
+        {selectedCreature &&
+          (crownedToggleOf(selectedCreature.pokemonId) ? (
+            // Zacian / Zamazenta: Hero or Crowned is a two-state toggle, driven by `CROWNED_FORM_TOGGLES`.
+            <CrownedFormToggle
+              key={selectedCreature.pokemonId}
+              toggle={crownedToggleOf(selectedCreature.pokemonId)!}
+              formCode={formCode}
+              onChange={handlePickForm}
+            />
+          ) : (
+            // Keyed by species so the picker's refusal notice never outlives the species it was about.
+            <FormPicker key={selectedCreature.pokemonId} pokemonId={selectedCreature.pokemonId} formCode={formCode} onChange={handlePickForm} />
+          ))}
         <CpSection cpText={cpText} onChangeCp={setCpText} />
         <AttributesCard
           shiny={shiny}

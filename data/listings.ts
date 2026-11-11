@@ -20,15 +20,15 @@ import type { Listing } from './types';
 //
 // Every listing and every `looking` entry here must be TRADABLE (`isPokemonUntradable`, which mirrors
 // `public.is_creature_untradable`). supabase/seed.sql holds these same six listings, and the database refuses
-// an untradable one at load time. That is why l1 is the default-form Zacian: Crowned Sword Zacian, Crowned
-// Shield Zamazenta, Ultra Necrozma and every Eternatus are untradable. `data/listings.test.ts` fails if either
-// this file or the seed names one.
+// an untradable one at load time: Ultra Necrozma, the fused Kyurem/Necrozma forms and every Eternatus are
+// untradable, and `data/listings.test.ts` fails if either this file or the seed names one. (l1 is the default-form
+// Zacian. The Crowned forms are listable since …20261112000400, so either would now load.)
 export const listings: Listing[] = [
   {
     id: 'l1',
     name: 'Zacian',
     pokemonId: 888,
-    year: 2020, // no formCode: the default (Hero) form. Crowned Sword Zacian is untradable, so it cannot be listed
+    year: 2020, // no formCode: the default (Hero of Many Battles) form
     lucky: true,
     shiny: true,
     hue: 260,

@@ -82,9 +82,10 @@ update public.profiles set trades_count = 214 where id = 'a0000000-0000-4000-800
 --
 -- Every row here, and every looking[] entry, must be TRADABLE. Migrations run before this seed on a
 -- `supabase db reset`, so `listings_tradable_guard` (…20260929000100, widened by …20261018000100) refuses an
--- untradable listing or wanted creature at load time and aborts the whole seed. That is why l1 is the default
--- (Hero) form Zacian, `form_code` null: Crowned Sword Zacian, Crowned Shield Zamazenta, Ultra Necrozma and every
--- Eternatus are untradable. data/listings.test.ts fails when this statement names one.
+-- untradable listing or wanted creature at load time and aborts the whole seed. Ultra Necrozma, the fused
+-- Kyurem/Necrozma forms and every Eternatus are untradable; data/listings.test.ts fails when this statement names
+-- one. l1 is the default (Hero) form Zacian, `form_code` null. (Crowned Sword Zacian and Crowned Shield Zamazenta
+-- were untradable when it was chosen; …20261112000400 made them listable, so either form would now load.)
 --
 -- Every `name` below (the listing's own and each looking[] entry) is the DEX name for its pokemon_id
 -- (constants/pokedex.ts) and nothing else: "Shiny", "Legacy", "Purified", a form or "Apex" are never typed

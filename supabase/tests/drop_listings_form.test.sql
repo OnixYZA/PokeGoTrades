@@ -6,7 +6,7 @@
 -- form); and it still freezes `form_code` once a chat exists while leaving the column editable before one.
 --
 -- Fixture (supabase/seed.sql): listing b…001 belongs to DriftCoral (a…001), is the default-form Zacian (form_code
--- null: Crowned Sword Zacian is untradable, so the seed cannot insert one) and already has chat c…001 on it, so
+-- null) and already has chat c…001 on it, so
 -- it is the guard case. Listing b…002 is Armored Mewtwo (form_code A). Listing b…004 belongs to EmberVale
 -- (a…005), is `open` and has zero chats, so nothing can trip the guard on it.
 begin;

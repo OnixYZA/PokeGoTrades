@@ -291,12 +291,20 @@ describe('creatureFullName', () => {
     }
   });
 
+  it('labels the default forms of Zacian and Zamazenta, and leaves Palafin\'s HERO to re-casing', () => {
+    expect(creatureFormLabel({ pokemonId: 888, formCode: 'HERO' })).toBe('Hero of Many Battles');
+    expect(creatureFormLabel({ pokemonId: 889, formCode: 'HERO' })).toBe('Hero of Many Battles');
+    expect(creatureFormLabel({ pokemonId: 964, formCode: 'HERO' })).toBe('Hero'); // a real, non-default form: unchanged
+  });
+
   it('puts an adjective-like form before the species', () => {
     expect(creatureFullName({ pokemonId: 150, formCode: 'A' })).toBe('Armored Mewtwo');
     expect(creatureFullName({ pokemonId: 37, formCode: 'ALOLA' })).toBe('Alolan Vulpix');
     expect(creatureFullName({ pokemonId: 52, formCode: 'GALARIAN' })).toBe('Galarian Meowth');
     expect(creatureFullName({ pokemonId: 58, formCode: 'HISUIAN' })).toBe('Hisuian Growlithe');
     expect(creatureFullName({ pokemonId: 888, formCode: 'CROWNED_SWORD' })).toBe('Crowned Sword Zacian');
+    expect(creatureFullName({ pokemonId: 889, formCode: 'CROWNED_SHIELD' })).toBe('Crowned Shield Zamazenta');
+    expect(creatureFullName({ pokemonId: 888 })).toBe('Zacian'); // the default form carries no form code
     expect(creatureFullName({ pokemonId: 479, formCode: 'HEAT' })).toBe('Heat Rotom');
     expect(creatureFullName({ pokemonId: 484, formCode: 'ORIGIN' })).toBe('Origin Palkia');
     expect(creatureFullName({ pokemonId: 646, formCode: 'WHITE' })).toBe('White Kyurem');
