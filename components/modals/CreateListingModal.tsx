@@ -440,11 +440,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       // The listing row goes first: the storage policy only accepts proofs for a listing that already
       // exists and is the caller's. Every step is idempotent for `draftId`, so a retry is safe.
       const proofs = await Promise.all(
-        uploads.map(async (u) => ({
-          kind: u.proofKind,
-          contentType: u.image.contentType,
-          data: await readProofBytes(u.image),
-        }))
+        uploads.map(async (u) => {
+          const { data, contentType } = await readProofBytes(u.image);
+          return { kind: u.proofKind, contentType, data };
+        })
       );
       const listing = await publishListing(draft, proofs);
       if (uploads.length > 0) {

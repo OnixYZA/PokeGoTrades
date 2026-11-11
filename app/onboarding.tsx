@@ -9,6 +9,7 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SURFACE } from '@/constants/theme';
 import { fetchMyProfile, isProfileReady, type MyProfile } from '@/lib/api/profile';
 import { completeOAuthRedirect, signInWithProvider, type OAuthProvider } from '@/lib/auth';
+import { goBack } from '@/lib/navigation';
 import { useSession } from '@/lib/session';
 
 const SECONDARY_BUTTON_STYLE = { ...SURFACE.card, borderWidth: 1, borderColor: '#1a2032' };
@@ -99,8 +100,6 @@ export default function OnboardingScreen() {
 
   if (done) return null;
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
-
   const signIn = async (next: OAuthProvider) => {
     setProvider(next);
     setError(null);
@@ -129,7 +128,7 @@ export default function OnboardingScreen() {
     <PhoneFrame>
       <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3 pt-1.5">
         <Pressable
-          onPress={goBack}
+          onPress={() => goBack()}
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={6}

@@ -3,6 +3,7 @@ import sharp from 'sharp';
 
 import type { SizeClass } from './catch';
 import { LISTING_PROOF_BUCKET, PROFILE_PROOF_BUCKET, type Config } from './env';
+import { sniffImageFormat } from './image-format';
 import { log } from './log';
 import { recognizeText, UnreadableImageError } from './ocr';
 import { interpretProfile, interpretProof } from './parser';
@@ -244,6 +245,11 @@ async function runRow<Row extends QueueRow>(supabase: SupabaseClient, config: Co
   try {
     const image = await download(supabase, spec.bucket, row.storage_path);
     if (!image) return await finish('failed', UNREADABLE, { cause: 'file_missing' });
+
+    // The bucket allowlist trusts the client's Content-Type header; sharp sniffs the real format and would happily
+    // parse SVG (librsvg), GIF, TIFF or HEIF, so only the three formats the buckets advertise ever reach sharp or
+    // tesseract. Terminal, not retried, same as `decode_error`.
+    if (!sniffImageFormat(image)) return await finish('failed', UNREADABLE, { cause: 'unsupported_format' });
 
     // Header-only read: sharp parses the dimensions without decoding the pixels, so an oversized image is
     // rejected on the strength of its header and never reaches a decoder. Both outcomes here are terminal

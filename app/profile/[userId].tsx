@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
@@ -10,6 +10,7 @@ import { TradeHistoryGrid } from '@/components/profile/TradeHistoryGrid';
 import { WishlistGrid } from '@/components/profile/WishlistGrid';
 import { buildPublicTrainerProfile } from '@/data/publicProfile';
 import { toReadOnlyEntries } from '@/lib/creature-list';
+import { goBack } from '@/lib/navigation';
 
 /** Public read-only profile for another trainer — reached by tapping a seller/partner avatar
  *  or name from the feed or chats. Not the current user's own `(tabs)/profile` tab. */
@@ -22,7 +23,7 @@ export default function PublicProfileScreen() {
     <PhoneFrame>
       <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3.5 pt-1.5">
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => goBack('/')}
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={6}

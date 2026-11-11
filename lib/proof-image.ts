@@ -2,6 +2,8 @@ import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
 
+import { sniffImageMime } from '@/lib/image-sniff';
+
 /** Mirrors both proof buckets' limits (supabase/config.toml): `listing-proofs` (migration …000600) and
  *  `profile-proofs` (migration …000100) are each capped at 5 MiB, jpeg/png/webp. */
 export const PROOF_MAX_BYTES = 5 * 1024 * 1024;
@@ -88,8 +90,12 @@ export async function pickProofImage(): Promise<PickedProof | null> {
 /**
  * Reads the picked image as an ArrayBuffer for `supabase.storage.upload`. Blob, File and FormData
  * bodies do not work on React Native, and web has no expo-file-system `File`, hence the split.
+ *
+ * Also checks the bytes: the buckets' MIME allowlist only trusts the Content-Type header, so the returned
+ * `contentType` is the one sniffed from the bytes (authoritative), not the picker's claim, and a file that is
+ * not really a JPEG, PNG or WebP is refused here.
  */
-export async function readProofBytes(proof: PickedProof): Promise<ArrayBuffer> {
+export async function readProofBytes(proof: PickedProof): Promise<{ data: ArrayBuffer; contentType: ProofMimeType }> {
   let data: ArrayBuffer;
   if (Platform.OS === 'web') {
     const blob = proof.webFile ?? (await (await fetch(proof.uri)).blob());
@@ -100,5 +106,7 @@ export async function readProofBytes(proof: PickedProof): Promise<ArrayBuffer> {
   if (data.byteLength > PROOF_MAX_BYTES) {
     throw new ProofImageError(`That image is ${formatBytes(data.byteLength)}. The limit is 5 MB.`);
   }
-  return data;
+  const sniffed = sniffImageMime(data);
+  if (!sniffed) throw new ProofImageError('That file is not a JPEG, PNG or WebP image.');
+  return { data, contentType: sniffed };
 }

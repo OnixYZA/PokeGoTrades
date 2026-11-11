@@ -8,6 +8,7 @@ import type { Database } from '@/lib/database.types';
 import { formatTradeDate } from '@/lib/format';
 import type { PickedProof } from '@/lib/proof-image';
 import { readProofBytes } from '@/lib/proof-image';
+import { describeError } from '@/lib/rpc-errors';
 import { supabase } from '@/lib/supabase';
 
 export type Team = Database['public']['Enums']['team_name'];
@@ -395,13 +396,25 @@ export interface ProfileProof {
  * while one is still `pending`/`processing` fails with `23505`.
  */
 export async function uploadProfileProof(proof: PickedProof): Promise<void> {
-  const bytes = await readProofBytes(proof);
+  const { data: bytes, contentType } = await readProofBytes(proof);
   const id = randomUUID();
   const path = `${await currentUserId()}/${id}`;
   const bucket = supabase.storage.from(PROFILE_PROOF_BUCKET);
 
-  const { error: uploadError } = await bucket.upload(path, bytes, { contentType: proof.contentType, upsert: false });
-  if (uploadError) throw new ProfileError('form', uploadError.message);
+  const { error: uploadError } = await bucket.upload(path, bytes, { contentType, upsert: false });
+  if (uploadError) {
+    // The restrictive `profile_proofs_obj_insert_rate_limit` storage policy (20261112000100) refuses the object.
+    const refused =
+      ('statusCode' in uploadError && String(uploadError.statusCode) === '403') ||
+      uploadError.message.includes('row-level security');
+    if (refused) {
+      throw new ProfileError(
+        'form',
+        "Couldn't upload that screenshot. If you've sent several in the last hour, wait a while and try again, or enter your details by hand."
+      );
+    }
+    throw new ProfileError('form', uploadError.message);
+  }
 
   const { error: insertError } = await supabase.from('profile_proofs').insert({ id, storage_path: path });
   if (insertError) {
@@ -410,6 +423,7 @@ export async function uploadProfileProof(proof: PickedProof): Promise<void> {
     // reference the object — an orphan left behind here is harmless.
     await bucket.remove([path]);
     if (insertError.code === '23505') throw new ProfileError('form', 'Your last screenshot is still being read.');
+    if (insertError.code === 'PT429') throw new ProfileError('form', describeError(insertError).message);
     throw new ProfileError('form', insertError.message);
   }
 }

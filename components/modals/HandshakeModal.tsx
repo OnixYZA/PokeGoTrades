@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertTriangle, CheckSquare, Copy, Lock, Star, X } from 'lucide-react-native';
 import { useShallow } from 'zustand/react/shallow';
 
+import { IconButton } from '@/components/ui/IconButton';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { getHandshake, type Handshake } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
@@ -185,6 +186,12 @@ export function HandshakeModal({
     if (!result.ok) setError(result.error.message);
   };
 
+  /** The "Return to chat" / ✕ exit. Marks the modal as closing so the phase watcher stays out of the way. */
+  const returnToChat = () => {
+    closing.current = true;
+    onReturnToChat?.();
+  };
+
   const trainers = live ? (data ? toTrainers(data) : null) : { me: MOCK_ME, partner: MOCK_PARTNER };
 
   return (
@@ -270,13 +277,18 @@ export function HandshakeModal({
           </Pressable>
         )}
         <Pressable
-          onPress={onReturnToChat}
+          onPress={returnToChat}
           accessibilityRole="button"
           accessibilityLabel="Return to chat"
           className="items-center py-3 active:opacity-70"
         >
           <Text style={{ fontSize: 13, fontWeight: '500', color: C.textMuted }}>Return to chat</Text>
         </Pressable>
+      </View>
+      <View style={{ position: 'absolute', top: insets.top + 8, right: 16, zIndex: 10, elevation: 10 }}>
+        <IconButton size={34} radius={12} accessibilityLabel="Close handshake" onPress={returnToChat}>
+          <X size={16} color={C.textMuted} />
+        </IconButton>
       </View>
       <ToastHost />
     </View>

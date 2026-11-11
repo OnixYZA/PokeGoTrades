@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, Handshake } from 'lucide-react-native';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,7 @@ import type { ChatMessage, CreatureRef } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureFullName } from '@/lib/format';
+import { goBack } from '@/lib/navigation';
 import { newestAcceptableOffer, offerAvailability } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
@@ -98,7 +99,7 @@ export default function ActiveChatScreen() {
       <View className="flex-1">
         <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3.5 pt-1.5">
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => goBack('/chats')}
             accessibilityRole="button"
             accessibilityLabel="Back to chats"
             hitSlop={6}
@@ -167,14 +168,14 @@ export default function ActiveChatScreen() {
   const handleMarkCompleted = async () => {
     await confirmTrade(chatId);
     setOverlay(null);
-    router.back();
+    goBack('/chats');
   };
 
   return (
     <View className="flex-1">
       <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3.5 pt-1.5">
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => goBack('/chats')}
           accessibilityRole="button"
           accessibilityLabel="Back to chats"
           hitSlop={6}
@@ -249,7 +250,7 @@ export default function ActiveChatScreen() {
           partner={chat.partner}
           onOpenHandshake={openHandshake}
           onReviewOffer={reviewNewestOffer}
-          onBailed={() => router.back()}
+          onBailed={() => goBack('/chats')}
         />
         <Composer
           value={draft}
@@ -278,7 +279,7 @@ export default function ActiveChatScreen() {
             onMarkCompleted={() => void handleMarkCompleted()}
             onCompleted={() => {
               setOverlay(null);
-              router.back();
+              goBack('/chats');
             }}
             onReturnToChat={() => setOverlay(null)}
           />

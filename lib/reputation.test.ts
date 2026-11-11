@@ -235,11 +235,12 @@ const taggedLine = (sql: string, tag: string): string => {
   return line;
 };
 
-// 000400 is applied on hosted and immutable; 000500 redefines bail_and_block / unlock_trade (latest = what hosted
-// runs), so the penalty constants are pinned in BOTH.
+// 000400 is applied on hosted and immutable; 000500 redefines bail_and_block / unlock_trade, and 20261112000100
+// recreates bail_and_block again (latest definition), so the penalty constants are pinned in ALL THREE.
 describe.each([
   '20261103000400_reputation_and_anti_bail.sql',
   '20261103000500_tighten_reputation_loopholes.sql',
+  '20261112000100_security_hardening.sql',
 ])('SQL drift guard (supabase/migrations/%s)', (file) => {
   const sql = readMigration(file);
   const lineWith = (tag: string) => taggedLine(sql, tag);

@@ -37,6 +37,7 @@ import {
 } from '@/lib/creature-list';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureFullName } from '@/lib/format';
+import { goBack } from '@/lib/navigation';
 import { useSession } from '@/lib/session';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
@@ -392,7 +393,7 @@ export default function ProfileScreen() {
       {/* Header with back button */}
       <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3 pt-1.5">
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => goBack('/')}
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={6}

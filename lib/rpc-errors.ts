@@ -61,6 +61,9 @@ const KNOWN: Record<string, Omit<ErrorInfo, 'code' | 'sqlState'>> = {
   own_listing: { message: 'You cannot make an offer on your own listing.', followUp: 'none' },
   permanent_account_required: { message: 'Verify your email to continue.', followUp: 'onboarding' },
   profile_incomplete: { message: 'Finish your trainer profile to continue.', followUp: 'onboarding' },
+  // Raised by the 20261112000100 rate-limit triggers on `profile_proofs` / `listing_proofs` and on `listings`.
+  proof_rate_limited: { message: "You've uploaded a lot of screenshots in the last hour. Try again later.", followUp: 'none' },
+  listing_rate_limited: { message: "You've posted a lot of listings in the last hour. Try again later.", followUp: 'none' },
   rate_limited: { message: 'You are doing that too fast. Try again in a moment.', followUp: 'none' },
   invalid_offer_message: { message: 'That offer is no longer valid.', followUp: 'resync' },
   invalid_offer: { message: 'That offer was rejected. Pick another.', followUp: 'none' },

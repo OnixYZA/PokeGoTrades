@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Ruler, Send, Trophy, X, Zap } from 'lucide-react-native';
@@ -35,6 +35,7 @@ import { formatVicinityLabel } from '@/constants/locations';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName, creatureFormLabel, formatCp } from '@/lib/format';
+import { goBack } from '@/lib/navigation';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
@@ -66,21 +67,53 @@ export default function ListingDetailScreen() {
     return subscribeToListing(id);
   }, [id, serverBacked, subscribeToListing]);
 
-  const defaultNavigate = () => router.back();
+  const defaultNavigate = () => goBack('/');
+
+  // Closing is single-fire and guaranteed. `closingRef` (JS) and `isClosing` (worklet) stop a second tap or a
+  // drag from restarting the animation; navigation runs once from `flushNav`, fired by the animation callback
+  // whether or not it `finished`, with a timer as the backstop if the callback never runs at all.
+  const closingRef = useRef(false);
+  const isClosing = useSharedValue(false);
+  const navigatedRef = useRef(false);
+  const pendingNavRef = useRef<(() => void) | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      // Unmounted (e.g. a hardware back mid-animation): the screen is already gone, so a late animation
+      // callback must not navigate again and pop the screen underneath.
+      navigatedRef.current = true;
+      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+    },
+    [],
+  );
+
+  const flushNav = () => {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+    (pendingNavRef.current ?? defaultNavigate)();
+  };
 
   const close = (navigate?: () => void) => {
-    const navFunc = navigate ?? defaultNavigate;
+    if (closingRef.current) return;
+    closingRef.current = true;
+    isClosing.value = true;
+    pendingNavRef.current = navigate ?? defaultNavigate;
     translateY.value = withTiming(SHEET_TRAVEL, { duration: 220, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
-    overlayOpacity.value = withTiming(0, { duration: 200 }, (finished) => {
-      if (finished) runOnJS(navFunc)();
+    overlayOpacity.value = withTiming(0, { duration: 200 }, () => {
+      runOnJS(flushNav)();
     });
+    fallbackTimerRef.current = setTimeout(flushNav, 350);
   };
 
   const dragGesture = Gesture.Pan()
     .onUpdate((e) => {
+      if (isClosing.value) return;
       if (e.translationY > 0) translateY.value = e.translationY;
     })
     .onEnd((e) => {
+      if (isClosing.value) return;
       if (e.translationY > DISMISS_THRESHOLD) {
         runOnJS(close)();
       } else {
@@ -170,12 +203,6 @@ export default function ListingDetailScreen() {
           className="relative border-b border-border-subtle px-[22px] pb-[22px] pt-[18px]"
           style={hueHeroBleed(creatureHue(listing))}
         >
-          <View className="absolute right-4 top-3">
-            <IconButton size={34} radius={12} accessibilityLabel="Close" onPress={() => close()}>
-              <X size={16} color="#8b93a7" />
-            </IconButton>
-          </View>
-
           <View className="flex-row items-start gap-4">
             <Sprite creature={listing} purified={listing.purified} size={92} />
             <View className="min-w-0 flex-1">
@@ -211,6 +238,14 @@ export default function ListingDetailScreen() {
                 )}
               </View>
             </View>
+          </View>
+
+          {/* Must stay the LAST child, with a zIndex: the row above spans the full width, and anything
+           *  painted before it loses the corner (and the touch) to its text column. */}
+          <View className="absolute right-4 top-3" style={{ zIndex: 10, elevation: 10 }}>
+            <IconButton size={34} radius={12} accessibilityLabel="Close" onPress={() => close()}>
+              <X size={16} color="#8b93a7" />
+            </IconButton>
           </View>
         </View>
 
