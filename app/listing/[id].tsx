@@ -19,6 +19,7 @@ import { StardustCard } from '@/components/listing/StardustCard';
 import { BuyerOfferModal } from '@/components/modals/BuyerOfferModal';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
+import { DynamaxBadge } from '@/components/ui/DynamaxBadge';
 import { GigantamaxBadge } from '@/components/ui/GigantamaxBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
@@ -264,6 +265,7 @@ export default function ListingDetailScreen() {
               <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
                 {listing.lucky && <LuckyBadge />}
                 {listing.isGigantamax && <GigantamaxBadge />}
+                {listing.isDynamax && <DynamaxBadge />}
                 <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
                 {listing.untradable && (
                   <View className="rounded-[6px] border px-2 py-[3px]" style={{ backgroundColor: 'rgba(255,92,138,0.15)', borderColor: 'rgba(255,92,138,0.3)' }}>

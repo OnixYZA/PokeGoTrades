@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AlertTriangle, Ban, Check, ChevronRight, ShieldCheck } from 'lucide-react-native';
+import { AlertTriangle, Ban, Check, ChevronDown, ChevronRight, ShieldCheck } from 'lucide-react-native';
 
 import { describeBailSafeguard, type BailSafeguardTone } from '@/lib/bail-safeguard';
+import { reputationRuleSummary } from '@/lib/trade-guide';
 import { ToastHost } from '@/components/ui/ToastHost';
 import type { ChatRole } from '@/data/types';
 import { useTradeStore } from '@/store/trade-store';
@@ -116,6 +117,7 @@ export function BailBlockModal({
         <ImpactChips sellerCopy={role !== 'buyer'} />
         <ReasonList selectedReason={selectedReason} onSelectReason={setSelectedReason} />
         {safeguard ? <SafeguardBanner {...safeguard} /> : null}
+        <RepRulesRow />
 
         {selectedReason === 'other' && (
           <View className="mb-6">
@@ -218,6 +220,43 @@ function SafeguardBanner({ tone, headline, detail }: { tone: BailSafeguardTone; 
         </Text>
         <Text style={{ fontSize: 12, color: C.textSecondary, marginTop: 2, lineHeight: 17 }}>{detail}</Text>
       </View>
+    </View>
+  );
+}
+
+/** "How rep penalties work": a compact expandable row under the safeguard banner. The bullets are
+ *  `reputationRuleSummary()` (lib/trade-guide.ts), so they quote the same constants the rules run on. */
+function RepRulesRow() {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <View className="mb-5">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel="How rep penalties work"
+        onPress={() => setExpanded((v) => !v)}
+        className="flex-row items-center justify-between active:opacity-70"
+        style={{ minHeight: 44 }}
+      >
+        <Text className="font-mono-semi" style={{ fontSize: 11, color: C.textSecondary, letterSpacing: 0.4 }}>
+          How rep penalties work
+        </Text>
+        <ChevronDown
+          size={16}
+          color={C.textMuted}
+          style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}
+        />
+      </Pressable>
+      {expanded
+        ? reputationRuleSummary().map((line) => (
+            <View key={line} className="mb-1.5 flex-row gap-2">
+              <Text style={{ fontSize: 12, lineHeight: 17, color: C.textMuted }}>{'•'}</Text>
+              <Text className="flex-1" style={{ fontSize: 12, lineHeight: 17, color: C.textSecondary }}>
+                {line}
+              </Text>
+            </View>
+          ))
+        : null}
     </View>
   );
 }

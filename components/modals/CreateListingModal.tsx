@@ -18,7 +18,6 @@ import {
   Search,
   Shirt,
   X,
-  Zap,
 } from 'lucide-react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
@@ -28,7 +27,10 @@ import { PokemonPickerModal, type PickedCreature } from '@/components/modals/Pok
 import { Chip } from '@/components/ui/Chip';
 import { LocationPickerSheet } from '@/components/location/LocationPickerSheet';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { DynamaxSymbol } from '@/components/ui/DynamaxBadge';
 import { GigantamaxSymbol } from '@/components/ui/GigantamaxBadge';
+import { MAX_BADGE_PALETTES } from '@/constants/max-badges';
+import { availableMaxForms, coerceMaxForm, maxFormFlags, type MaxForm } from '@/constants/max-form';
 import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { TextBadge } from '@/components/ui/TextBadge';
@@ -44,6 +46,7 @@ import {
   POKEMON_SIZES,
   TRADE_TIMELINES,
   TRADE_TIMELINE_LABELS,
+  PROOF_KIND_LABELS,
   type ListingTag,
   type Pokeball,
   type PokemonSize,
@@ -79,9 +82,9 @@ const MAX_WANTED = 3;
 /** The three proof slots, one image each — the same kinds as the `proof_kind` enum, so a listing can
  *  structurally hold at most three (`listing_proofs_one_per_kind`). */
 const PROOF_KINDS: { proofKind: ProofKind; label: 'Appraisal' | 'Movesets' | 'Event Badge' }[] = [
-  { proofKind: 'appraisal', label: 'Appraisal' },
-  { proofKind: 'movesets', label: 'Movesets' },
-  { proofKind: 'event_badge', label: 'Event Badge' },
+  { proofKind: 'appraisal', label: PROOF_KIND_LABELS.appraisal },
+  { proofKind: 'movesets', label: PROOF_KIND_LABELS.movesets },
+  { proofKind: 'event_badge', label: PROOF_KIND_LABELS.event_badge },
 ];
 
 interface ProofUpload {
@@ -140,21 +143,12 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [specialBackground, setSpecialBackground] = useState(true);
   const [costume, setCostume] = useState(false);
   const [willTravel, setWillTravel] = useState(false);
-  // Only meaningful for a species that can Gigantamax (`canGigantamax`): `handlePickPokemon` clears it on a switch
-  // to one that cannot, and the draft re-checks eligibility, so an ineligible G-Max listing can't be submitted.
-  const [isGigantamax, setIsGigantamax] = useState(false);
-  // Mutually exclusive with `isGigantamax` (DB check `listings_dynamax_xor_gigantamax`): the toggle handlers below
-  // clear the other one, so the draft can never carry both. Offered for any species until Sprint 2.3 brings
-  // Dynamax eligibility data.
-  const [isDynamax, setIsDynamax] = useState(false);
-  const toggleGigantamax = () => {
-    if (!isGigantamax) setIsDynamax(false);
-    setIsGigantamax(!isGigantamax);
-  };
-  const toggleDynamax = () => {
-    if (!isDynamax) setIsGigantamax(false);
-    setIsDynamax(!isDynamax);
-  };
+  // The listing's Max Battle form as ONE value, so Dynamax and Gigantamax are mutually exclusive by construction
+  // (the DB check `listings_dynamax_xor_gigantamax` is only the backstop). Gigantamax is only meaningful for a
+  // species that can (`canGigantamax`): `handlePickPokemon` and the draft both run it through `coerceMaxForm`.
+  // There is no Dynamax eligibility list in the pinned sources (PokeAPI / the PokeMiners game master), so every
+  // species may be marked Dynamax and that stays unchecked.
+  const [maxForm, setMaxForm] = useState<MaxForm>('standard');
   // The listing's location: starts at the feed's current one. It is a place label produced by
   // `sanitizeLocationLabel` (via the picker), never a coordinate; exact GPS is never read, stored or shared.
   const [area, setArea] = useState<LocationName>(() => filterLocation);
@@ -247,10 +241,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       sizeClass,
       cp: cpResult.cp,
       willTravel,
-      isGigantamax: isGigantamax && canGigantamax(selectedCreature.pokemonId),
-      // An ineligible G-Max flag is dropped above, so only a Dynamax the seller still holds can survive; the
-      // `!` guard makes "both true" unrepresentable here even if the two states ever drift apart.
-      isDynamax: isDynamax && !(isGigantamax && canGigantamax(selectedCreature.pokemonId)),
+      // One form value yields both flags, so "both true" is unrepresentable; an ineligible G-Max is coerced away.
+      ...maxFormFlags(coerceMaxForm(maxForm, canGigantamax(selectedCreature.pokemonId))),
       tradeTimeline,
     };
   }, [
@@ -265,8 +257,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     sizeClass,
     cpResult,
     willTravel,
-    isGigantamax,
-    isDynamax,
+    maxForm,
     tradeTimeline,
     knowsIv,
     ivAtk,
@@ -325,7 +316,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       if (!entry || isPokemonUntradable(entry.pokemonId)) return;
       // Re-picking the same species keeps its form; a different one starts on its default form.
       if (entry.pokemonId !== selectedCreature?.pokemonId) setFormCode(null);
-      if (!canGigantamax(entry.pokemonId)) setIsGigantamax(false);
+      setMaxForm((f) => coerceMaxForm(f, canGigantamax(entry.pokemonId)));
       setSelectedCreature(entry);
     } else if (target === 'wanted') {
       // `creatureRefFromPick` is the one place a pick becomes a ref: dex name and hue, the trainer's shiny and
@@ -638,10 +629,11 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           onToggleCostume={() => setCostume((v) => !v)}
           willTravel={willTravel}
           onToggleWillTravel={() => setWillTravel((v) => !v)}
-          gigantamax={isGigantamax}
-          onToggleGigantamax={selectedCreature && canGigantamax(selectedCreature.pokemonId) ? toggleGigantamax : undefined}
-          dynamax={isDynamax}
-          onToggleDynamax={toggleDynamax}
+        />
+        <MaxFormSelector
+          value={maxForm}
+          onChange={setMaxForm}
+          canGigantamax={!!selectedCreature && canGigantamax(selectedCreature.pokemonId)}
         />
         <IvSpreadSection
           knowsIv={knowsIv}
@@ -886,10 +878,6 @@ function AttributesCard({
   onToggleCostume,
   willTravel,
   onToggleWillTravel,
-  gigantamax,
-  onToggleGigantamax,
-  dynamax,
-  onToggleDynamax,
 }: {
   shiny: boolean;
   onToggleShiny: () => void;
@@ -901,12 +889,6 @@ function AttributesCard({
   onToggleCostume: () => void;
   willTravel: boolean;
   onToggleWillTravel: () => void;
-  gigantamax: boolean;
-  /** Undefined hides the row: the chosen species cannot Gigantamax. */
-  onToggleGigantamax?: () => void;
-  dynamax: boolean;
-  /** Shown for every species: there is no Dynamax eligibility data until Sprint 2.3. */
-  onToggleDynamax: () => void;
 }) {
   return (
     <View>
@@ -953,26 +935,6 @@ function AttributesCard({
           onGradient={MODAL_SURFACE.togglePink}
           onPress={onToggleCostume}
         />
-        {onToggleGigantamax && (
-          <AttributeRow
-            icon={<GigantamaxSymbol size={18} color="#ff2a5f" />}
-            tint="rgba(255,42,95,0.12)"
-            title="Gigantamax"
-            description="Can Gigantamax in Max Battles"
-            on={gigantamax}
-            onGradient={MODAL_SURFACE.toggleCrimson}
-            onPress={onToggleGigantamax}
-          />
-        )}
-        <AttributeRow
-          icon={<Zap size={18} color={C.blue} strokeWidth={2.2} />}
-          tint="rgba(56,189,248,0.12)"
-          title="Dynamax"
-          description="Can Dynamax in Max Battles"
-          on={dynamax}
-          onGradient={MODAL_SURFACE.toggleBlue}
-          onPress={onToggleDynamax}
-        />
         <AttributeRow
           icon={<Car size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
@@ -987,6 +949,74 @@ function AttributesCard({
     </View>
   );
 }
+
+/** The Max Battle form picker: ONE choice (standard / Dynamax / Gigantamax), so a listing is never both. The
+ *  options come from `availableMaxForms`, so Gigantamax is only offered to species that can; Dynamax is offered
+ *  for every species because the pinned sources carry no Dynamax eligibility data. */
+function MaxFormSelector({
+  value,
+  onChange,
+  canGigantamax,
+}: {
+  value: MaxForm;
+  onChange: (form: MaxForm) => void;
+  canGigantamax: boolean;
+}) {
+  const forms = availableMaxForms(canGigantamax);
+  // The rendered selection is coerced the same way as the draft, so it can never show an ineligible form.
+  const selectedForm = coerceMaxForm(value, canGigantamax);
+  return (
+    <View>
+      <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+        MAX BATTLE FORM
+      </Text>
+      <View accessibilityRole="radiogroup" accessibilityLabel="Max battle form" className="flex-row gap-2">
+        {forms.map((form) => {
+          const selected = form === selectedForm;
+          const palette = form === 'standard' ? null : MAX_BADGE_PALETTES[form];
+          const color = selected && palette ? palette.color : C.textMuted;
+          return (
+            <Pressable
+              key={form}
+              onPress={() => onChange(form)}
+              accessibilityRole="radio"
+              accessibilityLabel={MAX_FORM_LABELS[form]}
+              accessibilityState={{ selected }}
+              className="flex-1 flex-row items-center justify-center gap-1.5 rounded-[12px] border px-2 py-2.5 active:opacity-80"
+              style={{
+                minHeight: 44, // the minimum touch target; padding + one text line alone came to ~39pt
+                backgroundColor: selected ? (palette ? palette.background : C.bgCard) : C.bgCard,
+                borderColor: selected ? (palette ? palette.border : C.textMuted) : C.borderDefault,
+              }}
+            >
+              {form === 'dynamax' ? (
+                <DynamaxSymbol size={16} color={MAX_BADGE_PALETTES.dynamax.color} />
+              ) : form === 'gigantamax' ? (
+                <GigantamaxSymbol size={16} color={MAX_BADGE_PALETTES.gigantamax.color} />
+              ) : (
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.textMuted }} />
+              )}
+              <Text style={{ fontSize: 13, fontWeight: '600', color: selected ? C.textPrimary : color }}>
+                {MAX_FORM_LABELS[form]}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>
+        {canGigantamax
+          ? 'Pick one: a Pokémon is either Dynamax or Gigantamax, not both.'
+          : 'Gigantamax is offered only for species with a G-Max form.'}
+      </Text>
+    </View>
+  );
+}
+
+const MAX_FORM_LABELS: Record<MaxForm, string> = {
+  standard: 'Standard',
+  dynamax: 'Dynamax',
+  gigantamax: 'Gigantamax',
+};
 
 /** One ATK/DEF/STA stepper, clamped to the DB's `between 0 and 15` check — there's no way to type an
  *  out-of-range or non-integer value in through +/- buttons, so `parseIv` on the write path can never

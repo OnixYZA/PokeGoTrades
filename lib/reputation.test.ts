@@ -18,6 +18,7 @@ import {
   REP_GAIN_PER_COMPLETED_TRADE,
   REP_PENALTY_POST_GRACE_BAIL,
   REP_PENALTY_UNRESPONSIVE_NO_SHOW,
+  REP_TIER_THRESHOLDS,
   type BailReason,
 } from './reputation';
 
@@ -302,5 +303,21 @@ describe('SQL drift guard (20261103000500: tightened rules)', () => {
     expect(body.indexOf('REP_PENALTY_POST_GRACE_BAIL')).toBeLessThan(body.indexOf('delete from public.trade_locks'));
     expect(body).toContain('v_lock.buyer_confirmed_at is not null and v_lock.seller_confirmed_at is null');
     expect(body).toContain('where id = v_uid');
+  });
+});
+
+describe('REP_TIER_THRESHOLDS', () => {
+  it('is descending, ends at MIN_REP, and getRepStanding agrees at every boundary', () => {
+    const mins = REP_TIER_THRESHOLDS.map((t) => t.min);
+    expect([...mins].sort((a, b) => b - a)).toEqual(mins);
+    expect(mins[mins.length - 1]).toBe(MIN_REP);
+    for (const t of REP_TIER_THRESHOLDS) {
+      expect(getRepStanding(t.min).tier).toBe(t.tier);
+      expect(getRepStanding(t.min).label).toBe(t.label);
+    }
+    // Just below each non-final boundary falls to the next tier down.
+    REP_TIER_THRESHOLDS.slice(0, -1).forEach((t, i) => {
+      expect(getRepStanding(t.min - 0.001).tier).toBe(REP_TIER_THRESHOLDS[i + 1].tier);
+    });
   });
 });

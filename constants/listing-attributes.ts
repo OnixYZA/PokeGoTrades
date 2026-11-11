@@ -29,6 +29,14 @@ import type { PokemonType } from './pokedex';
 
 // ——— enums (mirror the DB enums in lib/database.types.ts exactly — see the assertion in lib/api/listings.ts) ———
 
+/** The proof screenshot kinds a listing may carry, mirroring the `proof_kind` DB enum, with the label shown in
+ *  the Create Listing proof slots and the in-app guide (one place, so the two can't drift). */
+export const PROOF_KIND_LABELS = {
+  appraisal: 'Appraisal',
+  movesets: 'Movesets',
+  event_badge: 'Event Badge',
+} as const;
+
 export const TRADE_TIMELINES = ['asap', 'this_week', 'this_month', 'flexible'] as const;
 export type TradeTimeline = (typeof TRADE_TIMELINES)[number];
 

@@ -5,6 +5,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Avatar } from '@/components/ui/Avatar';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { DemandBadge } from '@/components/ui/DemandBadge';
+import { DynamaxBadge } from '@/components/ui/DynamaxBadge';
 import { GigantamaxBadge } from '@/components/ui/GigantamaxBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
@@ -94,6 +95,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
           <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
           {listing.lucky && <LuckyBadge size="sm" />}
           {listing.isGigantamax && <GigantamaxBadge size="sm" />}
+          {listing.isDynamax && <DynamaxBadge size="sm" />}
         </View>
 
         {visibleBadges.length > 0 && (

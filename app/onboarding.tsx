@@ -3,6 +3,7 @@ import { ChevronLeft, LogIn, UserRound } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
+import { TradeGuideModal } from '@/components/modals/TradeGuideModal';
 import { PhoneFrame } from '@/components/layout/PhoneFrame';
 import { ProfileProofStep } from '@/components/onboarding/ProfileProofStep';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
@@ -33,6 +34,7 @@ export default function OnboardingScreen() {
   const [completingOAuth, setCompletingOAuth] = useState(() => Boolean(params.code || params.error));
   const [provider, setProvider] = useState<OAuthProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [profileState, setProfileState] = useState<'idle' | 'loading' | 'incomplete' | 'error'>('idle');
@@ -206,7 +208,19 @@ export default function OnboardingScreen() {
             {provider ? <ActivityIndicator color="#4fb3ff" /> : null}
           </View>
         )}
+        <Pressable
+          onPress={() => setGuideOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="How trading & reputation work"
+          className="mt-6 items-center justify-center active:opacity-70"
+          style={{ minHeight: 44 }}
+        >
+          <Text className="font-display-med" style={{ fontSize: 13, color: '#4fb3ff' }}>
+            How trading &amp; reputation work
+          </Text>
+        </Pressable>
       </ScrollView>
+      <TradeGuideModal visible={guideOpen} initialStep="listings" onClose={() => setGuideOpen(false)} />
     </PhoneFrame>
   );
 }

@@ -124,6 +124,19 @@ describe('compileFilter / matchesFilter — Dynamax chip', () => {
   });
 });
 
+describe('compileFilter / matchesFilter — Dynamax vs Gigantamax', () => {
+  it('an include-Dynamax filter excludes a Gigantamax-only listing, and vice versa', () => {
+    const dynamax = compileFilter({ isDynamax: 'include' });
+    const gigantamax = compileFilter({ isGigantamax: 'include' });
+    const gmaxOnly = makeListing({ isGigantamax: true, isDynamax: false });
+    const dmaxOnly = makeListing({ isGigantamax: false, isDynamax: true });
+    expect(matchesFilter(gmaxOnly, dynamax)).toBe(false);
+    expect(matchesFilter(dmaxOnly, dynamax)).toBe(true);
+    expect(matchesFilter(dmaxOnly, gigantamax)).toBe(false);
+    expect(matchesFilter(gmaxOnly, gigantamax)).toBe(true);
+  });
+});
+
 describe('compileFilter / matchesFilter — Gigantamax combined', () => {
   it('ANDs the Gigantamax chip with another flag: G-Max and shiny needs both', () => {
     const spec = compileFilter({ isGigantamax: 'include', shiny: 'include' });
