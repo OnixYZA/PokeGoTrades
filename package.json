@@ -61,7 +61,8 @@
     "db:types": "supabase gen types typescript --local > lib/database.types.ts",
     "e2e": "playwright test",
     "test:unit": "vitest run",
-    "sprites:mirror": "tsx scripts/mirror-assets.ts"
+    "sprites:mirror": "tsx scripts/mirror-assets.ts",
+    "pokedex:generate": "tsx scripts/generate-pokedex.ts"
   },
   "private": true
 }

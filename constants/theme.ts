@@ -115,7 +115,7 @@ export function hueDiscBg(hue: number): ViewStyle {
  * The glow every creature disc gets, shiny or not — outer bloom plus an inset rim. This used to take a
  * `shiny` flag and fall back to a dull inset-only rim when it was `false`, which read as "the app
  * thinks this Pokémon is boring" for the vast majority of listings/chips (almost everything isn't
- * shiny). Every creature gets the vibrant recipe now — the ✦ badge is the one and only shiny marker.
+ * shiny). Every creature gets the vibrant recipe now — the `ShinyGlint` badge is the one and only shiny marker.
  */
 export function hueDiscGlow(hue: number): ViewStyle {
   return {
@@ -142,6 +142,12 @@ export function hueBadgeStyle(hue: number): ViewStyle {
     backgroundColor: `hsla(${hue},70%,55%,.14)`,
     borderColor: `hsla(${hue},70%,55%,.3)`,
   };
+}
+
+/** The label colour for a `hueBadgeStyle` pill: the same hue lifted to a light tint, so the text clears
+ *  contrast on the dark, hue-tinted fill for every hue. */
+export function hueBadgeText(hue: number): string {
+  return `hsl(${hue},90%,76%)`;
 }
 
 // Solid fills only — avatars need a plain `backgroundColor` that's guaranteed to render on every

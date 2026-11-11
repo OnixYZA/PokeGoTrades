@@ -11,32 +11,40 @@ import {
   Check,
   CheckSquare,
   ChevronDown,
+  Droplet,
+  LocateFixed,
+  MapPin,
   Image as ImageIcon,
   Plus,
   Search,
   Shirt,
-  Sparkles,
-  Star,
   X,
 } from 'lucide-react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
-import { PokemonPickerModal } from '@/components/modals/PokemonPickerModal';
+import { FormPicker } from '@/components/modals/FormPicker';
+import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { GigantamaxSymbol } from '@/components/ui/GigantamaxBadge';
+import { LuckyClover } from '@/components/ui/LuckyBadge';
+import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import { findPokemon, isPokemonUntradable, type PokedexEntry } from '@/constants/pokedex';
+import { canGigantamax, findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
-import { creatureDisplayName } from '@/lib/format';
+import { appendDistinctCreature, creatureRefFromPick } from '@/lib/creature-pick';
+import { CP_MAX, CP_MIN, creatureFormLabel, creatureFullName, dexLabel, parseCp } from '@/lib/format';
 import {
   LISTING_TAGS,
   POKEBALLS,
   POKEBALL_LABELS,
+  POKEMON_SIZES,
   TRADE_TIMELINES,
   TRADE_TIMELINE_LABELS,
   type ListingTag,
   type Pokeball,
+  type PokemonSize,
   type TradeTimeline,
 } from '@/constants/listing-attributes';
 import {
@@ -48,7 +56,9 @@ import {
   type NewListingInput,
   type ProofKind,
 } from '@/lib/api/listings';
+import { AREAS, VICINITY_RADIUS_LABEL, type AreaName } from '@/constants/locations';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { useVicinity } from '@/lib/use-vicinity';
 import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
@@ -60,6 +70,10 @@ const C = MODAL_COLORS;
  *  "wanted" appends to the "WANTED IN RETURN" list. Mirrors the `pickerFor` pattern
  *  app/(tabs)/profile.tsx uses for its Arsenal/Wishlist "+" buttons. */
 type PickerTarget = 'creature' | 'wanted';
+
+/** The most creatures a listing can ask for in return: the database caps `listings.looking` at this
+ *  (`creature_ref_array_is_valid(looking, 3)`). */
+const MAX_WANTED = 3;
 
 /** The three proof slots, one image each — the same kinds as the `proof_kind` enum, so a listing can
  *  structurally hold at most three (`listing_proofs_one_per_kind`). */
@@ -116,12 +130,26 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
 
   const [step, setStep] = useState<Step>('form');
   const [selectedCreature, setSelectedCreature] = useState<PokedexEntry | null>(null);
+  // The chosen form of `selectedCreature`, as `CreatureRef.formCode`; null is the species' default form. Written
+  // only by `handlePickPokemon` (a new species starts on its default) and `handlePickForm` (which refuses a form
+  // the species does not have, or one that cannot be traded), so it can never describe a different species.
+  const [formCode, setFormCode] = useState<string | null>(null);
   const [shiny, setShiny] = useState(true);
   const [purified, setPurified] = useState(false);
   const [specialBackground, setSpecialBackground] = useState(true);
   const [costume, setCostume] = useState(false);
   const [willTravel, setWillTravel] = useState(false);
+  // Only meaningful for a species that can Gigantamax (`canGigantamax`): `handlePickPokemon` clears it on a switch
+  // to one that cannot, and the draft re-checks eligibility, so an ineligible G-Max listing can't be submitted.
+  const [isGigantamax, setIsGigantamax] = useState(false);
+  // The listing's neighbourhood: starts at the feed's current one, and is always one of `AREAS` (the only
+  // location a listing ever carries; exact GPS is never read, stored or shared).
+  const [area, setArea] = useState<AreaName>(() => filterLocation);
   const [pokeball, setPokeball] = useState<Pokeball | null>(null);
+  // Seller-declared; null leaves it to an appraisal screenshot to tag.
+  const [sizeClass, setSizeClass] = useState<PokemonSize | null>(null);
+  // CP is typed text, parsed by the one shared rule (`parseCp`); the draft only ever sees the parsed number.
+  const [cpText, setCpText] = useState('');
   const [tradeTimeline, setTradeTimeline] = useState<TradeTimeline>('flexible');
   // `iv_atk`/`iv_def`/`iv_sta` are seller-declared (migration …000200_tables.sql:
   // `listings_iv_all_or_none`), read straight off the trainer's in-game Appraise screen — not
@@ -169,8 +197,11 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const verifyExited = useRef(false);
 
   /** Exactly what gets inserted: only the fields a trainer supplies (see `NewListingInput`). */
+  const cpResult = useMemo(() => parseCp(cpText), [cpText]);
   const draft = useMemo<NewListingInput | null>(() => {
-    if (!selectedCreature) return null;
+    // CP is required: with no creature or no valid CP there is no draft, so nothing downstream (preview,
+    // publish) can run without them.
+    if (!selectedCreature || !cpResult.ok) return null;
     const bg: NewListingInput['bg'] = shiny ? 'shiny' : specialBackground ? 'legacy' : 'meta';
     const tradeType: TradeType = shiny ? 'Unregistered (Shiny/Legendary)' : 'Unregistered (Standard)';
     // `wanted` is already shaped as `CreatureRef[]` (see `handlePickPokemon` below), so no re-mapping.
@@ -181,15 +212,15 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       name: selectedCreature.name,
       pokemonId: selectedCreature.pokemonId,
       hue: selectedCreature.hue,
-      // `purified` is now its own column (migration …000100_listing_attributes) — `form` no longer
-      // encodes it, so every draft writes the plain form name here.
-      form: 'Standard',
+      // The form is its structured code and nothing else: there is no free-text form beside it to drift, and
+      // `purified` is its own column. Omitted for the default form, like the other optional fields.
+      ...(formCode ? { formCode } : {}),
       // Placeholder until OCR reads the real catch date from the proof (SUPABASE_PLAN.md §5.2 Q9).
       year: new Date().getFullYear(),
       shiny,
       accent: '#fbbf24',
       bg,
-      loc: filterLocation,
+      loc: area,
       tradeType,
       iv: knowsIv ? `${ivAtk}/${ivDef}/${ivSta}` : 'Unrated',
       looking,
@@ -200,30 +231,37 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       // itself (like `purified`) rather than inferred from the background, so it gets its own toggle.
       costume,
       pokeball,
+      sizeClass,
+      cp: cpResult.cp,
       willTravel,
+      isGigantamax: isGigantamax && canGigantamax(selectedCreature.pokemonId),
       tradeTimeline,
     };
   }, [
     draftId,
     selectedCreature,
+    formCode,
     shiny,
     purified,
     specialBackground,
     costume,
     pokeball,
+    sizeClass,
+    cpResult,
     willTravel,
+    isGigantamax,
     tradeTimeline,
     knowsIv,
     ivAtk,
     ivDef,
     ivSta,
     wanted,
-    filterLocation,
+    area,
     selectedTags,
     notes,
   ]);
 
-  /** The draft as the feed card renders it. Seller, ranks, distance and lucky are server-owned, so they are display-only here. */
+  /** The draft as the feed card renders it. Seller, ranks and lucky are server-owned, so they are display-only here. */
   const previewListing = useMemo<Listing | null>(
     () =>
       draft && {
@@ -231,17 +269,14 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         // A new listing is never Lucky: only the OCR worker sets that, after an appraisal proof backs it.
         lucky: false,
         seller: 'You',
-        dist: USE_SUPABASE ? undefined : 0,
         pvp: 'NEW',
-        // Service-role only (migration …000100) — a freshly drafted listing has no size yet.
-        sizeClass: null,
         screenshots: uploads.map((u) => u.image.filename),
       },
     [draft, uploads]
   );
 
   const openWantedPicker = () => {
-    if (wanted.length >= 3) return; // the DB caps `looking` at 3 (creature_ref_array_is_valid(looking, 3))
+    if (wanted.length >= MAX_WANTED) return;
     setPickerFor('wanted');
   };
 
@@ -254,25 +289,44 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
    *  RETURN" list, disambiguated by `pickerFor`. Closes the picker before touching state — same order
    *  as app/(tabs)/profile.tsx's `handleSelectPokemon` (see lib/toast.ts on modals and their own
    *  ToastHost; this flow has no toast, but the close-first order still avoids the picker's own Modal
-   *  re-rendering mid-close). `shiny` is only ever true here for a 'wanted' pick — the picker's own
-   *  Shiny pill is gated off for the 'creature' slot (`allowShiny={pickerFor === 'wanted'}` below),
-   *  since that slot already has its own Shiny toggle in the form. This is the only way into
-   *  `selectedCreature` and `wanted`, so refusing untradable species here means a draft can never hold one.
-   *  The picker already refuses them; the database (`listings_tradable_guard`) is the backstop. */
-  const handlePickPokemon = (pokemonId: number, shiny: boolean) => {
+   *  re-rendering mid-close).
+   *
+   *  The two slots read different parts of the pick. 'creature' uses only the SPECIES: that slot has its own
+   *  Shiny toggle and its own `FormPicker` right under it, so the picker is mounted with `allowShiny` and
+   *  `allowForm` off for it, and the form is whatever `handlePickForm` last set. 'wanted' uses the whole pick,
+   *  shiny and form included, because a wanted entry has no other control: "Alolan Vulpix" and "Vulpix" are
+   *  different creatures (`pokemonId` + `formCode`), and dropping the form here would ask for the wrong one.
+   *
+   *  This is the only way into `selectedCreature` and `wanted`, so refusing untradable creatures here, with
+   *  the form, means a draft can never hold one. The picker already refuses them; the database
+   *  (`listings_tradable_guard`) is the backstop. */
+  const handlePickPokemon = (pick: PickedCreature) => {
     const target = pickerFor;
     setPickerFor(null);
-    const entry = findPokemon(pokemonId);
-    if (!entry || isPokemonUntradable(entry.pokemonId)) return;
     if (target === 'creature') {
+      const entry = findPokemon(pick.pokemonId);
+      if (!entry || isPokemonUntradable(entry.pokemonId)) return;
+      // Re-picking the same species keeps its form; a different one starts on its default form.
+      if (entry.pokemonId !== selectedCreature?.pokemonId) setFormCode(null);
+      if (!canGigantamax(entry.pokemonId)) setIsGigantamax(false);
       setSelectedCreature(entry);
     } else if (target === 'wanted') {
-      const candidate: CreatureRef = { name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue, ...(shiny ? { shiny } : {}) };
-      const candidateKey = spriteVariantKey(spriteVariantOf(candidate));
-      setWanted((prev) =>
-        prev.length >= 3 || prev.some((w) => spriteVariantKey(spriteVariantOf(w)) === candidateKey) ? prev : [...prev, candidate]
-      );
+      // `creatureRefFromPick` is the one place a pick becomes a ref: dex name and hue, the trainer's shiny and
+      // form, and a refusal for an unknown species, a form the species lacks, or an untradable (species, form).
+      const candidate = creatureRefFromPick(pick);
+      if (!candidate.ok) return;
+      // Distinct by `spriteVariantKey` (species + shiny + form + costume), so two forms of one species both fit.
+      setWanted((prev) => appendDistinctCreature(prev, candidate.ref, MAX_WANTED));
     }
+  };
+
+  /** The only way into `formCode` besides a species change. The form picker already refuses a form the species
+   *  does not have and an untradable one (White Kyurem); checking here too means a draft can never hold either,
+   *  the same belt-and-braces as `handlePickPokemon`, with `listings_tradable_guard` as the database backstop. */
+  const handlePickForm = (next: string | null) => {
+    if (!selectedCreature) return;
+    if (next !== null && (!formsOf(selectedCreature.pokemonId).includes(next) || isPokemonUntradable(selectedCreature.pokemonId, next))) return;
+    setFormCode(next);
   };
 
   const addProof = async () => {
@@ -303,7 +357,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   };
 
   const goToPreview = () => {
-    if (!selectedCreature) return;
+    if (!draft) return; // a creature AND a valid CP
     setStep('preview');
   };
 
@@ -542,7 +596,12 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24, gap: 24 }}
         showsVerticalScrollIndicator={false}
       >
-        <CreatureSelector selected={selectedCreature} onPress={() => setPickerFor('creature')} />
+        <CreatureSelector selected={selectedCreature} formCode={formCode} onPress={() => setPickerFor('creature')} />
+        {selectedCreature && (
+          // Keyed by species so the picker's refusal notice never outlives the species it was about.
+          <FormPicker key={selectedCreature.pokemonId} pokemonId={selectedCreature.pokemonId} formCode={formCode} onChange={handlePickForm} />
+        )}
+        <CpSection cpText={cpText} onChangeCp={setCpText} />
         <AttributesCard
           shiny={shiny}
           onToggleShiny={() => setShiny((v) => !v)}
@@ -554,6 +613,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           onToggleCostume={() => setCostume((v) => !v)}
           willTravel={willTravel}
           onToggleWillTravel={() => setWillTravel((v) => !v)}
+          gigantamax={isGigantamax}
+          onToggleGigantamax={selectedCreature && canGigantamax(selectedCreature.pokemonId) ? () => setIsGigantamax((v) => !v) : undefined}
         />
         <IvSpreadSection
           knowsIv={knowsIv}
@@ -566,8 +627,12 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           onChangeSta={setIvSta}
         />
         <LogisticsSection
+          area={area}
+          onSelectArea={setArea}
           pokeball={pokeball}
           onSelectPokeball={setPokeball}
+          sizeClass={sizeClass}
+          onSelectSize={setSizeClass}
           tradeTimeline={tradeTimeline}
           onSelectTimeline={setTradeTimeline}
         />
@@ -582,13 +647,17 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         />
         <WantedInReturn wanted={wanted} onAddWanted={openWantedPicker} onRemoveWanted={removeWanted} />
       </ScrollView>
-      <Footer onContinue={goToPreview} disabled={!selectedCreature} bottomInset={insets.bottom} />
+      <Footer onContinue={goToPreview} disabled={!draft} bottomInset={insets.bottom} />
       <PokemonPickerModal
         visible={pickerFor !== null}
         title={pickerFor === 'wanted' ? 'Add to Looking For' : 'Choose your Pokémon'}
         onClose={() => setPickerFor(null)}
         onSelect={handlePickPokemon}
         allowShiny={pickerFor === 'wanted'}
+        // Off only for the "CREATURE" slot, which has its own `FormPicker` below the selector. Phrased as
+        // `!== 'creature'` (not `=== 'wanted'`) so closing the picker after a wanted pick, which sets
+        // `pickerFor` to null, leaves the prop where it was instead of flipping it mid fade-out.
+        allowForm={pickerFor !== 'creature'}
         exclude={pickerFor === 'wanted' ? wanted : undefined}
       />
     </View>
@@ -650,10 +719,19 @@ function ProgressBar({ filled }: { filled: number }) {
   );
 }
 
-/** dex label as `#<padded id>` — matches PokemonPickerModal's own `PokedexRow` formatting. */
-const dexLabel = (pokemonId: number) => `#${String(pokemonId).padStart(3, '0')}`;
-
-function CreatureSelector({ selected, onPress }: { selected: PokedexEntry | null; onPress: () => void }) {
+function CreatureSelector({
+  selected,
+  formCode,
+  onPress,
+}: {
+  selected: PokedexEntry | null;
+  /** The chosen form, so the sprite, the typing and the label show it (the sprite and `typesOf` both resolve by
+   *  `pokemonId` + `formCode`). */
+  formCode: string | null;
+  onPress: () => void;
+}) {
+  const creature = selected && { pokemonId: selected.pokemonId, hue: selected.hue, formCode }; // `Chip` tints via `creatureHue`, so the stored hue goes in raw
+  const formLabel = selected ? creatureFormLabel({ pokemonId: selected.pokemonId, formCode }) : undefined;
   return (
     <View>
       <View className="mb-2.5 flex-row items-center justify-between">
@@ -669,15 +747,18 @@ function CreatureSelector({ selected, onPress }: { selected: PokedexEntry | null
         <Pressable
           onPress={onPress}
           accessibilityRole="button"
-          accessibilityLabel={`${selected.name} selected. Change creature`}
+          accessibilityLabel={`${selected.name}${formLabel ? `, ${formLabel} form` : ''} selected. Change creature`}
           className="flex-row items-center gap-3 rounded-[14px] border px-4 py-3 active:opacity-80"
           style={{ backgroundColor: C.bgCard, borderColor: C.gold, boxShadow: '0 0 0 4px rgba(251,191,36,0.08)' }}
         >
-          <Chip creature={selected} size={44} />
+          {creature && <Chip creature={creature} size={44} />}
           <View className="flex-1">
-            <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>{selected.name}</Text>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: C.textPrimary }}>
+              {selected.name}
+              {formLabel ? <Text style={{ fontWeight: '500', color: C.textSecondary }}>{` · ${formLabel}`}</Text> : null}
+            </Text>
             <Text className="font-mono" style={{ fontSize: 11, color: C.textMuted }}>
-              {dexLabel(selected.pokemonId)} · {selected.type}
+              {dexLabel(selected.pokemonId)} · {formatTypes(typesOf({ pokemonId: selected.pokemonId, formCode }) ?? selected.types)}
             </Text>
           </View>
           <Text className="font-mono-semi" style={{ fontSize: 11, color: C.gold, letterSpacing: 0.6 }}>
@@ -778,6 +859,8 @@ function AttributesCard({
   onToggleCostume,
   willTravel,
   onToggleWillTravel,
+  gigantamax,
+  onToggleGigantamax,
 }: {
   shiny: boolean;
   onToggleShiny: () => void;
@@ -789,6 +872,9 @@ function AttributesCard({
   onToggleCostume: () => void;
   willTravel: boolean;
   onToggleWillTravel: () => void;
+  gigantamax: boolean;
+  /** Undefined hides the row: the chosen species cannot Gigantamax. */
+  onToggleGigantamax?: () => void;
 }) {
   return (
     <View>
@@ -800,7 +886,7 @@ function AttributesCard({
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
         <AttributeRow
-          icon={<Star size={18} color={C.gold} strokeWidth={2.2} />}
+          icon={<ShinyGlint size={20} color={C.gold} />}
           tint="rgba(251,191,36,0.12)"
           title="Shiny"
           description="Rare alternate coloration"
@@ -809,7 +895,7 @@ function AttributesCard({
           onPress={onToggleShiny}
         />
         <AttributeRow
-          icon={<Sparkles size={18} color={C.blue} strokeWidth={2.2} />}
+          icon={<Droplet size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
           title="Purified"
           description="Cleansed from Shadow form"
@@ -835,6 +921,17 @@ function AttributesCard({
           onGradient={MODAL_SURFACE.togglePink}
           onPress={onToggleCostume}
         />
+        {onToggleGigantamax && (
+          <AttributeRow
+            icon={<GigantamaxSymbol size={18} color="#ff2a5f" />}
+            tint="rgba(255,42,95,0.12)"
+            title="Gigantamax"
+            description="Can Gigantamax in Max Battles"
+            on={gigantamax}
+            onGradient={MODAL_SURFACE.toggleCrimson}
+            onPress={onToggleGigantamax}
+          />
+        )}
         <AttributeRow
           icon={<Car size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
@@ -1010,6 +1107,81 @@ function PokeballOption({
   );
 }
 
+/** The seller picks the listing's neighbourhood from `AREAS`; buyers only ever see this name plus the vicinity
+ *  radius. The web-only shortcut asks the browser for a coarse fix and keeps just the bucketed area. */
+function AreaPicker({ area, onSelect }: { area: AreaName; onSelect: (area: AreaName) => void }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<View>(null);
+  const vicinity = useVicinity();
+
+  const pickMyVicinity = async () => {
+    const found = await vicinity.locate();
+    if (found) onSelect(found);
+  };
+
+  return (
+    <View>
+      <Text className="font-mono mb-1.5" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
+        NEIGHBOURHOOD
+      </Text>
+      <Pressable
+        ref={anchorRef}
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={`Listing neighbourhood: ${area}`}
+        accessibilityHint="Opens a list of neighbourhoods to choose from"
+        accessibilityState={{ expanded: open }}
+        className="flex-row items-center gap-2 rounded-[14px] border px-4 py-3.5 active:opacity-80"
+        style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
+      >
+        <MapPin size={14} color={C.textMuted} />
+        <Text className="flex-1" style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
+          {area}
+        </Text>
+        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted }}>
+          {VICINITY_RADIUS_LABEL}
+        </Text>
+        <ChevronDown size={16} color={C.textMuted} />
+      </Pressable>
+      <Text className="mt-1.5" style={{ fontSize: 11, lineHeight: 16, color: C.textMuted }}>
+        Buyers see only this neighbourhood. Your exact GPS location is never shared.
+      </Text>
+      {vicinity.supported ? (
+        <Pressable
+          onPress={() => void pickMyVicinity()}
+          disabled={vicinity.locating}
+          accessibilityRole="button"
+          accessibilityLabel="Use my vicinity, fuzzed to a neighbourhood"
+          accessibilityHint="Asks your browser for your location and keeps only the neighbourhood"
+          accessibilityState={{ busy: vicinity.locating, disabled: vicinity.locating }}
+          hitSlop={6}
+          className="mt-2 flex-row items-center gap-1.5 self-start active:opacity-70"
+          style={{ opacity: vicinity.locating ? 0.6 : 1 }}
+        >
+          <LocateFixed size={13} color={C.gold} />
+          <Text className="font-display-semi" style={{ fontSize: 12, color: C.gold }}>
+            {vicinity.locating ? 'Locating…' : 'Use my vicinity'}
+          </Text>
+        </Pressable>
+      ) : null}
+      <Dropdown visible={open} onRequestClose={() => setOpen(false)} anchorRef={anchorRef} align="stretch">
+        {AREAS.map((option, i) => (
+          <PokeballOption
+            key={option}
+            label={option}
+            selected={option === area}
+            onPress={() => {
+              onSelect(option);
+              setOpen(false);
+            }}
+            isLast={i === AREAS.length - 1}
+          />
+        ))}
+      </Dropdown>
+    </View>
+  );
+}
+
 /** Optional — `null` ("Not specified") is a real, first-class choice, not just an unset default: most
  *  sellers never learn (or bother recording) which ball a catch used. */
 function PokeballPicker({ pokeball, onSelect }: { pokeball: Pokeball | null; onSelect: (pokeball: Pokeball | null) => void }) {
@@ -1091,14 +1263,109 @@ function TimelinePicker({ timeline, onSelect }: { timeline: TradeTimeline; onSel
   );
 }
 
+/** Seller-declared size. "None" is a real choice (null), not an unset state: the segmented control always shows
+ *  one selected option. Modelled on `TimelinePicker`. */
+function SizePicker({ size, onSelect }: { size: PokemonSize | null; onSelect: (size: PokemonSize | null) => void }) {
+  const options: (PokemonSize | null)[] = [null, ...POKEMON_SIZES];
+  return (
+    <View>
+      <Text className="font-mono mb-1.5" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
+        SIZE (OPTIONAL)
+      </Text>
+      <View accessibilityRole="radiogroup" accessibilityLabel="Size" className="flex-row overflow-hidden rounded-[14px] border" style={{ borderColor: C.borderDefault }}>
+        {options.map((option, i) => {
+          const selected = option === size;
+          const label = option ?? 'None';
+          return (
+            <Pressable
+              key={label}
+              onPress={() => onSelect(option)}
+              accessibilityRole="radio"
+              accessibilityLabel={option ? `Size ${option}` : 'No size'}
+              accessibilityState={{ selected }}
+              className="flex-1 items-center justify-center py-2.5 active:opacity-80"
+              style={{
+                backgroundColor: selected ? C.gold : C.bgCard,
+                borderLeftWidth: i === 0 ? 0 : 1,
+                borderLeftColor: C.borderDefault,
+              }}
+            >
+              <Text className="font-display-semi" style={{ fontSize: 11, color: selected ? '#0a0a0f' : C.textMuted }}>
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text className="mt-1.5" style={{ fontSize: 12, lineHeight: 18, color: C.textDim }}>
+        Leave it as None and an appraisal screenshot can still tag the size automatically.
+      </Text>
+    </View>
+  );
+}
+
+/** Required Combat Power. Feedback is deliberately quiet while the field is empty and untouched (no nagging on
+ *  arrival), and appears as soon as something invalid is typed or the field is left empty after being focused. */
+function CpSection({ cpText, onChangeCp }: { cpText: string; onChangeCp: (value: string) => void }) {
+  const [touched, setTouched] = useState(false);
+  const result = parseCp(cpText);
+  const error = result.ok
+    ? null
+    : result.reason === 'empty'
+      ? touched
+        ? 'Enter your Pokémon’s CP.'
+        : null
+      : result.reason === 'not_a_number'
+        ? 'CP can only contain digits.'
+        : `CP must be between ${CP_MIN} and ${CP_MAX.toLocaleString('en-US')}.`;
+  return (
+    <View>
+      <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+        COMBAT POWER (CP)
+      </Text>
+      <TextInput
+        value={cpText}
+        onChangeText={onChangeCp}
+        onBlur={() => setTouched(true)}
+        keyboardType="number-pad"
+        maxLength={5}
+        placeholder="e.g. 2841"
+        placeholderTextColor={C.textDim}
+        accessibilityLabel="Combat power, required"
+        accessibilityHint={`A whole number from ${CP_MIN} to ${CP_MAX}`}
+        className="rounded-[14px] border px-4 py-3.5"
+        style={{
+          backgroundColor: C.bgCard,
+          borderColor: error ? C.danger : C.borderDefault,
+          color: C.textPrimary,
+          fontSize: 16,
+        }}
+      />
+      {error ? (
+        <Text accessibilityRole="alert" accessibilityLiveRegion="polite" className="mt-1.5" style={{ fontSize: 12, color: C.danger }}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function LogisticsSection({
+  area,
+  onSelectArea,
   pokeball,
   onSelectPokeball,
+  sizeClass,
+  onSelectSize,
   tradeTimeline,
   onSelectTimeline,
 }: {
+  area: AreaName;
+  onSelectArea: (area: AreaName) => void;
   pokeball: Pokeball | null;
   onSelectPokeball: (pokeball: Pokeball | null) => void;
+  sizeClass: PokemonSize | null;
+  onSelectSize: (size: PokemonSize | null) => void;
   tradeTimeline: TradeTimeline;
   onSelectTimeline: (timeline: TradeTimeline) => void;
 }) {
@@ -1108,12 +1375,10 @@ function LogisticsSection({
         LOGISTICS
       </Text>
       <View className="gap-3">
+        <AreaPicker area={area} onSelect={onSelectArea} />
         <PokeballPicker pokeball={pokeball} onSelect={onSelectPokeball} />
         <TimelinePicker timeline={tradeTimeline} onSelect={onSelectTimeline} />
-        {/* size_class is service-role only (constants/listing-attributes.ts) — no control here ever. */}
-        <Text style={{ fontSize: 12, lineHeight: 18, color: C.textDim }}>
-          XXL/XXS is added automatically when your appraisal proof verifies.
-        </Text>
+        <SizePicker size={sizeClass} onSelect={onSelectSize} />
       </View>
     </View>
   );
@@ -1392,7 +1657,7 @@ function ProofUploadsSection({
 
           <View className="flex-row items-center gap-3 rounded-xl px-3.5 py-3" style={MODAL_SURFACE.luckyBadge}>
             <View className="h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
-              <Star size={18} color="#0a0a0f" fill="#0a0a0f" />
+              <LuckyClover size={18} color="#0a0a0f" />
             </View>
             <View className="flex-1">
               <Text className="font-display" style={{ fontSize: 16, color: '#0a0a0f', letterSpacing: -0.16 }}>
@@ -1417,23 +1682,31 @@ function ProofUploadsSection({
 }
 
 function WantedSlot({ creature, onRemove }: { creature: CreatureRef; onRemove?: () => void }) {
+  // The full name, form included ("Alolan Vulpix"): the slot has no line of its own for a form, and without it two
+  // wanted entries of one species would read as the same creature twice. Three squares share the row, so it gets
+  // two lines before it elides, and the padding is a notch tighter than it was to make room for the second.
+  const name = creatureFullName(creature);
   return (
     <View
-      className="relative aspect-square flex-1 items-center justify-center rounded-xl border p-2.5"
+      className="relative aspect-square flex-1 items-center justify-center rounded-xl border p-2"
       style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
     >
       <Pressable
         onPress={onRemove}
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${creatureDisplayName(creature)}`}
+        accessibilityLabel={`Remove ${name}`}
         className="absolute right-1 top-1 h-[18px] w-[18px] items-center justify-center rounded-full border active:opacity-70"
         style={{ backgroundColor: '#0a0a0f', borderColor: C.borderDefault }}
       >
         <X size={10} color={C.textSecondary} strokeWidth={3} />
       </Pressable>
       <Chip creature={creature} size={36} />
-      <Text className="mt-1.5" numberOfLines={1} style={{ fontSize: 11, fontWeight: '600', color: C.textPrimary }}>
-        {creatureDisplayName(creature)}
+      <Text
+        className="mt-1"
+        numberOfLines={2}
+        style={{ fontSize: 11, lineHeight: 13, fontWeight: '600', color: C.textPrimary, textAlign: 'center' }}
+      >
+        {name}
       </Text>
       <Text className="font-mono" style={{ fontSize: 9, color: C.textMuted }}>
         {dexLabel(creature.pokemonId)}
@@ -1450,7 +1723,7 @@ function WantedInReturn({
   wanted: CreatureRef[];
   onAddWanted?: () => void;
   /** Keyed by `spriteVariantKey(spriteVariantOf(...))`, not `pokemonId` — a shiny and non-shiny entry
-   *  for the same species are distinct wanted slots (see `handlePickPokemon`'s dedupe). */
+   *  for the same species, or two forms of it, are distinct wanted slots (see `appendDistinctCreature`). */
   onRemoveWanted?: (variantKey: string) => void;
 }) {
   return (
@@ -1460,7 +1733,7 @@ function WantedInReturn({
           WANTED IN RETURN (OPTIONAL)
         </Text>
         <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>
-          {wanted.length} / 3
+          {wanted.length} / {MAX_WANTED}
         </Text>
       </View>
       {wanted.length === 0 ? (
@@ -1485,7 +1758,7 @@ function WantedInReturn({
             const key = spriteVariantKey(spriteVariantOf(w));
             return <WantedSlot key={key} creature={w} onRemove={() => onRemoveWanted?.(key)} />;
           })}
-          {wanted.length < 3 && (
+          {wanted.length < MAX_WANTED && (
             <Pressable
               onPress={onAddWanted}
               accessibilityRole="button"

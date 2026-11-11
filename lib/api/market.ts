@@ -28,3 +28,29 @@ export async function fetchMarketDemand(pokemonIds: number[]): Promise<Map<strin
   }
   return result;
 }
+
+/**
+ * The most-wanted (pokemon_id, shiny) rows in `pokemon_market_demand`, for the feed search sheet's trending
+ * chips. One cheap read of the view the feed already reads, ordered by wanted_count; the species-level
+ * grouping, untradable filtering and capping stay in `trendingSpecies` (lib/feed-search.ts), so this takes a
+ * generous row limit rather than the final chip count.
+ */
+export async function fetchTopWanted(rowLimit = 40): Promise<Map<string, MarketSignal>> {
+  const result = new Map<string, MarketSignal>();
+  const { data, error } = await supabase
+    .from('pokemon_market_demand')
+    .select('pokemon_id, shiny, wanted_count, offered_count, demand_ratio')
+    .order('wanted_count', { ascending: false })
+    .limit(rowLimit);
+  if (error) throw error;
+
+  for (const row of data) {
+    if (row.pokemon_id === null || row.shiny === null) continue;
+    result.set(marketSignalKey(row.pokemon_id, row.shiny), {
+      wanted: row.wanted_count ?? 0,
+      offered: row.offered_count ?? 0,
+      ratio: row.demand_ratio ?? 0,
+    });
+  }
+  return result;
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { BlurView } from 'expo-blur';
-import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Send, Trophy, X } from 'lucide-react-native';
+import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Ruler, Send, Trophy, X, Zap } from 'lucide-react-native';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -13,22 +13,28 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SafeMeetZone } from '@/components/profile/SafeMeetZone';
 import { LookingForRow } from '@/components/listing/LookingForRow';
 import { StardustCard } from '@/components/listing/StardustCard';
 import { BuyerOfferModal } from '@/components/modals/BuyerOfferModal';
 import { IconButton } from '@/components/ui/IconButton';
+import { GigantamaxBadge } from '@/components/ui/GigantamaxBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
+import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Sprite } from '@/components/ui/Sprite';
 import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
 import { ToastHost } from '@/components/ui/ToastHost';
+import { TypeBadge } from '@/components/ui/TypeBadge';
+import { creatureHue } from '@/constants/pokedex';
 import { hueHeroBleed, SURFACE } from '@/constants/theme';
 import { demandTier, marketLabel } from '@/constants/market';
 import { POKEBALL_LABELS, TRADE_TIMELINE_LABELS } from '@/constants/listing-attributes';
+import { formatVicinityLabel } from '@/constants/locations';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { creatureDisplayName } from '@/lib/format';
+import { creatureDisplayName, creatureFormLabel, formatCp } from '@/lib/format';
 import { toast } from '@/lib/toast';
 import { useTradeStore } from '@/store/trade-store';
 
@@ -42,6 +48,7 @@ export default function ListingDetailScreen() {
   const subscribeToListing = useTradeStore((s) => s.subscribeToListing);
   const insets = useSafeAreaInsets();
   const [showOfferModal, setShowOfferModal] = useState(false);
+  const [showMeetup, setShowMeetup] = useState(false);
 
   const translateY = useSharedValue(SHEET_TRAVEL);
   const overlayOpacity = useSharedValue(0);
@@ -161,7 +168,7 @@ export default function ListingDetailScreen() {
 
         <View
           className="relative border-b border-border-subtle px-[22px] pb-[22px] pt-[18px]"
-          style={hueHeroBleed(listing.hue)}
+          style={hueHeroBleed(creatureHue(listing))}
         >
           <View className="absolute right-4 top-3">
             <IconButton size={34} radius={12} accessibilityLabel="Close" onPress={() => close()}>
@@ -172,13 +179,13 @@ export default function ListingDetailScreen() {
           <View className="flex-row items-start gap-4">
             <Sprite creature={listing} purified={listing.purified} size={92} />
             <View className="min-w-0 flex-1">
+              {/* "Armored · 2024 catch", or just "2024 catch" for the default form (`creatureFormLabel` is
+               *  undefined there): only the parts that exist are joined, so there is never a dangling "· ". */}
               <Text className="font-mono uppercase text-text-subtle" style={{ fontSize: 10, letterSpacing: 1.2 }}>
-                {listing.form} · {listing.year} catch
+                {[creatureFormLabel(listing), `${listing.year} catch`].filter(Boolean).join(' · ')}
               </Text>
               <View className="mt-1 flex-row items-center gap-1.5">
-                {listing.shiny && (
-                  <Text style={{ color: '#ff6bd6', textShadow: '0 0 8px #ff6bd6', fontSize: 22 } as any}>✦</Text>
-                )}
+                {listing.shiny && <ShinyGlint size={22} glow />}
                 {/* `flexShrink: 1` + `numberOfLines`: "Shiny " (Task 1) makes this ~6 characters longer,
                  *  and a Text sibling next to a fixed-size glyph in a row doesn't shrink by default in RN
                  *  (unlike the web), so a long name would overflow past the card edge instead of eliding. */}
@@ -190,9 +197,11 @@ export default function ListingDetailScreen() {
                   {creatureDisplayName(listing)}
                 </Text>
               </View>
+              <TypeBadge creature={listing} style={{ marginTop: 8 }} />
               <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
                 {listing.lucky && <LuckyBadge />}
-                <BackgroundBadge bg={listing.bg} hue={listing.hue} accent={listing.accent} />
+                {listing.isGigantamax && <GigantamaxBadge />}
+                <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
                 {listing.untradable && (
                   <View className="rounded-[6px] border px-2 py-[3px]" style={{ backgroundColor: 'rgba(255,92,138,0.15)', borderColor: 'rgba(255,92,138,0.3)' }}>
                     <Text className="font-display-semi uppercase" style={{ fontSize: 10, letterSpacing: 0.8, color: '#ff5c8a' }}>
@@ -207,6 +216,9 @@ export default function ListingDetailScreen() {
 
         <ScrollView contentContainerStyle={{ padding: 22 }} showsVerticalScrollIndicator={false}>
           <View className="mb-[18px] flex-row gap-2">
+            {listing.cp != null && (
+              <StatTile label="CP" value={formatCp(listing.cp).replace('CP ', '')} color="#f5c518" icon={<Zap size={12} color="#f5c518" />} radius={12} valueSize={18} />
+            )}
             <StatTile label="PvP Rank" value={listing.pvp} color="#4fb3ff" icon={<Bolt size={12} color="#4fb3ff" />} radius={12} valueSize={18} />
             <StatTile
               label="Top Traded"
@@ -238,8 +250,10 @@ export default function ListingDetailScreen() {
               <View className="h-px flex-1" style={SURFACE.divider} />
             </View>
             <View className="flex-row flex-wrap gap-2">
+              <LogisticsChip icon={<MapPin size={12} color="#4fb3ff" />} label={formatVicinityLabel(listing.loc)} />
               <LogisticsChip icon={<Car size={12} color="#4fb3ff" />} label={listing.willTravel ? 'Will Travel' : 'Local Only'} />
               <LogisticsChip icon={<Clock size={12} color="#4fb3ff" />} label={TRADE_TIMELINE_LABELS[listing.tradeTimeline]} />
+              {listing.sizeClass && <LogisticsChip icon={<Ruler size={12} color="#4fb3ff" />} label={`Size: ${listing.sizeClass}`} />}
               {listing.pokeball && (
                 <LogisticsChip icon={<CircleDot size={12} color="#4fb3ff" />} label={POKEBALL_LABELS[listing.pokeball]} />
               )}
@@ -258,17 +272,40 @@ export default function ListingDetailScreen() {
             </View>
             <View className="gap-2">
               {listing.looking.map((creature, i) => (
-                <LookingForRow key={creature.name} creature={creature} index={i} />
+                // Index, not name: a wanted list can hold two entries of one species (a shiny and a regular,
+                // or two forms), and a name — the dex species now — no longer tells them apart. The list is
+                // static for the life of this screen, so position is a stable identity.
+                <LookingForRow key={i} creature={creature} index={i} />
               ))}
             </View>
           </View>
         </ScrollView>
 
+        {showMeetup ? (
+          <View className="border-t border-border-subtle px-[22px] pb-1 pt-3" accessibilityLiveRegion="polite">
+            <Text className="font-display text-text-primary" style={{ fontSize: 13 }}>
+              Safe meetup vicinity
+            </Text>
+            <SafeMeetZone location={formatVicinityLabel(listing.loc)} />
+            <Text className="mt-2 font-mono text-text-muted" style={{ fontSize: 11, lineHeight: 16 }}>
+              {listing.willTravel ? 'Seller is willing to travel for the meetup.' : 'Seller prefers to meet locally.'}
+            </Text>
+            <Text className="mt-1 text-text-body" style={{ fontSize: 12, lineHeight: 18 }}>
+              Exact meetup spots are agreed in chat after the trade locks. Exact GPS is never shared.
+            </Text>
+          </View>
+        ) : null}
+
         <View
           className="flex-row gap-2 border-t border-border-subtle px-[22px] pt-3.5"
           style={[SURFACE.ctaFade, { paddingBottom: Math.max(insets.bottom, 26) }]}
         >
-          <IconButton size={52} radius={14} accessibilityLabel="View meetup location">
+          <IconButton
+            size={52}
+            radius={14}
+            accessibilityLabel="View meetup location"
+            onPress={() => setShowMeetup((v) => !v)}
+          >
             <MapPin size={20} color="#4fb3ff" />
           </IconButton>
           <PrimaryButton

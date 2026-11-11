@@ -1,4 +1,4 @@
-import { Flame, Sparkles, TrendingDown, TrendingUp } from 'lucide-react-native';
+import { Flame, TrendingDown, TrendingUp } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
 import { demandTier, marketLabel, type MarketSignal, type MarketTier } from '@/constants/market';
@@ -28,15 +28,20 @@ interface DemandBadgeProps {
 /** Feed-card / detail-sheet want:have signal, tiered by `demandTier` (constants/market.ts). Replaces
  *  the old plain "★ <tier>" pill: a real signal (hot/high/balanced/surplus) gets its own tinted pill,
  *  while a genuinely new (or too-thin-to-call) pairing renders as a subtle, unfilled "NEW" pill so it
- *  never visually competes with an actual hot/high call. */
+ *  never visually competes with an actual hot/high call.
+ *
+ *  The NEW pill is text-only on purpose. Each real tier's icon encodes a direction (flame / trending up
+ *  / trending down), and "no call yet" has no direction to encode, so the absence of an icon is itself
+ *  the quiet signal. It also used to draw a sparkle, the shiny marker (`ShinyGlint`), which made a
+ *  not-shiny listing's feed card look shiny; and a clock or pulsing dot would read as "timeline" or
+ *  "online" instead. */
 export function DemandBadge({ market }: DemandBadgeProps) {
   if (!market) return null;
   const tier = demandTier(market);
 
   if (tier === 'new') {
     return (
-      <View className="flex-row items-center gap-1 rounded-lg border border-border-strong bg-bg-panel px-2 py-1">
-        <Sparkles size={11} color="#8b93a7" />
+      <View className="flex-row items-center rounded-lg border border-border-strong bg-bg-panel px-2 py-1">
         <Text className="font-display text-text-muted" style={{ fontSize: 11 }}>
           NEW
         </Text>

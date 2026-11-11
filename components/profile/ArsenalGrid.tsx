@@ -4,20 +4,28 @@ import { Text, View } from 'react-native';
 import { EqualGrid } from '@/components/ui/EqualGrid';
 import { IconButton } from '@/components/ui/IconButton';
 import { Chip } from '@/components/ui/Chip';
+import { LuckyClover } from '@/components/ui/LuckyBadge';
+import { RemoveCreatureButton } from '@/components/profile/RemoveCreatureButton';
+import { creatureHue } from '@/constants/pokedex';
 import { hueBleed, SURFACE } from '@/constants/theme';
-import type { CreatureRef } from '@/data/types';
-import { creatureDisplayName } from '@/lib/format';
-import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
+import { creatureFullName } from '@/lib/format';
+import type { TrainerCreature } from '@/lib/creature-list';
 
 interface ArsenalGridProps {
-  arsenal: CreatureRef[];
+  /** Entries, not bare creatures: each carries its row id, which is both the React key (duplicates are
+   *  legal, so the creature alone can't be one) and what `onRemove` hands back. Read-only callers wrap
+   *  theirs with `toReadOnlyEntries`. */
+  arsenal: readonly TrainerCreature[];
   /** Only passed by the signed-in trainer's own profile screen; a public profile leaves it out. */
   onEdit?: () => void;
+  /** Only passed by the signed-in trainer's own profile screen, same as `onEdit`: its presence is what
+   *  puts a remove button on every tile, so a read-only grid can't offer a delete it has no row to run. */
+  onRemove?: (entry: TrainerCreature) => void;
 }
 
 const COLUMNS = 3;
 
-export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
+export function ArsenalGrid({ arsenal, onEdit, onRemove }: ArsenalGridProps) {
   return (
     <View className="mb-[22px]">
       {/* Inlines SectionHeading's own layout (title + divider + meta) instead of reusing it, so the
@@ -39,26 +47,44 @@ export function ArsenalGrid({ arsenal, onEdit }: ArsenalGridProps) {
       <EqualGrid
         items={arsenal}
         columns={COLUMNS}
-        keyExtractor={(p, i) => `${spriteVariantKey(spriteVariantOf(p))}-${i}`}
-        renderItem={(p) => (
+        keyExtractor={(entry) => entry.id}
+        renderItem={(entry) => (
           <View className="relative items-center gap-2 overflow-hidden rounded-2xl border border-border bg-bg-card p-2.5">
-            <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(p.hue)]} />
-            {/* A lucky entry shows both the Chip's small gold "L" and this tile's "✦ LUCKY" caption below. */}
-            <Chip creature={p} size={52} />
+            <View className="absolute h-20 w-20 self-center" style={[{ top: -20, pointerEvents: 'none' }, hueBleed(creatureHue(entry.creature))]} />
+            {/* A lucky entry shows both the Chip's small gold "L" and this tile's clover "LUCKY" caption below. */}
+            <Chip creature={entry.creature} size={52} />
             {/* numberOfLines: 3 narrow columns (Task 1) + the "Shiny " prefix means a name like "Shiny
              *  Crabominable" needs to wrap — capped at 2 lines so a long one still fits its tile instead
-             *  of pushing the row's height around unpredictably. */}
+             *  of pushing the row's height around unpredictably.
+             *
+             *  The FULL name (`creatureFullName`: "Shiny Alolan Vulpix", "Wormadam (Sandy Cloak)"), not the species
+             *  with the form on a line of its own: a tile this narrow has no spare line, a third one would make
+             *  tiles with a form taller than their neighbours, and the label that already knows whether the form
+             *  goes before or after the species is the one place that word order is decided. */}
             <Text
               numberOfLines={2}
               className="text-center font-display-semi text-text-primary"
               style={{ fontSize: 11, lineHeight: 13.2 }}
             >
-              {creatureDisplayName(p)}
+              {creatureFullName(entry.creature)}
             </Text>
-            {p.lucky && (
-              <Text className="font-display" style={{ fontSize: 8, letterSpacing: 0.9, color: '#f5c518' }}>
-                ✦ LUCKY
-              </Text>
+            {entry.creature.lucky && (
+              <View className="flex-row items-center gap-0.5">
+                <LuckyClover size={9} color="#f5c518" />
+                <Text className="font-display" style={{ fontSize: 8, letterSpacing: 0.9, color: '#f5c518' }}>
+                  LUCKY
+                </Text>
+              </View>
+            )}
+            {/* Top-right: the Chip is centered and narrower than the tile, so that corner is clear of it
+             *  and of the (centered) name below. Last child, so it paints and hit-tests above the rest. */}
+            {onRemove && (
+              <RemoveCreatureButton
+                creature={entry.creature}
+                listLabel="Arsenal"
+                placement={{ top: 4, right: 4 }}
+                onPress={() => onRemove(entry)}
+              />
             )}
           </View>
         )}

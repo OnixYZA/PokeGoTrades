@@ -1,8 +1,10 @@
 import { Image } from 'expo-image';
 import { Text, View } from 'react-native';
 
-import { findPokemon } from '@/constants/pokedex';
+import { ShinyGlint } from '@/components/ui/ShinyGlint';
+import { creatureHue, findPokemon } from '@/constants/pokedex';
 import { GO_SPRITE_ZOOM, hueChipBg, hueChipGlow } from '@/constants/theme';
+import { spriteAltText } from '@/lib/format';
 import { spriteVariantOf, type SpriteSubject } from '@/lib/sprite-url';
 import { useSpriteSource } from '@/lib/use-sprite-source';
 
@@ -22,12 +24,14 @@ const INNER_RADIUS = 12 - 1;
 export function Chip({ creature, size = 48 }: ChipProps) {
   const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource(spriteVariantOf(creature));
 
+  const hue = creatureHue(creature);
+
   return (
     <View
       style={[
         { width: size, height: size, borderRadius: 12, borderWidth: 1 },
-        hueChipBg(creature.hue),
-        hueChipGlow(creature.hue),
+        hueChipBg(hue),
+        hueChipGlow(hue),
       ]}
       className="shrink-0 items-center justify-center"
     >
@@ -59,21 +63,12 @@ export function Chip({ creature, size = 48 }: ChipProps) {
             onLoad={onLoad}
             onError={onError}
             accessibilityIgnoresInvertColors
-            alt={`Pokemon ${creature.pokemonId} sprite`}
-            accessibilityLabel={`Pokemon ${creature.pokemonId} sprite`}
+            alt={spriteAltText(creature)}
+            accessibilityLabel={spriteAltText(creature)}
           />
         )}
       </View>
-      {creature.shiny && (
-        <Text
-          className="absolute"
-          style={{ top: 4, right: 5, fontSize: 10, color: '#fff', textShadow: '0 0 4px #ff6bd6' } as any}
-          accessibilityElementsHidden
-          importantForAccessibility="no"
-        >
-          ✦
-        </Text>
-      )}
+      {creature.shiny && <ShinyGlint size={10} color="#fff" glow style={{ position: 'absolute', top: 4, right: 5 }} />}
       {creature.lucky && (
         <Text
           className="absolute font-display"

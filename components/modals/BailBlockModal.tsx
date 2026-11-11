@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AlertTriangle, Ban, Check, ChevronRight } from 'lucide-react-native';
+import { AlertTriangle, Ban, Check, ChevronRight, ShieldCheck } from 'lucide-react-native';
 
+import { describeBailSafeguard, type BailSafeguardTone } from '@/lib/bail-safeguard';
 import { ToastHost } from '@/components/ui/ToastHost';
 import type { ChatRole } from '@/data/types';
 import { useTradeStore } from '@/store/trade-store';
@@ -11,7 +12,9 @@ import { MODAL_COLORS, MODAL_SURFACE } from './tokens';
 
 const C = MODAL_COLORS;
 
-export type BailReason = 'unresponsive' | 'unreasonable_adds' | 'spoofer' | 'other';
+// One definition, in lib/reputation.ts (type-checked against the DB enum there); re-exported for existing importers.
+import type { BailReason } from '@/lib/reputation';
+export type { BailReason };
 
 const REASONS: { id: BailReason; title: string; subtitle: string; flag?: boolean; chevron?: boolean }[] = [
   { id: 'unresponsive', title: 'Unresponsive', subtitle: 'Stopped replying after locking the trade' },
@@ -36,6 +39,12 @@ interface BailBlockModalProps {
   partnerName?: string;
   /** Only the seller has a listing to un-freeze. Omitted, the copy stays the mock's seller wording. */
   role?: ChatRole;
+  /** When the trade lock was taken. `null`: known to be unlocked. Omitted: unknown, so no Rep claim is shown. */
+  lockedAt?: string | null;
+  /** The signed-in trainer has confirmed the trade. */
+  callerConfirmed?: boolean;
+  /** The partner has confirmed the trade. */
+  partnerConfirmed?: boolean;
   /** The bail went through. */
   onDone?: () => void;
   /** Standalone use, with no chat (the /test-bail screen): receives the choice and does nothing else. */
@@ -44,13 +53,31 @@ interface BailBlockModalProps {
 }
 
 /** Bottom-sheet "Bail & Block" safety confirmation. */
-export function BailBlockModal({ chatId, partnerName, role, onDone, onSubmit, onCancel }: BailBlockModalProps) {
+export function BailBlockModal({
+  chatId,
+  partnerName,
+  role,
+  lockedAt,
+  callerConfirmed = false,
+  partnerConfirmed = false,
+  onDone,   onSubmit,
+  onCancel,
+}: BailBlockModalProps) {
   const insets = useSafeAreaInsets();
   const bailChat = useTradeStore((s) => s.bailChat);
   const [selectedReason, setSelectedReason] = useState<BailReason>('unresponsive');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const now = useNow(typeof lockedAt === 'string');
+  const safeguard = describeBailSafeguard({
+    reason: selectedReason,
+    lockedAtIso: lockedAt,
+    callerConfirmed,
+    partnerConfirmed,
+    nowMs: now,
+  });
 
   const submit = async () => {
     const trimmed = selectedReason === 'other' ? note.trim() || undefined : undefined;
@@ -88,6 +115,7 @@ export function BailBlockModal({ chatId, partnerName, role, onDone, onSubmit, on
         <Heading partnerName={partnerName} sellerCopy={role !== 'buyer'} />
         <ImpactChips sellerCopy={role !== 'buyer'} />
         <ReasonList selectedReason={selectedReason} onSelectReason={setSelectedReason} />
+        {safeguard ? <SafeguardBanner {...safeguard} /> : null}
 
         {selectedReason === 'other' && (
           <View className="mb-6">
@@ -143,6 +171,53 @@ export function BailBlockModal({ chatId, partnerName, role, onDone, onSubmit, on
         </Pressable>
       </View>
       <ToastHost />
+    </View>
+  );
+}
+
+/** How often the grace countdown re-reads the clock. Minutes are the unit shown, so this need not be fast. */
+const CLOCK_TICK_MS = 15_000;
+
+/** `Date.now()`, refreshed on a light interval while `active`, and released when the modal unmounts. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+const SAFEGUARD_TONES: Record<BailSafeguardTone, { fg: string; bg: string; border: string }> = {
+  safe: { fg: C.success, bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.35)' },
+  caution: { fg: C.gold, bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.35)' },
+  penalty: { fg: C.danger, bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.45)' },
+};
+
+/** "Reputation & Grace Period Safeguard": what leaving costs in Rep, for the reason currently selected. */
+function SafeguardBanner({ tone, headline, detail }: { tone: BailSafeguardTone; headline: string; detail: string }) {
+  const t = SAFEGUARD_TONES[tone];
+  const Icon = tone === 'penalty' ? AlertTriangle : ShieldCheck;
+  return (
+    <View
+      accessible
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={`Reputation and grace period safeguard. ${headline}. ${detail}`}
+      className="mb-5 flex-row items-start gap-3 rounded-2xl border px-4 py-3"
+      style={{ backgroundColor: t.bg, borderColor: t.border }}
+    >
+      <Icon size={18} color={t.fg} strokeWidth={2.3} style={{ marginTop: 1 }} />
+      <View className="flex-1">
+        <Text className="font-mono-semi" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8, marginBottom: 3 }}>
+          REPUTATION &amp; GRACE PERIOD SAFEGUARD
+        </Text>
+        <Text className="font-mono-semi" style={{ fontSize: 12, color: t.fg, letterSpacing: 0.3 }}>
+          {headline}
+        </Text>
+        <Text style={{ fontSize: 12, color: C.textSecondary, marginTop: 2, lineHeight: 17 }}>{detail}</Text>
+      </View>
     </View>
   );
 }

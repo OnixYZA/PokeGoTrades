@@ -1,10 +1,12 @@
 import { Image } from 'expo-image';
-import { Sparkles } from 'lucide-react-native';
+import { Droplet } from 'lucide-react-native';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 
-import { findPokemon } from '@/constants/pokedex';
+import { ShinyGlint, SHINY_PINK } from '@/components/ui/ShinyGlint';
+import { creatureHue, findPokemon } from '@/constants/pokedex';
 import { GO_SPRITE_ZOOM, hueDiscBg, hueDiscGlow } from '@/constants/theme';
+import { spriteAltText } from '@/lib/format';
 import { backgroundObjectKey, spriteVariantOf, storagePublicUrl, type SpriteSubject } from '@/lib/sprite-url';
 import { useSpriteSource } from '@/lib/use-sprite-source';
 
@@ -27,6 +29,7 @@ interface SpriteProps {
 export function Sprite({ creature, purified = false, background = null, size = 72 }: SpriteProps) {
   const { uri, loaded, exhausted, onLoad, onError } = useSpriteSource(spriteVariantOf(creature));
 
+  const hue = creatureHue(creature);
   const bgKey = background != null ? backgroundObjectKey(background) : null;
   const bgUrl = bgKey ? storagePublicUrl(bgKey) : null;
   // The inner clip radius for this tile's `borderWidth: 1` circle — see the no-bleed wrapper below.
@@ -36,8 +39,8 @@ export function Sprite({ creature, purified = false, background = null, size = 7
     <View
       style={[
         { width: size, height: size, borderRadius: size / 2, borderWidth: 1 },
-        hueDiscBg(creature.hue),
-        hueDiscGlow(creature.hue),
+        hueDiscBg(hue),
+        hueDiscGlow(hue),
       ]}
       className="shrink-0 items-center justify-center"
     >
@@ -75,8 +78,8 @@ export function Sprite({ creature, purified = false, background = null, size = 7
             onLoad={onLoad}
             onError={onError}
             accessibilityIgnoresInvertColors
-            alt={`Pokemon ${creature.pokemonId} sprite`}
-            accessibilityLabel={`Pokemon ${creature.pokemonId} sprite`}
+            alt={spriteAltText(creature)}
+            accessibilityLabel={spriteAltText(creature)}
           />
         )}
       </View>
@@ -90,15 +93,15 @@ export function Sprite({ creature, purified = false, background = null, size = 7
             width: 22,
             height: 22,
             borderRadius: 11,
-            backgroundImage: 'radial-gradient(circle, #fff 0%, #ff6bd6 50%, transparent 70%)',
+            backgroundImage: `radial-gradient(circle, #fff 0%, ${SHINY_PINK} 50%, transparent 70%)`,
           }}
         >
-          <Text style={{ fontSize: 14, color: '#fff' }} accessibilityElementsHidden importantForAccessibility="no">
-            ✦
-          </Text>
+          <ShinyGlint size={14} color="#fff" />
         </View>
       )}
 
+      {/* Purified is a droplet ("cleansed"), never a sparkle: the sparkle is the shiny marker above, and the
+          two badges share this tile. */}
       {purified && (
         <View
           className="absolute items-center justify-center rounded-full"
@@ -106,7 +109,7 @@ export function Sprite({ creature, purified = false, background = null, size = 7
           accessibilityElementsHidden
           importantForAccessibility="no"
         >
-          <Sparkles size={13} color="#7dffb3" />
+          <Droplet size={13} color="#7dffb3" />
         </View>
       )}
     </View>

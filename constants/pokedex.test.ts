@@ -1,8 +1,9 @@
 /**
  * Unit tests for the pure search/lookup helpers in `constants/pokedex.ts`. These sit on top of
- * generated data (`constants/pokedex-data.ts`, from PokeAPI), so the fixtures below are real dex
- * entries chosen specifically for the punctuation/diacritics they carry (Mr. Mime, Farfetch'd,
- * Flabébé, Type: Null) rather than invented names — see AGENTS.md on never hallucinating game data.
+ * generated data (`constants/pokedex-data.ts`, from PokeAPI and the PokeMiners game master), so the
+ * fixtures below are real dex entries chosen specifically for the punctuation/diacritics they carry
+ * (Mr. Mime, Farfetch'd, Flabébé, Type: Null) or the typing they exercise (Zacian, Vulpix, Rotom) rather
+ * than invented names — see AGENTS.md on never hallucinating game data.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -10,13 +11,35 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  canGigantamax,
+  creatureHasType,
+  creatureHue,
+  defaultFormOf,
   findPokemon,
+  formatTypes,
+  formsOf,
   isPokemonUntradable,
+  maxCpOf,
+  META_TIER_DISCLAIMER,
+  metaRanksOf,
+  POKEDEX,
+  statsOf,
+  type MetaTier,
+  POKEMON_TYPES,
+  matchPokemonType,
   searchPokedex,
+  TYPE_HUE,
+  typeMembership,
+  typesOf,
   UNTRADABLE_FORM_COMBINATIONS,
   UNTRADABLE_MYTHICAL_IDS,
   UNTRADABLE_SPECIES_IDS,
+  type TypeMembership,
 } from './pokedex';
+import { creatureFormLabel } from '../lib/format';
+import { BASE_FORM_CODES } from './base-form-codes';
+import { FORM_STAT_OVERRIDES, FORM_TYPE_OVERRIDES, POKEDEX_DEFAULT_FORMS, POKEDEX_FORMS, POKEDEX_GIGANTAMAX_IDS, POKEDEX_STATS } from './pokedex-data';
+import { isPokemonUntradable as isPokemonUntradableLeaf, UNTRADABLE_FORM_COMBINATIONS as UNTRADABLE_FORM_COMBINATIONS_LEAF } from './untradable';
 
 describe('findPokemon', () => {
   it('finds a known dex id', () => {
@@ -149,10 +172,57 @@ describe('isPokemonUntradable', () => {
     expect(isPokemonUntradable(800, null)).toBe(false);
   });
 
+  // Crowned Sword / Crowned Shield / Ultra are the project's rule (2026-10-18), and each matches the game master:
+  // the pinned file carries `isTradable` on ZACIAN_HERO and NECROZMA but not on their Crowned / Ultra forms (the
+  // generator's tradability cross-check keeps it that way). They used to be tradable; a regression to that
+  // fails here and in the database drift test below.
+  it('is true for Crowned Sword Zacian, Crowned Shield Zamazenta and Ultra Necrozma', () => {
+    expect(isPokemonUntradable(888, 'CROWNED_SWORD')).toBe(true);
+    expect(isPokemonUntradable(889, 'CROWNED_SHIELD')).toBe(true);
+    expect(isPokemonUntradable(800, 'ULTRA')).toBe(true);
+  });
+
+  it('keeps the base forms of Zacian, Zamazenta and Necrozma tradable: only the named form is refused', () => {
+    for (const id of [888, 889]) {
+      expect(isPokemonUntradable(id), `#${id}`).toBe(false);
+      expect(isPokemonUntradable(id, null), `#${id}`).toBe(false);
+      expect(isPokemonUntradable(id, 'HERO'), `#${id}`).toBe(false); // the default form's own code, as the sprite pipeline spells it
+    }
+    expect(isPokemonUntradable(888, 'CROWNED_SHIELD')).toBe(false); // each Crowned code is scoped to its own species
+    expect(isPokemonUntradable(889, 'CROWNED_SWORD')).toBe(false);
+    expect(isPokemonUntradable(800)).toBe(false);
+    expect(isPokemonUntradable(800, null)).toBe(false);
+    expect(isPokemonUntradable(800, 'NORMAL')).toBe(false);
+  });
+
+  it('is true for Eternatus in every form, Eternamax included', () => {
+    expect(isPokemonUntradable(890)).toBe(true);
+    expect(isPokemonUntradable(890, null)).toBe(true);
+    expect(isPokemonUntradable(890, 'ETERNAMAX')).toBe(true);
+    expect(UNTRADABLE_SPECIES_IDS.has(890)).toBe(true); // species-wide, not a form entry: nothing else can be spelled wrong
+  });
+
+  // Pecharunt is the one place the rule departs from the game master, which marks it `isTradable: true`. It stays
+  // untradable as a Mythical (owner decision), recorded as TRADABILITY_OVERRIDES in scripts/pokedex-source.ts.
+  it('keeps Pecharunt untradable, in every form, although the game master calls it tradable', () => {
+    expect(UNTRADABLE_MYTHICAL_IDS.has(1025)).toBe(true);
+    expect(isPokemonUntradable(1025)).toBe(true);
+    expect(isPokemonUntradable(1025, null)).toBe(true);
+    expect(isPokemonUntradable(1025, 'NORMAL')).toBe(true);
+  });
+
   it('is false for ordinary species and legendaries', () => {
     expect(isPokemonUntradable(25)).toBe(false);
     expect(isPokemonUntradable(150, 'A')).toBe(false); // Armored Mewtwo
-    expect(isPokemonUntradable(888, 'CROWNED_SWORD')).toBe(false);
+    expect(isPokemonUntradable(891)).toBe(false); // Kubfu, the neighbouring species of Eternatus
+    expect(isPokemonUntradable(889)).toBe(false);
+  });
+
+  it('is re-exported from the leaf module the generator reads, so there is one rule', () => {
+    expect(isPokemonUntradable).toBe(isPokemonUntradableLeaf);
+    expect(UNTRADABLE_FORM_COMBINATIONS).toBe(UNTRADABLE_FORM_COMBINATIONS_LEAF);
+    const source = readFileSync(path.resolve(__dirname, 'untradable.ts'), 'utf8');
+    expect(source, 'the generator must be able to import it without pulling in the generated dex').not.toMatch(/^\s*import\b/m);
   });
 
   it('only names real dex entries', () => {
@@ -161,27 +231,88 @@ describe('isPokemonUntradable', () => {
   });
 });
 
+/** A migration file and its SQL. */
+interface Migration {
+  file: string;
+  body: string;
+}
+
+/** A statement that DEFINES the function (`create function` or `create or replace function`, at the start of a
+ *  line, so a comment or a call that merely names it is not a definition). */
+const UNTRADABLE_FUNCTION_DEFINITION = /^[ \t]*create[ \t]+(?:or[ \t]+replace[ \t]+)?function[ \t]+public\.is_creature_untradable[ \t]*\(/gim;
+
+/**
+ * The CURRENT definition of `public.is_creature_untradable`: the last definition in the last migration, by
+ * filename order (the timestamp prefix), that defines it, cut to that one function (its `create` to the closing
+ * `$$;`). The function has been redefined with `create or replace` before and will be again, and each
+ * redefinition replaces the last one in the database, so only the newest is the rule the database enforces.
+ * Reading any other would compare the client lists with a rule the database no longer has. Input order does
+ * not matter, and a migration that only calls or mentions the function is not a definition.
+ */
+function currentUntradableFunction(migrations: readonly Migration[]): { file: string; sql: string } | undefined {
+  const newestFirst = [...migrations].sort((a, b) => (a.file < b.file ? 1 : a.file > b.file ? -1 : 0));
+  for (const { file, body } of newestFirst) {
+    const last = [...body.matchAll(UNTRADABLE_FUNCTION_DEFINITION)].at(-1);
+    if (!last) continue;
+    const close = body.indexOf('$$;', last.index);
+    return { file, sql: body.slice(last.index, close === -1 ? undefined : close + 3) };
+  }
+  return undefined;
+}
+
+describe('currentUntradableFunction', () => {
+  const original = 'create function public.is_creature_untradable(p_pokemon_id integer)\nreturns boolean as $$\n  select 1 -- ORIGINAL\n$$;\n';
+  const redefinition = 'create or replace function public.is_creature_untradable(p_pokemon_id integer)\nreturns boolean as $$\n  select 1 -- REDEFINED\n$$;\n';
+
+  it('takes the newest definition by filename, whatever order the files arrive in', () => {
+    const migrations = [
+      { file: '20261018000100_redefine.sql', body: redefinition },
+      { file: '20260929000100_original.sql', body: original },
+    ];
+    expect(currentUntradableFunction(migrations)?.file).toBe('20261018000100_redefine.sql');
+    expect(currentUntradableFunction([...migrations].reverse())?.sql).toContain('-- REDEFINED');
+    expect(currentUntradableFunction(migrations)?.sql).not.toContain('-- ORIGINAL');
+  });
+
+  it('does not take a newer migration that only calls or mentions the function', () => {
+    const migrations = [
+      { file: '20260929000100_original.sql', body: original },
+      { file: '20270101000100_caller.sql', body: '-- create or replace function public.is_creature_untradable is redefined elsewhere\nselect public.is_creature_untradable(1);\n' },
+    ];
+    expect(currentUntradableFunction(migrations)?.file).toBe('20260929000100_original.sql');
+  });
+
+  it('keeps to the function: a tag after its closing $$; is not part of it', () => {
+    const migrations = [{ file: '20260929000100_original.sql', body: `${original}-- UNTRADABLE_SPECIES_IDS\n` }];
+    expect(currentUntradableFunction(migrations)?.sql).not.toContain('UNTRADABLE_SPECIES_IDS');
+  });
+
+  it('uses the last definition when one migration defines it twice, and finds none when nothing does', () => {
+    expect(currentUntradableFunction([{ file: '20260929000100_twice.sql', body: original + redefinition }])?.sql).toContain('-- REDEFINED');
+    expect(currentUntradableFunction([{ file: '20260929000100_other.sql', body: 'select 1;' }])).toBeUndefined();
+  });
+});
+
 describe('untradable lists match public.is_creature_untradable', () => {
-  // The database enforces the same rule. Read the NEWEST migration that defines the function, so a later
-  // `create or replace` is what gets compared, not the original.
+  // The database enforces the same rule. Compare with the CURRENT definition: the newest migration that
+  // defines the function, so a later `create or replace` is what gets compared, never the original.
   const migrationsDir = path.resolve(__dirname, '..', 'supabase', 'migrations');
-  const sql = readdirSync(migrationsDir)
+  const migrations = readdirSync(migrationsDir)
     .filter((file) => file.endsWith('.sql'))
-    .sort()
-    .map((file) => readFileSync(path.join(migrationsDir, file), 'utf8'))
-    .filter((body) => /function public\.is_creature_untradable\b/.test(body))
-    .at(-1);
+    .map((file) => ({ file, body: readFileSync(path.join(migrationsDir, file), 'utf8') }));
+  const current = currentUntradableFunction(migrations);
+  const sql = current?.sql;
 
   /** The line tagged `-- <marker>` inside the function body. */
   const taggedLine = (marker: string): string => {
     const line = sql?.split('\n').find((l) => l.trimEnd().endsWith(`-- ${marker}`));
-    if (!line) throw new Error(`No line tagged "-- ${marker}" in the is_creature_untradable migration`);
+    if (!line) throw new Error(`No line tagged "-- ${marker}" in ${current?.file ?? 'any migration (none defines the function)'}`);
     return line.slice(0, line.lastIndexOf('--'));
   };
   const ids = (marker: string) => (taggedLine(marker).match(/\d+/g) ?? []).map(Number).sort((a, b) => a - b);
 
   it('finds the migration', () => {
-    expect(sql).toBeDefined();
+    expect(current?.file).toMatch(/^\d{14}_.+\.sql$/);
   });
 
   it('has the same Mythical ids', () => {
@@ -197,5 +328,730 @@ describe('untradable lists match public.is_creature_untradable', () => {
       ([, id, code]) => `${id}:${code}`,
     );
     expect(pairs.sort()).toEqual(UNTRADABLE_FORM_COMBINATIONS.map((c) => `${c.pokemonId}:${c.formCode}`).sort());
+  });
+});
+
+// ——— types ———
+
+describe('the generated dex', () => {
+  it('lists species 1 through 1025 in order, none missing', () => {
+    expect(POKEDEX).toHaveLength(1025);
+    POKEDEX.forEach((entry, index) => expect(entry.pokemonId).toBe(index + 1));
+  });
+
+  it('keeps the names the picker and search rely on', () => {
+    expect(findPokemon(29)?.name).toBe('Nidoran♀');
+    expect(findPokemon(122)?.name).toBe('Mr. Mime');
+    expect(findPokemon(669)?.name).toBe('Flabébé');
+    expect(findPokemon(902)?.name).toBe('Basculegion');
+    expect(findPokemon(1025)?.name).toBe('Pecharunt');
+  });
+
+  it('gives every species one or two DISTINCT valid types', () => {
+    for (const entry of POKEDEX) {
+      const label = `#${entry.pokemonId} ${entry.name}`;
+      expect([1, 2], label).toContain(entry.types.length);
+      for (const type of entry.types) expect(POKEMON_TYPES, label).toContain(type);
+      expect(new Set(entry.types).size, label).toBe(entry.types.length);
+    }
+  });
+
+  it('derives hue from the PRIMARY type', () => {
+    for (const entry of POKEDEX) expect(entry.hue, entry.name).toBe(TYPE_HUE[entry.types[0]]);
+    expect(findPokemon(6)?.hue).toBe(TYPE_HUE.Fire); // Charizard, Fire/Flying: Fire, not Flying
+  });
+
+  it('no longer exposes a single-type field that could go stale', () => {
+    expect(findPokemon(6)).not.toHaveProperty('type');
+  });
+});
+
+describe('typesOf', () => {
+  it('returns both types for a dual-typed species, primary first', () => {
+    expect(typesOf({ pokemonId: 6 })).toEqual(['Fire', 'Flying']); // Charizard
+    expect(typesOf({ pokemonId: 1 })).toEqual(['Grass', 'Poison']); // Bulbasaur
+  });
+
+  it('returns one type for a single-typed species', () => {
+    expect(typesOf({ pokemonId: 25 })).toEqual(['Electric']); // Pikachu
+    expect(typesOf({ pokemonId: 4 })).toEqual(['Fire']); // Charmander
+  });
+
+  it('types a species with no form, or a null/undefined one, as its default form', () => {
+    expect(typesOf({ pokemonId: 888 })).toEqual(['Fairy']); // Zacian: default form is Hero
+    expect(typesOf({ pokemonId: 888, formCode: null })).toEqual(['Fairy']);
+    expect(typesOf({ pokemonId: 888, formCode: undefined })).toEqual(['Fairy']);
+  });
+
+  it('is form-aware: Crowned Sword Zacian is Fairy/Steel where Zacian is Fairy', () => {
+    // The order is the sources' own: PokeAPI (zacian-crowned) and the game master both list Fairy first.
+    expect(typesOf({ pokemonId: 888, formCode: 'CROWNED_SWORD' })).toEqual(['Fairy', 'Steel']);
+    expect(typesOf({ pokemonId: 888, formCode: 'HERO' })).toEqual(['Fairy']); // an explicit default form
+    expect(typesOf({ pokemonId: 889, formCode: 'CROWNED_SHIELD' })).toEqual(['Fighting', 'Steel']);
+  });
+
+  it('is form-aware for regional forms, which can change AND drop types', () => {
+    expect(typesOf({ pokemonId: 37 })).toEqual(['Fire']); // Vulpix
+    expect(typesOf({ pokemonId: 37, formCode: 'ALOLA' })).toEqual(['Ice']); // Alolan Vulpix: Fire is gone
+    expect(typesOf({ pokemonId: 38, formCode: 'ALOLA' })).toEqual(['Ice', 'Fairy']);
+    expect(typesOf({ pokemonId: 79 })).toEqual(['Water', 'Psychic']); // Slowpoke
+    expect(typesOf({ pokemonId: 79, formCode: 'GALARIAN' })).toEqual(['Psychic']); // Water is gone
+    expect(typesOf({ pokemonId: 58, formCode: 'HISUIAN' })).toEqual(['Fire', 'Rock']); // Growlithe
+  });
+
+  it('is form-aware for appliance, Origin-style and fused forms', () => {
+    expect(typesOf({ pokemonId: 479 })).toEqual(['Electric', 'Ghost']); // Rotom
+    expect(typesOf({ pokemonId: 479, formCode: 'HEAT' })).toEqual(['Electric', 'Fire']);
+    expect(typesOf({ pokemonId: 800, formCode: 'DUSK_MANE' })).toEqual(['Psychic', 'Steel']); // Necrozma
+    expect(typesOf({ pokemonId: 741, formCode: 'SENSU' })).toEqual(['Ghost', 'Flying']); // Oricorio
+  });
+
+  it('types Mega and Primal forms, and leaves one that keeps the species typing alone', () => {
+    expect(typesOf({ pokemonId: 6, formCode: 'MEGA_X' })).toEqual(['Fire', 'Dragon']);
+    expect(typesOf({ pokemonId: 6, formCode: 'MEGA_Y' })).toEqual(['Fire', 'Flying']); // unchanged
+    expect(typesOf({ pokemonId: 383, formCode: 'PRIMAL' })).toEqual(['Ground', 'Fire']);
+    expect(typesOf({ pokemonId: 384, formCode: 'MEGA' })).toEqual(['Dragon', 'Flying']); // unchanged
+  });
+
+  it('falls back to the species for a form code it has no override for', () => {
+    expect(typesOf({ pokemonId: 150, formCode: 'A' })).toEqual(['Psychic']); // Armored Mewtwo
+    expect(typesOf({ pokemonId: 6, formCode: 'GIGANTAMAX' })).toEqual(['Fire', 'Flying']);
+    expect(typesOf({ pokemonId: 25, formCode: 'NOT_A_REAL_FORM' })).toEqual(['Electric']);
+  });
+
+  it('matches form codes exactly, case included', () => {
+    expect(typesOf({ pokemonId: 37, formCode: 'alola' })).toEqual(['Fire']);
+  });
+
+  it('returns undefined, never a guess, for an id outside the dex', () => {
+    expect(typesOf({ pokemonId: 0 })).toBeUndefined();
+    expect(typesOf({ pokemonId: 1026 })).toBeUndefined();
+    expect(typesOf({ pokemonId: 10188 })).toBeUndefined(); // PokeAPI's synthetic zacian-crowned id
+    expect(typesOf({ pokemonId: 10188, formCode: 'CROWNED_SWORD' })).toBeUndefined();
+    expect(typesOf({ pokemonId: -1 })).toBeUndefined();
+  });
+
+  it('accepts anything creature-shaped', () => {
+    const listing = { pokemonId: 888, formCode: 'CROWNED_SWORD', name: 'Zacian', shiny: true };
+    expect(typesOf(listing)).toEqual(['Fairy', 'Steel']);
+  });
+});
+
+describe('creatureHasType', () => {
+  it('checks either slot, for the form', () => {
+    expect(creatureHasType({ pokemonId: 6 }, 'Flying')).toBe(true); // secondary slot
+    expect(creatureHasType({ pokemonId: 6 }, 'Fire')).toBe(true);
+    expect(creatureHasType({ pokemonId: 6 }, 'Water')).toBe(false);
+    expect(creatureHasType({ pokemonId: 37, formCode: 'ALOLA' }, 'Fire')).toBe(false);
+    expect(creatureHasType({ pokemonId: 37, formCode: 'ALOLA' }, 'Ice')).toBe(true);
+  });
+
+  it('is false for an id outside the dex', () => {
+    for (const type of POKEMON_TYPES) expect(creatureHasType({ pokemonId: 10188 }, type)).toBe(false);
+  });
+});
+
+describe('FORM_TYPE_OVERRIDES', () => {
+  it('only names dex species, with a valid form code shape (the one listings.form_code accepts)', () => {
+    for (const [pokemonId, formCode] of FORM_TYPE_OVERRIDES) {
+      expect(findPokemon(pokemonId), `#${pokemonId}`).toBeDefined();
+      expect(formCode, `#${pokemonId}`).toMatch(/^[A-Z0-9_]{1,40}$/);
+    }
+  });
+
+  it('has one row per (pokemonId, formCode), sorted', () => {
+    const keys = FORM_TYPE_OVERRIDES.map(([id, code]) => `${String(id).padStart(4, '0')}:${code}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toEqual([...keys].sort());
+  });
+
+  it('gives every override 1-2 distinct valid types that DIFFER from the species default', () => {
+    for (const [pokemonId, formCode, types] of FORM_TYPE_OVERRIDES) {
+      const label = `#${pokemonId} ${formCode}`;
+      expect([1, 2], label).toContain(types.length);
+      for (const type of types) expect(POKEMON_TYPES, label).toContain(type);
+      expect(new Set(types).size, label).toBe(types.length);
+      expect(types, label).not.toEqual(findPokemon(pokemonId)?.types); // else it is noise, not an override
+    }
+  });
+
+  it('spells the untradable Necrozma, Zacian and Zamazenta forms exactly as the typing table does', () => {
+    // These codes also key UNTRADABLE_FORM_COMBINATIONS and the is_creature_untradable migration, so a typing
+    // under a different spelling would mean one of the two lists is wrong. (Kyurem has no override: the game
+    // master types White and Black Kyurem Dragon/Ice, the same as Kyurem.)
+    const typed = UNTRADABLE_FORM_COMBINATIONS.filter((c) => c.pokemonId !== 646);
+    expect(typed.map((c) => `${c.pokemonId}:${c.formCode}`).sort()).toEqual([
+      '800:DAWN_WINGS',
+      '800:DUSK_MANE',
+      '800:ULTRA',
+      '888:CROWNED_SWORD',
+      '889:CROWNED_SHIELD',
+    ]);
+    for (const { pokemonId, formCode } of typed) {
+      expect(typesOf({ pokemonId, formCode }), formCode).not.toEqual(typesOf({ pokemonId }));
+    }
+  });
+});
+
+// ——— Gigantamax ———
+
+describe('canGigantamax', () => {
+  it('is true for the species the pinned sprite listing has Gigantamax art for', () => {
+    for (const id of [3, 6, 9, 12, 25, 52, 68, 94, 99, 131, 143]) expect(canGigantamax(id)).toBe(true); // Venusaur .. Snorlax
+  });
+
+  it('is false for species without Gigantamax art, and for ids outside the dex', () => {
+    expect(canGigantamax(150)).toBe(false); // Mewtwo
+    expect(canGigantamax(1)).toBe(false);
+    expect(canGigantamax(0)).toBe(false);
+    expect(canGigantamax(-6)).toBe(false);
+    expect(canGigantamax(99999)).toBe(false);
+  });
+
+  it('is generated data: sorted, unique, inside the dex, and never a stored form', () => {
+    expect([...POKEDEX_GIGANTAMAX_IDS]).toEqual([...new Set(POKEDEX_GIGANTAMAX_IDS)].sort((a, b) => a - b));
+    for (const id of POKEDEX_GIGANTAMAX_IDS) expect(findPokemon(id)).toBeDefined();
+    for (const [, codes] of POKEDEX_FORMS) expect(codes.some((code) => code.includes('GIGANTAMAX'))).toBe(false);
+  });
+});
+
+// ——— forms ———
+
+describe('formsOf', () => {
+  it('lists the forms that FORM_TYPE_OVERRIDES cannot: Origin Palkia and Armored Mewtwo type like their species', () => {
+    // Neither is in the override table (their typing is the species'), which is why the table could not feed a picker.
+    expect(FORM_TYPE_OVERRIDES.some(([id, code]) => (id === 484 && code === 'ORIGIN') || (id === 150 && code === 'A'))).toBe(false);
+    expect(formsOf(484)).toContain('ORIGIN');
+    expect(formsOf(150)).toContain('A');
+    expect(formsOf(150)).toEqual(['A']);
+  });
+
+  it('lists regional, fused, crowned and appliance forms in the exact formCode spelling listings carry', () => {
+    expect(formsOf(37)).toEqual(['ALOLA']); // Vulpix
+    expect(formsOf(52)).toEqual(['ALOLA', 'GALARIAN']); // Meowth, in the game master's order
+    expect(formsOf(888)).toEqual(['CROWNED_SWORD']); // Zacian: HERO is its default form, so it is not listed
+    expect(formsOf(889)).toEqual(['CROWNED_SHIELD']);
+    expect(formsOf(479)).toEqual(['HEAT', 'WASH', 'FROST', 'FAN', 'MOW']); // Rotom: the appliances, not its plain form
+    expect(formsOf(646)).toEqual(['WHITE', 'BLACK']);
+    expect(formsOf(800)).toEqual(expect.arrayContaining(['DUSK_MANE', 'DAWN_WINGS']));
+    expect(formsOf(412)).toEqual(['BURMY_SANDY', 'BURMY_TRASH']); // codes that keep the species prefix keep it here too
+  });
+
+  it('is empty for a single-form species and for an id outside the dex', () => {
+    expect(formsOf(1)).toEqual([]); // Bulbasaur: its only other "form" is an event costume
+    expect(formsOf(4)).toEqual([]);
+    for (const id of [0, -1, 1026, 10188]) expect(formsOf(id), `#${id}`).toEqual([]);
+  });
+
+  it('never lists the default form: null already means it', () => {
+    for (const [id, code] of POKEDEX_DEFAULT_FORMS) expect(formsOf(id), `#${id}`).not.toContain(code);
+    for (const [id, codes] of POKEDEX_FORMS) {
+      expect(codes, `#${id}`).not.toContain('NORMAL');
+      for (const code of codes) expect(code, `#${id}`).not.toMatch(/_NORMAL$/);
+    }
+  });
+
+  it('agrees with the sprite pipeline about which form is the default (BASE_FORM_CODES)', () => {
+    // Unown A, Vivillon Meadow, Zygarde Fifty Percent and Toxtricity Amped are the base art, although the game
+    // master lists a different form first. The one that is NOT the base must stay selectable.
+    for (const [key, code] of Object.entries(BASE_FORM_CODES)) {
+      const id = Number(key);
+      expect(formsOf(id), `#${id} ${code}`).not.toContain(code);
+      if (formsOf(id).length > 0) expect(defaultFormOf(id), `#${id}`).toBe(code === 'NORMAL' ? undefined : code);
+    }
+    expect(formsOf(201)).toContain('UNOWN_F');
+    expect(formsOf(666)).toContain('ARCHIPELAGO');
+    expect(formsOf(849)).toContain('LOW_KEY');
+    expect(formsOf(718)).toContain('TEN_PERCENT');
+  });
+
+  it('offers no temporary evolution: Mega, Primal and Gigantamax are not stored forms', () => {
+    const temporary = new Set(['MEGA', 'MEGA_X', 'MEGA_Y', 'PRIMAL', 'GIGANTAMAX']);
+    for (const [id, codes] of POKEDEX_FORMS) for (const code of codes) expect(temporary.has(code), `#${id} ${code}`).toBe(false);
+  });
+
+  it('offers no event costume and no shadow marker', () => {
+    expect(formsOf(25)).toEqual([]); // Pikachu: the game master flags its ~70 outfits, and COPY_2019 is excluded by name
+    expect(formsOf(222)).toEqual(['GALARIAN']); // Corsola: SPRING_2026 is a flagged costume, GALARIAN is a form
+    for (const id of [243, 244, 245, 249, 250, 380, 381]) expect(formsOf(id), `#${id}`).not.toContain('S');
+    for (const [id, codes] of POKEDEX_FORMS) {
+      for (const code of codes) expect(code, `#${id}`).not.toMatch(/(?:^|_)(?:SHADOW|PURIFIED)$/);
+    }
+    // ...but a form that merely contains the word is a form: Shadow Rider Calyrex.
+    expect(formsOf(898)).toContain('SHADOW_RIDER');
+  });
+
+  // The game master does not flag these `isCostume`, so they are excluded by name (UNFLAGGED_COSTUME_FORMS_EXCLUDED
+  // in scripts/pokedex-source.ts, species-scoped). All five species have no other form, so they have none left.
+  it('offers no unflagged event form: Copy 2019 on the three starters and Pikachu, Swim 2025 on Psyduck', () => {
+    for (const [id, code] of [[3, 'COPY_2019'], [6, 'COPY_2019'], [9, 'COPY_2019'], [25, 'COPY_2019'], [54, 'SWIM_2025']] as const) {
+      expect(formsOf(id), `#${id}`).not.toContain(code);
+      expect(formsOf(id), `#${id}`).toEqual([]);
+    }
+    // The cheapest tripwire for the next unflagged one: an event-year suffix on any selectable form. A species a
+    // future game master adds one to fails here, which needs a decision (exclude it by name, or it is a form).
+    for (const [id, codes] of POKEDEX_FORMS) {
+      for (const code of codes) expect(code, `#${id}`).not.toMatch(/(?:^|_)(?:19|20)\d{2}$/);
+    }
+  });
+
+  it('keeps every typed form selectable, except the temporary evolutions and one event costume', () => {
+    // FORM_TYPE_OVERRIDES is how typesOf reaches a form's typing; a typed form no trainer can pick is dead data.
+    const temporary = new Set(['MEGA', 'MEGA_X', 'MEGA_Y', 'PRIMAL']);
+    // The game master types CORSOLA_SPRING_2026 as Ghost because it is a costume on GALARIAN Corsola. It is
+    // flagged isCostume, so it is not offered: the trainer picks Galarian and turns Costume on, which types the
+    // same. It is the ONLY costume with a typing of its own; a new one failing here needs a decision, not a skip.
+    const costumesOnARegionalForm = new Set(['222:SPRING_2026']);
+    for (const [id, code] of FORM_TYPE_OVERRIDES) {
+      if (temporary.has(code) || costumesOnARegionalForm.has(`${id}:${code}`)) continue;
+      expect(formsOf(id), `#${id} ${code}`).toContain(code);
+    }
+    expect(typesOf({ pokemonId: 222, formCode: 'GALARIAN' })).toEqual(typesOf({ pokemonId: 222, formCode: 'SPRING_2026' }));
+  });
+
+  it('offers every untradable form, so a picker can refuse them rather than hide them', () => {
+    // The fused Kyurem / Necrozma forms, Crowned Sword / Shield Zacian and Zamazenta, and Ultra Necrozma.
+    for (const { pokemonId, formCode } of UNTRADABLE_FORM_COMBINATIONS) {
+      expect(formsOf(pokemonId), `#${pokemonId} ${formCode}`).toContain(formCode);
+      expect(isPokemonUntradable(pokemonId, formCode)).toBe(true);
+    }
+    // ...and the forms of a species that is untradable whole are offered too: Eternamax Eternatus.
+    expect(formsOf(890)).toContain('ETERNAMAX');
+    expect(isPokemonUntradable(890, 'ETERNAMAX')).toBe(true);
+    // The default forms of the species that have one untradable form are NOT among them, and stay tradable.
+    expect(formsOf(888)).not.toContain('HERO');
+    expect(isPokemonUntradable(888, 'HERO')).toBe(false);
+  });
+
+  it('is well-formed: dex species in id order, no repeats, a valid form code every time', () => {
+    const ids = POKEDEX_FORMS.map(([id]) => id);
+    expect(ids).toEqual([...ids].sort((a, b) => a - b));
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const [id, codes] of POKEDEX_FORMS) {
+      expect(findPokemon(id), `#${id}`).toBeDefined();
+      expect(codes.length, `#${id}`).toBeGreaterThan(0);
+      expect(new Set(codes).size, `#${id}`).toBe(codes.length);
+      for (const code of codes) expect(code, `#${id}`).toMatch(/^[A-Z0-9_]{1,40}$/);
+    }
+  });
+
+  it('gives every offered form a readable label that is not blank', () => {
+    for (const [id, codes] of POKEDEX_FORMS) {
+      for (const code of codes) expect(creatureFormLabel({ pokemonId: id, formCode: code })?.trim(), `#${id} ${code}`).toBeTruthy();
+    }
+    expect(creatureFormLabel({ pokemonId: 150, formCode: 'A' })).toBe('Armored');
+    expect(creatureFormLabel({ pokemonId: 484, formCode: 'ORIGIN' })).toBe('Origin');
+    expect(creatureFormLabel({ pokemonId: 37, formCode: 'ALOLA' })).toBe('Alolan');
+    expect(creatureFormLabel({ pokemonId: 888, formCode: 'CROWNED_SWORD' })).toBe('Crowned Sword');
+  });
+});
+
+describe('defaultFormOf', () => {
+  it('names the default form where it has a name of its own', () => {
+    expect(defaultFormOf(888)).toBe('HERO');
+    expect(defaultFormOf(487)).toBe('ALTERED');
+    expect(defaultFormOf(666)).toBe('MEADOW');
+    expect(defaultFormOf(201)).toBe('UNOWN_A');
+  });
+
+  it('is undefined where the default is the plain form, for single-form species and for unknown ids', () => {
+    expect(defaultFormOf(484)).toBeUndefined(); // Palkia: plain
+    expect(defaultFormOf(37)).toBeUndefined();
+    expect(defaultFormOf(1)).toBeUndefined();
+    expect(defaultFormOf(10188)).toBeUndefined();
+  });
+
+  it('only names species that have selectable forms, and a form that is not among them', () => {
+    for (const [id, code] of POKEDEX_DEFAULT_FORMS) {
+      expect(formsOf(id).length, `#${id}`).toBeGreaterThan(0);
+      expect(formsOf(id), `#${id}`).not.toContain(code);
+      expect(code, `#${id}`).toMatch(/^[A-Z0-9_]{1,40}$/);
+    }
+  });
+});
+
+describe('typeMembership', () => {
+  /** The documented semantics of `TypeMembership`, as an executable spec. */
+  function inMembership(m: TypeMembership, creature: { pokemonId: number; formCode?: string | null }): boolean {
+    if (m.allForms.includes(creature.pokemonId)) return true;
+    const code = creature.formCode ?? null;
+    const except = m.exceptForms.find((e) => e.pokemonId === creature.pokemonId);
+    if (except) return code === null || !except.formCodes.includes(code);
+    const only = m.onlyForms.find((e) => e.pokemonId === creature.pokemonId);
+    return only !== undefined && code !== null && only.formCodes.includes(code);
+  }
+
+  it('agrees with creatureHasType for every type, every species and every form, null form included', () => {
+    const codesBySpecies = new Map<number, string[]>();
+    for (const [id, code] of FORM_TYPE_OVERRIDES) codesBySpecies.set(id, [...(codesBySpecies.get(id) ?? []), code]);
+
+    for (const type of POKEMON_TYPES) {
+      const membership = typeMembership(type);
+      for (const { pokemonId } of POKEDEX) {
+        const codes: (string | null)[] = [null, 'NOT_A_REAL_FORM', ...(codesBySpecies.get(pokemonId) ?? [])];
+        for (const formCode of codes) {
+          const creature = { pokemonId, formCode };
+          if (inMembership(membership, creature) !== creatureHasType(creature, type)) {
+            throw new Error(`${type}: #${pokemonId} form ${formCode} disagrees`);
+          }
+        }
+      }
+    }
+  });
+
+  it('matches nothing outside the dex', () => {
+    for (const type of POKEMON_TYPES) {
+      expect(inMembership(typeMembership(type), { pokemonId: 10188, formCode: 'CROWNED_SWORD' })).toBe(false);
+    }
+  });
+
+  it('is precomputed once: the same object every call, for every type', () => {
+    for (const type of POKEMON_TYPES) {
+      expect(typeMembership(type)).toBe(typeMembership(type));
+      expect(typeMembership(type).type).toBe(type);
+    }
+  });
+
+  it('puts each species in at most one group, ascending and duplicate-free', () => {
+    for (const type of POKEMON_TYPES) {
+      const m = typeMembership(type);
+      const all = new Set(m.allForms);
+      const except = m.exceptForms.map((e) => e.pokemonId);
+      const only = m.onlyForms.map((e) => e.pokemonId);
+      expect(all.size, type).toBe(m.allForms.length);
+      expect(m.allForms, type).toEqual([...m.allForms].sort((a, b) => a - b));
+      expect(new Set(except).size, type).toBe(except.length);
+      expect(new Set(only).size, type).toBe(only.length);
+      for (const id of [...except, ...only]) expect(all.has(id), `${type} #${id}`).toBe(false);
+      for (const id of only) expect(except.includes(id), `${type} #${id}`).toBe(false);
+      for (const group of [...m.exceptForms, ...m.onlyForms]) expect(group.formCodes.length, `${type} #${group.pokemonId}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('has members for every type, including types that only ever appear as a second type', () => {
+    for (const type of POKEMON_TYPES) {
+      const m = typeMembership(type);
+      expect(m.allForms.length + m.exceptForms.length + m.onlyForms.length, type).toBeGreaterThan(0);
+    }
+    expect(typeMembership('Flying').allForms).toContain(12); // Butterfree: Bug/Flying, Flying is second
+    // Charizard is Fire/Flying, but Mega Charizard X is Fire/Dragon: Flying is Charizard minus that form.
+    expect(typeMembership('Flying').exceptForms).toContainEqual({ pokemonId: 6, formCodes: ['MEGA_X'] });
+  });
+
+  it('a form that DROPS a type is an exception to its species: Alolan Vulpix is not Fire', () => {
+    const fire = typeMembership('Fire');
+    expect(fire.allForms).toContain(4); // Charmander: every form
+    expect(fire.allForms).not.toContain(37); // Vulpix is not "all forms"...
+    expect(fire.exceptForms).toContainEqual({ pokemonId: 37, formCodes: ['ALOLA'] }); // ...Alolan Vulpix is out
+    const water = typeMembership('Water');
+    expect(water.exceptForms.find((e) => e.pokemonId === 79)?.formCodes).toEqual(['GALARIAN']); // Slowpoke
+  });
+
+  it('a form that GAINS a type is listed only for that form: Heat Rotom is Fire, Rotom is not', () => {
+    const fire = typeMembership('Fire');
+    expect(fire.allForms).not.toContain(479);
+    expect(fire.onlyForms.find((e) => e.pokemonId === 479)?.formCodes).toEqual(['HEAT']);
+    const steel = typeMembership('Steel');
+    expect(steel.onlyForms.find((e) => e.pokemonId === 888)?.formCodes).toEqual(['CROWNED_SWORD']);
+    expect(steel.allForms).not.toContain(888);
+  });
+
+  it('a form that keeps the type needs no entry: Alolan Diglett is still Ground', () => {
+    const ground = typeMembership('Ground');
+    expect(ground.allForms).toContain(50); // Diglett: Ground in every form
+    expect(ground.exceptForms.some((e) => e.pokemonId === 50)).toBe(false);
+  });
+});
+
+describe('formatTypes', () => {
+  it('joins a dual type with a slash and leaves a single type alone', () => {
+    expect(formatTypes(['Fire', 'Flying'])).toBe('Fire / Flying');
+    expect(formatTypes(['Grass'])).toBe('Grass');
+  });
+
+  it('formats what typesOf returns', () => {
+    const types = typesOf({ pokemonId: 888, formCode: 'CROWNED_SWORD' });
+    expect(types && formatTypes(types)).toBe('Fairy / Steel');
+  });
+});
+
+describe('creatureHue', () => {
+  const VULPIX = 37;
+  const ROTOM = 479;
+  const CHARIZARD = 6;
+  const stored = (pokemonId: number) => findPokemon(pokemonId)!.hue;
+
+  it('tints a form whose primary type differs from the species by that form\'s type', () => {
+    // Vulpix is Fire; Alolan Vulpix is Ice, so the tint follows the type badge, not the species.
+    expect(creatureHue({ pokemonId: VULPIX, formCode: 'ALOLA', hue: stored(VULPIX) })).toBe(TYPE_HUE.Ice);
+    expect(creatureHue({ pokemonId: VULPIX, formCode: 'ALOLA', hue: stored(VULPIX) })).not.toBe(TYPE_HUE.Fire);
+    // Alolan Rattata is Dark/Normal where Rattata is Normal.
+    expect(creatureHue({ pokemonId: 19, formCode: 'ALOLA', hue: stored(19) })).toBe(TYPE_HUE.Dark);
+  });
+
+  it('keeps the stored hue for a form that shares the species\' primary type', () => {
+    // Wash Rotom is Electric/Water and Rotom is Electric/Ghost: the PRIMARY is Electric in both, so no change.
+    expect(typesOf({ pokemonId: ROTOM, formCode: 'WASH' })).toEqual(['Electric', 'Water']);
+    expect(creatureHue({ pokemonId: ROTOM, formCode: 'WASH', hue: 123 })).toBe(123);
+    // Mega X Charizard is Fire/Dragon, Charizard Fire/Flying.
+    expect(creatureHue({ pokemonId: CHARIZARD, formCode: 'MEGA_X', hue: 18 })).toBe(18);
+  });
+
+  it('keeps a hand-picked stored hue on the default form, however the form is absent', () => {
+    for (const formCode of [undefined, null, '']) {
+      expect(creatureHue({ pokemonId: 382, formCode, hue: 340 })).toBe(340);
+    }
+    expect(creatureHue({ pokemonId: 382, hue: 210 })).toBe(210);
+  });
+
+  it('keeps the stored hue for an unknown id or an unknown form code', () => {
+    expect(creatureHue({ pokemonId: 999_999, formCode: 'ALOLA', hue: 77 })).toBe(77);
+    expect(creatureHue({ pokemonId: VULPIX, formCode: 'NOT_A_FORM', hue: 77 })).toBe(77);
+  });
+
+  it('for every (species, form) in the dex is either the stored hue or the form\'s primary type hue', () => {
+    const stub = 1234; // not a TYPE_HUE value, so "stored" and "type" can never be confused
+    let retinted = 0;
+    for (const entry of POKEDEX) {
+      for (const formCode of [null, ...formsOf(entry.pokemonId)]) {
+        const creature = { pokemonId: entry.pokemonId, formCode, hue: stub };
+        const formPrimary = typesOf(creature)![0];
+        const result = creatureHue(creature);
+        if (formPrimary !== entry.types[0]) {
+          expect(result, `${entry.pokemonId} ${formCode}`).toBe(TYPE_HUE[formPrimary]);
+          retinted++;
+        } else {
+          expect(result, `${entry.pokemonId} ${formCode}`).toBe(stub);
+        }
+      }
+    }
+    expect(retinted).toBeGreaterThan(0);
+  });
+});
+
+describe('searchPokedex — dex number forms', () => {
+  it.each(['150', '#0150', '0150', ' #150 '])('"%s" finds Mewtwo first', (q) => {
+    expect(searchPokedex(q)[0]?.pokemonId).toBe(150);
+  });
+  it('ranks an exact dex number before prefix matches', () => {
+    expect(searchPokedex('15', 5).map((r) => r.pokemonId).slice(0, 2)).toEqual([15, 150]);
+  });
+});
+
+describe('searchPokedex — names', () => {
+  it('finds by full name and by prefix', () => {
+    expect(searchPokedex('Mewtwo')[0]?.pokemonId).toBe(150);
+    expect(searchPokedex('ray').map((r) => r.name)).toContain('Rayquaza');
+  });
+});
+
+describe('searchPokedex — type matching', () => {
+  const ids = (q: string) => searchPokedex(q, 2000).map((r) => r.pokemonId);
+
+  it('matches species by exact type name, case-insensitively', () => {
+    for (const [q, id] of [['Fire', 4], ['Dragon', 149], ['Fairy', 35], ['fire', 6]] as const) {
+      expect(ids(q)).toContain(id);
+    }
+  });
+  it('matches by a 3+ char prefix', () => {
+    expect(ids('drag')).toContain(149);
+    expect(new Set(ids('drag'))).toEqual(new Set(ids('dragon')));
+  });
+  it('finds a dual-type species under its second type', () => {
+    expect(ids('Flying')).toContain(6); // Charizard
+  });
+  it('finds form-only members', () => {
+    expect(ids('Fire')).toContain(479); // Rotom (HEAT)
+    expect(ids('Ice')).toContain(37); // Vulpix (ALOLA)
+  });
+  it('agrees with typeMembership', () => {
+    const m = typeMembership('Dragon');
+    const expected = new Set([...m.allForms, ...m.exceptForms.map((e) => e.pokemonId), ...m.onlyForms.map((e) => e.pokemonId)]);
+    expect(new Set(ids('Dragon'))).toEqual(expected);
+  });
+  it('orders by rank, then pokemonId', () => {
+    // "fire" also hits names containing it (rank 2-4); those lead, and each rank block ascends by id.
+    const results = searchPokedex('Fire', 2000);
+    const nameHits = results.filter((r) => r.name.toLowerCase().includes('fire')).map((r) => r.pokemonId);
+    const typeOnly = results.filter((r) => !r.name.toLowerCase().includes('fire')).map((r) => r.pokemonId);
+    expect(results.slice(0, nameHits.length).map((r) => r.pokemonId)).toEqual(nameHits);
+    expect(typeOnly).toEqual([...typeOnly].sort((a, b) => a - b));
+  });
+  it('ranks names above types (prefix "fai" = Fairy type, name hits first)', () => {
+    const results = searchPokedex('fai', 2000);
+    const firstTypeOnly = results.findIndex((r) => !r.name.toLowerCase().includes('fai'));
+    const lastNameHit = results.map((r) => r.name.toLowerCase().includes('fai')).lastIndexOf(true);
+    if (firstTypeOnly !== -1) expect(lastNameHit).toBeLessThan(firstTypeOnly);
+  });
+  it('limit caps the total, taking the lowest dex numbers of a type', () => {
+    const r = searchPokedex('Water', 10).map((x) => x.pokemonId);
+    expect(r).toHaveLength(10);
+    expect(r).toEqual([...r].sort((a, b) => a - b));
+  });
+  it('does not type-match numeric queries', () => {
+    expect(searchPokedex('150', 50).every((r) => String(r.pokemonId).startsWith('150'))).toBe(true);
+  });
+});
+
+describe('matchPokemonType', () => {
+  it('matches exact names case-insensitively', () => {
+    expect(matchPokemonType('Dragon')).toBe('Dragon');
+    expect(matchPokemonType(' fire ')).toBe('Fire');
+  });
+  it('matches a prefix of 3+ chars', () => {
+    expect(matchPokemonType('drag')).toBe('Dragon');
+    expect(matchPokemonType('fai')).toBe('Fairy');
+  });
+  it('rejects too-short prefixes and non-types', () => {
+    expect(matchPokemonType('dr')).toBeNull();
+    expect(matchPokemonType('f')).toBeNull();
+    expect(matchPokemonType('')).toBeNull();
+    expect(matchPokemonType('Mewtwo')).toBeNull();
+    expect(matchPokemonType('150')).toBeNull();
+  });
+});
+
+// ——— base stats, max CP and meta tiers ———
+// Values are read from the generated tables (constants/pokedex-data.ts); only relationships are asserted.
+
+describe('statsOf', () => {
+  const statRow = (id: number) => POKEDEX_STATS.find(([pokemonId]) => pokemonId === id)!;
+
+  it('returns the generated default-form stats for a species, with a maxCp', () => {
+    const [, atk, def, sta] = statRow(6);
+    expect(statsOf({ pokemonId: 6 })).toEqual({ atk, def, sta, maxCp: maxCpOf({ atk, def, sta }) });
+  });
+
+  it('treats a null/absent form code and a form with no override as the species default', () => {
+    expect(statsOf({ pokemonId: 6, formCode: null })).toEqual(statsOf({ pokemonId: 6 }));
+    expect(statsOf({ pokemonId: 6, formCode: 'NOT_A_FORM' })).toEqual(statsOf({ pokemonId: 6 }));
+  });
+
+  it('is form-aware: Origin Giratina differs from Altered/default, and matches its override row', () => {
+    const origin = statsOf({ pokemonId: 487, formCode: 'ORIGIN' })!;
+    const row = FORM_STAT_OVERRIDES.find(([id, code]) => id === 487 && code === 'ORIGIN')!;
+    expect(origin).toMatchObject({ atk: row[2], def: row[3], sta: row[4] });
+    expect(origin).not.toEqual(statsOf({ pokemonId: 487 }));
+    expect(statsOf({ pokemonId: 487, formCode: 'ALTERED' })).toEqual(statsOf({ pokemonId: 487 }));
+  });
+
+  it('gives Armored Mewtwo (A) its own stats when the data has an override for it', () => {
+    const row = FORM_STAT_OVERRIDES.find(([id, code]) => id === 150 && code === 'A');
+    if (!row) return; // the data decides; no override means the form shares Mewtwo's stats
+    expect(statsOf({ pokemonId: 150, formCode: 'A' })).toMatchObject({ atk: row[2], def: row[3], sta: row[4] });
+    expect(statsOf({ pokemonId: 150, formCode: 'A' })).not.toEqual(statsOf({ pokemonId: 150 }));
+  });
+
+  it('uses the app default form, not the first-listed one (Zygarde: null is Fifty Percent)', () => {
+    const ten = FORM_STAT_OVERRIDES.find(([id, code]) => id === 718 && code === 'TEN_PERCENT');
+    expect(ten).toBeDefined();
+    expect(statsOf({ pokemonId: 718 })).not.toMatchObject({ atk: ten![2], def: ten![3], sta: ten![4] });
+  });
+
+  it('is undefined for an unknown id and for Basculegion (#902, no game master stats)', () => {
+    expect(statsOf({ pokemonId: 0 })).toBeUndefined();
+    expect(statsOf({ pokemonId: 99999 })).toBeUndefined();
+    expect(statsOf({ pokemonId: 902 })).toBeUndefined();
+    expect(statsOf({ pokemonId: 902, formCode: 'FEMALE' })).toBeUndefined();
+    expect(findPokemon(902)).toBeDefined();
+  });
+
+  it('covers every other species, and every override row is for a species with default stats', () => {
+    const missing = POKEDEX.filter((e) => !statsOf({ pokemonId: e.pokemonId })).map((e) => e.pokemonId);
+    expect(missing).toEqual([902]);
+    for (const [id] of FORM_STAT_OVERRIDES) expect(statsOf({ pokemonId: id })).toBeDefined();
+  });
+
+  it('never lists a form override equal to its species default, nor a Mega/Primal form', () => {
+    for (const [id, code, atk, def, sta] of FORM_STAT_OVERRIDES) {
+      const base = statRow(id);
+      expect([atk, def, sta]).not.toEqual([base[1], base[2], base[3]]);
+      expect(code).not.toMatch(/^(MEGA|PRIMAL)/);
+    }
+  });
+});
+
+describe('maxCpOf', () => {
+  it('matches the level-50 15/15/15 formula for the generated stats', () => {
+    for (const [id, atk, def, sta] of POKEDEX_STATS) {
+      const expected = Math.max(10, Math.floor(((atk + 15) * Math.sqrt(def + 15) * Math.sqrt(sta + 15) * 0.84029999 ** 2) / 10));
+      expect(statsOf({ pokemonId: id })!.maxCp).toBe(expected);
+    }
+  });
+
+  it('is monotonic in each stat', () => {
+    const base = { atk: 150, def: 150, sta: 150 };
+    expect(maxCpOf({ ...base, atk: 151 })).toBeGreaterThanOrEqual(maxCpOf(base));
+    expect(maxCpOf({ ...base, atk: 250 })).toBeGreaterThan(maxCpOf(base));
+    expect(maxCpOf({ ...base, def: 250 })).toBeGreaterThan(maxCpOf(base));
+    expect(maxCpOf({ ...base, sta: 250 })).toBeGreaterThan(maxCpOf(base));
+  });
+
+  it('never goes below the game minimum of 10', () => {
+    expect(maxCpOf({ atk: 0, def: 0, sta: 0 })).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe('metaRanksOf', () => {
+  const MODES = ['pve', 'greatLeague', 'ultraLeague', 'masterLeague'] as const;
+  const TIER_VALUE: Record<MetaTier, number> = { C: 0, B: 1, A: 2, S: 3, 'S+': 4 };
+
+  it('is undefined exactly when statsOf is', () => {
+    expect(metaRanksOf({ pokemonId: 902 })).toBeUndefined();
+    expect(metaRanksOf({ pokemonId: 0 })).toBeUndefined();
+    expect(metaRanksOf({ pokemonId: 6 })).toBeDefined();
+  });
+
+  it('is deterministic', () => {
+    expect(metaRanksOf({ pokemonId: 150 })).toEqual(metaRanksOf({ pokemonId: 150 }));
+  });
+
+  it('buckets the default-form population by the documented percentile thresholds', () => {
+    const ids = POKEDEX_STATS.map(([id]) => id);
+    for (const mode of MODES) {
+      const counts: Record<MetaTier, number> = { 'S+': 0, S: 0, A: 0, B: 0, C: 0 };
+      for (const id of ids) counts[metaRanksOf({ pokemonId: id })![mode]]++;
+      const n = ids.length;
+      // Ties can push a boundary by a few species, so allow a small slack around each exact bucket size.
+      const slack = Math.ceil(n * 0.02);
+      expect(Math.abs(counts['S+'] - n * 0.05)).toBeLessThanOrEqual(slack);
+      expect(Math.abs(counts.S - n * 0.1)).toBeLessThanOrEqual(slack);
+      expect(Math.abs(counts.A - n * 0.2)).toBeLessThanOrEqual(slack);
+      expect(Math.abs(counts.B - n * 0.3)).toBeLessThanOrEqual(slack);
+      expect(counts['S+'] + counts.S + counts.A + counts.B + counts.C).toBe(n);
+      expect(counts['S+']).toBeLessThan(counts.C);
+    }
+  });
+
+  it('never ranks a strictly better stat line lower in Master League or PvE', () => {
+    const lines = POKEDEX_STATS.map(([id, atk, def, sta]) => ({ id, atk, def, sta }));
+    let checked = 0;
+    for (const a of lines) {
+      for (const b of lines) {
+        if (a.atk > b.atk && a.def > b.def && a.sta > b.sta) {
+          checked++;
+          const ra = metaRanksOf({ pokemonId: a.id })!;
+          const rb = metaRanksOf({ pokemonId: b.id })!;
+          expect(TIER_VALUE[ra.masterLeague]).toBeGreaterThanOrEqual(TIER_VALUE[rb.masterLeague]);
+          expect(TIER_VALUE[ra.pve]).toBeGreaterThanOrEqual(TIER_VALUE[rb.pve]);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('scores a form with its own stats (Origin Giratina is not forced to Altered\'s tiers by id)', () => {
+    expect(metaRanksOf({ pokemonId: 487, formCode: 'ORIGIN' })).toBeDefined();
+    expect(metaRanksOf({ pokemonId: 487, formCode: 'ALTERED' })).toEqual(metaRanksOf({ pokemonId: 487 }));
+  });
+
+  it('penalises species whose max CP is far below a league cap relative to ones that reach it', () => {
+    const weakest = [...POKEDEX_STATS].sort((x, y) => statsOf({ pokemonId: x[0] })!.maxCp - statsOf({ pokemonId: y[0] })!.maxCp)[0][0];
+    expect(metaRanksOf({ pokemonId: weakest })!.masterLeague).toBe('C');
+    expect(metaRanksOf({ pokemonId: weakest })!.ultraLeague).toBe('C');
+  });
+
+  it('has a disclaimer that says the tiers are estimates', () => {
+    expect(META_TIER_DISCLAIMER.toLowerCase()).toContain('base stats');
   });
 });

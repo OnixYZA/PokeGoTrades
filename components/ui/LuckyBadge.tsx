@@ -1,3 +1,4 @@
+import { Clover } from 'lucide-react-native';
 import { useEffect } from 'react';
 import { Text, View } from 'react-native';
 import Animated, {
@@ -11,6 +12,17 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { COLORS, luckyShimmerGradient } from '@/constants/theme';
+
+/** The lucky marker's icon: a four-leaf clover. Lucky used to borrow the sparkle, which is the shiny
+ *  marker (`ShinyGlint`) and made a lucky listing read as shiny. Every lucky icon draws this, so lucky
+ *  has one look as well. Decorative: the "Lucky" text beside it is what a screen reader gets. */
+export function LuckyClover({ size, color, strokeWidth = 2.4 }: { size: number; color: string; strokeWidth?: number }) {
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no">
+      <Clover size={size} color={color} strokeWidth={strokeWidth} />
+    </View>
+  );
+}
 
 /** Guaranteed-lucky pill with the handoff's `shimmer` sweep (3s linear, background-position). */
 export function LuckyBadge({ size = 'default' }: { size?: 'default' | 'sm' }) {
@@ -53,11 +65,12 @@ export function LuckyBadge({ size = 'default' }: { size?: 'default' | 'sm' }) {
           animatedStyle,
         ]}
       />
+      <LuckyClover size={fontSize + 2} color="#2a1e02" />
       <Text
         className="font-display uppercase"
         style={{ fontSize, letterSpacing: fontSize * 0.08, color: '#2a1e02' }}
       >
-        ✦ Guaranteed Lucky
+        Guaranteed Lucky
       </Text>
     </View>
   );

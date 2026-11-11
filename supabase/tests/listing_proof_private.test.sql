@@ -11,7 +11,7 @@
 -- listing), so the "0 rows" case below proves the seller-only policy on `listing_proof_private` holds even
 -- for a trainer already inside an active chat on that exact listing, not just for a total stranger.
 begin;
-select plan(7);
+select plan(12);
 
 create function pg_temp.act_as(p_uid uuid) returns void language sql as $$
   select set_config('request.jwt.claims',
@@ -64,6 +64,19 @@ select throws_ok(
   $$ delete from public.listing_proof_private where proof_id = 'e0000000-0000-4000-8000-000000000001' $$,
   '42501', null, 'nor delete one, even the seller''s own');
 reset role;
+
+-- ——— no accidental default grants: TRUNCATE ignores RLS, so it must be absent for both client roles ———
+-- (migration ...20261103000100; Supabase's default table privileges used to hand these out to every new table)
+select ok(not has_table_privilege('anon', 'public.listing_proof_private', 'TRUNCATE'),
+  'anon holds no TRUNCATE on listing_proof_private');
+select ok(not has_table_privilege('authenticated', 'public.listing_proof_private', 'TRUNCATE'),
+  'authenticated holds no TRUNCATE on listing_proof_private');
+select ok(not has_any_column_privilege('authenticated', 'public.listing_proof_private', 'UPDATE'),
+  'authenticated holds no UPDATE on listing_proof_private');
+select ok(not has_table_privilege('authenticated', 'public.listing_proof_private', 'DELETE'),
+  'authenticated holds no DELETE on listing_proof_private');
+select ok(not has_any_column_privilege('anon', 'public.listing_proof_private', 'SELECT'),
+  'anon holds no SELECT on listing_proof_private');
 
 select * from finish();
 rollback;

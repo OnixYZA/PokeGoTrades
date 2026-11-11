@@ -1,3 +1,4 @@
+import type { AreaName } from '@/constants/locations';
 import type { ListingTag, Pokeball, PokemonSize, TradeTimeline } from '@/constants/listing-attributes';
 import type { MarketSignal } from '@/constants/market';
 
@@ -30,9 +31,14 @@ export interface CreatureRef {
   pokemonId: number;
   shiny?: boolean;
   lucky?: boolean;
-  /** PokeMiners sprite form code (`lib/sprite-url.ts` `spriteObjectKey`'s `.f{FORM}` layer), matching
-   *  `[A-Z0-9_]+` (e.g. `'CROWNED_SWORD'`, `'ALOLA'`). Distinct from `Listing.form`, which is free
-   *  display text like `'Crowned Sword'`. `null`/absent means the base species sprite. */
+  /** The creature's form, as a PokeMiners form code (`lib/sprite-url.ts` `spriteObjectKey`'s `.f{FORM}` layer),
+   *  matching `[A-Z0-9_]+` (e.g. `'CROWNED_SWORD'`, `'ALOLA'`). `null`/absent means the species' default form
+   *  (and the base species sprite).
+   *
+   *  This is the ONLY representation of a form, on a `Listing` as on a looking-for entry or an offer: there is no
+   *  separate display string to drift from it (a listing used to carry free text `form` beside this, and the two
+   *  disagreed). Show it through `creatureFormLabel` (`lib/format.ts`), never by printing the code. A form the
+   *  code table has no code for ("Apex") therefore cannot be stated at all, by design. */
   formCode?: string | null;
   /** PokeMiners sprite costume code (`spriteObjectKey`'s `.c{COSTUME}` layer), same `[A-Z0-9_]+` shape
    *  as `formCode` (e.g. `'JAN_2020_NOEVOLVE'`). Distinct from `Listing.costume`, which is only a
@@ -45,7 +51,6 @@ export type ListingStatus = 'open' | 'locked' | 'completed' | 'withdrawn';
 
 export interface Listing extends CreatureRef {
   id: string;
-  form: string;
   year: number;
   lucky: boolean;
   shiny: boolean;
@@ -57,7 +62,7 @@ export interface Listing extends CreatureRef {
   /** Kilometres from the viewer. Mock data only: proximity is not persisted (SUPABASE_PLAN.md D3),
    *  so Supabase-backed listings leave it undefined and the UI hides the badge. */
   dist?: number;
-  loc: string;
+  loc: AreaName;
   pvp: string;
   tradeType: TradeType;
   iv: string;
@@ -81,10 +86,16 @@ export interface Listing extends CreatureRef {
   /** Event / costume variant. */
   costume: boolean;
   pokeball: Pokeball | null;
-  /** Service-role only (migration …000100_listing_attributes) — the seller never sets this. Null
-   *  until a future OCR pass reads it off an appraisal screenshot. */
+  /** Combat Power the seller declares (10..10000). Required when creating a listing; absent/null only on
+   *  listings that predate the column (migration …20261103000200). */
+  cp?: number | null;
+  /** Seller-declared in-game size label (migration …20261103000200 reversed the old service-role-only rule);
+   *  the OCR pass only fills it while null. */
   sizeClass: PokemonSize | null;
   willTravel: boolean;
+  /** Seller-declared Gigantamax Pokémon (migration …20261103000300). Only offered for species
+   *  `canGigantamax` (constants/pokedex.ts) names. */
+  isGigantamax: boolean;
   tradeTimeline: TradeTimeline;
   /** Live want/have signal for this (pokemonId, shiny) pair (`pokemon_market_demand`). Undefined
    *  until `useFeed` fetches it, or if that fetch failed — never treat absence as "no demand",
@@ -110,6 +121,13 @@ export interface FormalOffer {
 export type ChatStatus = 'open' | 'bailed' | 'completed' | 'closed';
 export type ChatRole = 'seller' | 'buyer';
 
+/**
+ * How a formal offer ended without being locked in. `chat_messages` is insert-only and no RPC retracts an
+ * offer, so nothing in the schema can record either yet and nothing sets this today; `store/offer-state.ts`
+ * already treats both as dead, so only the row mapping has to change when the backend gains one.
+ */
+export type OfferResolution = 'withdrawn' | 'rejected';
+
 export interface ChatMessage {
   /** 'system' rows (lock / unlock / confirm / completed / closed) exist only on Supabase-backed chats. */
   role: 'them' | 'me' | 'system';
@@ -117,6 +135,8 @@ export interface ChatMessage {
   time: string;
   /** Present when this message is an auto-sent formal-offer card rather than plain text. */
   offer?: FormalOffer;
+  /** Set when `offer` was withdrawn or rejected; see `OfferResolution`. Absent means the offer still stands. */
+  offerResolution?: OfferResolution;
 
   // ——— Supabase-backed messages only; the mock thread predates all of these ———
   /** Server row id. For an unconfirmed optimistic message this equals `clientId`. */
@@ -183,6 +203,8 @@ export interface Trainer {
   trades: number;
   rep: number;
   streak: number;
+  /** Bails that cost this trainer's partner a trade (server-written `profiles.bails_count`). */
+  bailsCount?: number;
   arsenal: CreatureRef[];
   wishlist: CreatureRef[];
   tradeHistory: TradeHistoryEntry[];

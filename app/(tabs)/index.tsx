@@ -3,8 +3,10 @@ import { router } from 'expo-router';
 import { ListFilter, Plus, Search } from 'lucide-react-native';
 import { ActivityIndicator, FlatList, Modal, Pressable, Text, View } from 'react-native';
 
+import { FeedSearchModal } from '@/components/feed/FeedSearchModal';
 import { ListingCard } from '@/components/feed/ListingCard';
 import { LocationDropdown } from '@/components/feed/LocationDropdown';
+import { SearchSpeciesPill } from '@/components/feed/SearchSpeciesPill';
 import { CreateListingModal } from '@/components/modals/CreateListingModal';
 import { ListingFilterSheet } from '@/components/modals/ListingFilterSheet';
 import { BrandLogo } from '@/components/ui/BrandLogo';
@@ -21,13 +23,16 @@ export default function FeedScreen() {
   const addListing = useTradeStore((s) => s.addListing);
   const listingFilters = useTradeStore((s) => s.listingFilters);
   const clearListingFilters = useTradeStore((s) => s.clearListingFilters);
+  const searchPokemonId = useTradeStore((s) => s.searchPokemonId);
   const feed = useFeed(filterLocation);
   const [showCreateListing, setShowCreateListing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pulling, setPulling] = useState(false);
 
-  const activeFilterCount = Object.keys(listingFilters).length;
+  // A searched species narrows the feed exactly like a chip, so it counts toward "active" (badge, empty state).
+  const activeFilterCount = Object.keys(listingFilters).length + (searchPokemonId !== null ? 1 : 0);
 
   const filtered = feed.listings;
 
@@ -74,7 +79,7 @@ export default function FeedScreen() {
               </Text>
             </View>
           </View>
-          <IconButton accessibilityLabel="Search listings">
+          <IconButton accessibilityLabel="Search listings" onPress={() => setShowSearch(true)}>
             <Search size={18} color="#8b93a7" />
           </IconButton>
         </View>
@@ -104,6 +109,11 @@ export default function FeedScreen() {
             </Text>
           </Pressable>
         </View>
+        {searchPokemonId !== null && (
+          <View className="mt-2.5">
+            <SearchSpeciesPill />
+          </View>
+        )}
       </View>
 
       <View className="flex-row gap-2 px-[22px] pb-3.5">
@@ -190,6 +200,7 @@ export default function FeedScreen() {
         />
       </Modal>
 
+      <FeedSearchModal visible={showSearch} onClose={() => setShowSearch(false)} />
       <ListingFilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
   );

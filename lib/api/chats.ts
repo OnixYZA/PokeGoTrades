@@ -1,4 +1,4 @@
-import type { Chat, ChatMessage, ChatRole, ChatStatus, CreatureRef, FormalOffer, ListingStatus } from '@/data/types';
+import type { Chat, ChatMessage, ChatRole, ChatStatus, FormalOffer, ListingStatus } from '@/data/types';
 import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
 import type { Database, Json } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
@@ -7,7 +7,13 @@ import { supabase } from '@/lib/supabase';
 
 type Tables = Database['public']['Tables'];
 
-export type BailReason = Database['public']['Enums']['bail_reason'];
+// Defined once, in the pure `lib/reputation.ts`; this compile-time check pins it to the generated enum
+// (it fails to typecheck if `public.bail_reason` gains or loses a value).
+import type { BailReason } from '@/lib/reputation';
+
+export type { BailReason };
+type SameType<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+export const bailReasonMatchesEnum: SameType<BailReason, Database['public']['Enums']['bail_reason']> = true;
 export type TradeLockRow = Tables['trade_locks']['Row'];
 export type MessageRow = Tables['chat_messages']['Row'];
 type InboxRow = Database['public']['Views']['my_inbox']['Row'];
@@ -75,21 +81,9 @@ export function offerToJson(offer: FormalOffer): Json {
   };
 }
 
-// Not built from `creatureRefToJson`/`parseCreatureRef`: those parse or serialize the jsonb *wire*
-// shape (`Json`, values widened to `Json | undefined`), while this converts one already-typed client
-// shape (`CreatureRef`) to another (`FormalOffer`) — reusing them here would need an unsafe cast to
-// undo that widening, which is worse than the few duplicated lines.
-export function creatureToOffer(creature: CreatureRef): FormalOffer {
-  return {
-    name: creature.name,
-    pokemonId: creature.pokemonId,
-    hue: creature.hue,
-    ...(creature.shiny ? { shiny: true } : {}),
-    ...(creature.lucky ? { lucky: true } : {}),
-    ...(creature.formCode != null ? { formCode: creature.formCode } : {}),
-    ...(creature.costumeCode != null ? { costumeCode: creature.costumeCode } : {}),
-  };
-}
+// `creatureToOffer` (a `CreatureRef` -> `FormalOffer`, form included) lives beside the jsonb pair it feeds, in
+// `lib/api/creature-ref.ts`, so vitest can cover it; re-exported so the chat screens keep importing it from here.
+export { creatureToOffer } from '@/lib/api/creature-ref';
 
 /** `role` has no meaning on the wire ('me' is a different person on the other device), so it is derived here. */
 export function toChatMessage(row: MessageRow, meId: string | null): ChatMessage {
@@ -440,6 +434,8 @@ export interface LockEvent {
   chatId: string;
   sellerConfirmedAt: string | null;
   buyerConfirmedAt: string | null;
+  /** `trade_locks.locked_at`; null only for a payload from a server that omits it. */
+  lockedAt: string | null;
   /**
    * `trade_locks.updated_at`: the token that orders two observations of the same lock, so a frame that
    * overtakes a newer one can be recognised and dropped (migration …000300). Null only for a payload from
@@ -459,6 +455,7 @@ export function parseLockEvent(payload: unknown): LockEvent | null {
     chatId: chat_id,
     sellerConfirmedAt: nullableString(payload.seller_confirmed_at),
     buyerConfirmedAt: nullableString(payload.buyer_confirmed_at),
+    lockedAt: nullableString(payload.locked_at),
     updatedAt: nullableString(payload.updated_at),
   };
 }

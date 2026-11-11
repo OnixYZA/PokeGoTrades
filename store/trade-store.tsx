@@ -1,8 +1,10 @@
 import { randomUUID } from 'expo-crypto';
 import { create } from 'zustand';
 
+import type { AreaName } from '@/constants/locations';
 import { chats as seedChats, fallbackOffers } from '@/data/chats';
 import { listings as seedListings } from '@/data/listings';
+import { trainer as mockTrainer } from '@/data/trainer';
 import type {
   Chat,
   ChatMessage,
@@ -18,6 +20,7 @@ import { fetchListingsByIds } from '@/lib/api/listings';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName } from '@/lib/format';
 import { openPrivateChannel } from '@/lib/realtime';
+import { computeRepAfterTrade, computeStreakAfterTrade, evaluateBailOutcome, evaluateUnlockOutcome, MAX_REP, MIN_REP } from '@/lib/reputation';
 import { describeError, type ErrorInfo } from '@/lib/rpc-errors';
 import { toast } from '@/lib/toast';
 import {
@@ -28,7 +31,8 @@ import {
   type LockConfirmations,
   type LockVersion,
 } from './lock-state';
-import { cycleFilter, type FilterKey, type FilterState } from './listing-filters';
+import { cycleFilter, setFilterMode, type FilterKey, type FilterMode, type FilterState } from './listing-filters';
+import { offerAvailability } from './offer-state';
 
 // The lock rules live in ./lock-state so they can be tested without the Expo/Supabase module graph.
 // Re-exported here because this is where the rest of the app already imports them from.
@@ -136,6 +140,24 @@ export function selectTradeView(
   };
 }
 
+/**
+ * Why `lockChat` would be refused before it reaches the server, as the RPC's own error code (so the sentence
+ * comes from `lib/rpc-errors.ts`). It is the same rule the chat UI disables its buttons by — `canLock` and
+ * `offerAvailability` — checked again at the one place a lock is actually taken, so a stale button, a
+ * competing lock that landed while a preview was open, or a message that was never the buyer's cannot slip through.
+ */
+function lockRefusal(
+  state: Pick<TradeState, 'chats' | 'lockByListing' | 'lockConfirmations' | 'messages'>,
+  chatId: string,
+  offerMessageId: string | undefined,
+): 'not_seller' | 'not_lockable' | 'invalid_offer_message' | null {
+  const view = selectTradeView(state, chatId);
+  if (!view.canLock) return view.role === 'seller' ? 'not_lockable' : 'not_seller';
+  if (offerMessageId === undefined) return null;
+  const message = state.messages[chatId]?.find((m) => m.id === offerMessageId);
+  return message?.offer && offerAvailability(view, message).confirmable ? null : 'invalid_offer_message';
+}
+
 /** Sum of unread messages across visible chats, for the tab badge. */
 export function selectTotalUnread(state: Pick<TradeState, 'chats'>): number {
   let total = 0;
@@ -152,6 +174,14 @@ export type OfferSelection = { kind: 'creature'; offer: FormalOffer } | { kind: 
 export type OutgoingMessage = { text: string } | { offer: FormalOffer };
 
 const CUSTOM_OFFER_BODY = "Custom offer — let's work out the details here.";
+
+/**
+ * The inbox preview of a chat whose last message is a formal offer. In Supabase mode the server writes it
+ * (`private.on_message_inserted`, migration 20261017000100) and the client shows whatever was stored; the server
+ * has no Pokédex, so it cannot name the species and says only this. The mock builds the same string so a demo
+ * inbox reads like the real one. Keep the two in step.
+ */
+const FORMAL_OFFER_PREVIEW = 'Formal offer';
 
 interface TradeState {
   // ——— normalized entities ———
@@ -172,6 +202,13 @@ interface TradeState {
   lockEventVersion: Record<string, LockVersion>;
   /** chatId -> each side's confirmation of the trade that chat holds. Live chats only. */
   lockConfirmations: Record<string, LockConfirmations>;
+  /**
+   * Mock mode only (no backend): the local trainer's reputation stats, moved by `confirmTrade` / `bailChat`
+   * with the same rules the server applies (lib/reputation.ts). In live mode the server owns these
+   * (`profiles.rep` etc., see `fetchMyProfile`) and this stays at its seed. Partner penalties are not
+   * representable: mock partners have no profile records.
+   */
+  mockStats: MockTrainerStats;
   /** The signed-in trainer. Set by `LiveSync`; message roles are derived against it. */
   me: { id: string } | null;
   /** A chat whose Handshake should open by itself: the buyer's, when the seller locks (D1). */
@@ -179,15 +216,21 @@ interface TradeState {
   clearHandshakeRequest: () => void;
 
   // ——— filters / prefs ———
-  filterLocation: string;
-  setFilterLocation: (loc: string) => void;
+  filterLocation: AreaName;
+  setFilterLocation: (loc: AreaName) => void;
   friendship: FriendshipLabel;
   setFriendship: (level: FriendshipLabel) => void;
   /** Tristate feed-attribute filters (constants/listing-attributes.ts / store/listing-filters.ts).
    *  Not persisted — a fresh app open starts with every chip neutral. */
   listingFilters: FilterState;
   cycleListingFilter: (key: FilterKey) => void;
+  /** Sets one chip directly to include / exclude / neutral (`'none'`); idempotent, unlike the cycle. */
+  setListingFilter: (key: FilterKey, mode: FilterMode | 'none') => void;
   clearListingFilters: () => void;
+  /** Feed species filter set by the search: only listings of this `pokemonId` (all forms). Not persisted;
+   *  `clearListingFilters` resets it too. */
+  searchPokemonId: number | null;
+  setSearchPokemonId: (id: number | null) => void;
 
   // ——— listings ———
   /** Appends a fully-formed listing — including its `screenshots` (multi-image proof) and
@@ -221,8 +264,13 @@ interface TradeState {
   markRead: (chatId: string) => void;
 
   // ——— trade lock ———
-  /** Seller only (D1). Locks this chat's trade, freezing every sibling chat competing for the listing. */
-  lockChat: (chatId: string) => Promise<ActionResult>;
+  /**
+   * Seller only (D1). Locks this chat's trade, freezing every sibling chat competing for the listing.
+   * `offerMessageId` names the buyer's offer being accepted — any of them, not just the newest; left out, the
+   * server takes the newest (or none, for a trade agreed in chat). Refused up front, without a request, when
+   * the trade or that offer cannot be accepted (`lockRefusal`).
+   */
+  lockChat: (chatId: string, offerMessageId?: string) => Promise<ActionResult>;
   /** Seller only (D1). Unlocks, thawing the siblings; only the current lock holder can. */
   unlockChat: (chatId: string) => Promise<ActionResult>;
   /** Either party (D2). The second confirmation completes the trade. */
@@ -289,6 +337,18 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMe
 
 function newestServerTimestamp(list: ChatMessage[] | undefined): string | undefined {
   return list ? [...list].reverse().find((m) => m.createdAt && !m.delivery)?.createdAt : undefined;
+}
+
+export interface MockTrainerStats {
+  trades: number;
+  rep: number;
+  streak: number;
+  bailsCount: number;
+  lastTradeAt: string | null;
+}
+
+function seedMockStats(): MockTrainerStats {
+  return { trades: mockTrainer.trades, rep: mockTrainer.rep, streak: mockTrainer.streak, bailsCount: mockTrainer.bailsCount ?? 0, lastTradeAt: null };
 }
 
 function dropChat(state: TradeState, chatId: string): Partial<TradeState> {
@@ -475,6 +535,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
     lockByListing: {},
     lockConfirmations: {},
     lockEventVersion: {},
+    mockStats: seedMockStats(),
     me: null,
     handshakeRequest: null,
     clearHandshakeRequest: () => set({ handshakeRequest: null }),
@@ -485,7 +546,10 @@ export const useTradeStore = create<TradeState>((set, get) => {
     setFriendship: (level) => set({ friendship: level }),
     listingFilters: {},
     cycleListingFilter: (key) => set((state) => ({ listingFilters: cycleFilter(state.listingFilters, key) })),
-    clearListingFilters: () => set({ listingFilters: {} }),
+    setListingFilter: (key, mode) => set((state) => ({ listingFilters: setFilterMode(state.listingFilters, key, mode) })),
+    clearListingFilters: () => set({ listingFilters: {}, searchPokemonId: null }),
+    searchPokemonId: null,
+    setSearchPokemonId: (id) => set({ searchPokemonId: id }),
 
     addListing: (listing) => set((state) => ({ listings: { [listing.id]: listing, ...state.listings } })),
     upsertListings: (incoming) => set((state) => ({ listings: { ...state.listings, ...byId(incoming) } })),
@@ -524,19 +588,23 @@ export const useTradeStore = create<TradeState>((set, get) => {
       if (!USE_SUPABASE) {
         const listing = get().listings[listingId];
         if (!listing) return { ok: false, error: { code: 'unknown', message: 'That listing is gone.', followUp: 'none' } };
-        const offer: FormalOffer =
+        // A custom offer opens with plain text, exactly as the Supabase branch below sends it. It used to be
+        // faked as a `FormalOffer` named 'Custom Offer' wearing the LISTING's `pokemonId` — but a formal offer is
+        // a creature, and its name is derived from that id (`creatureDisplayName`), so the card would have read
+        // as the listing's own species. There is no creature in a custom offer, so there is no card.
+        const opener: ChatMessage =
           selection.kind === 'creature'
-            ? selection.offer
-            : { name: 'Custom Offer', pokemonId: listing.pokemonId, hue: listing.hue };
+            ? { role: 'me', text: '', time: timeNow(), offer: selection.offer }
+            : { role: 'me', text: CUSTOM_OFFER_BODY, time: timeNow() };
         const chatId = `c-${Date.now()}`;
         get().addChat({
           id: chatId,
           listingId,
           partner: listing.seller,
-          preview: `Formal offer sent · ${creatureDisplayName(offer)}`,
+          preview: selection.kind === 'creature' ? FORMAL_OFFER_PREVIEW : CUSTOM_OFFER_BODY,
           unread: 0,
           active: true,
-          offers: [{ role: 'me', text: '', time: timeNow(), offer }],
+          offers: [opener],
         });
         return ok(chatId);
       }
@@ -607,14 +675,24 @@ export const useTradeStore = create<TradeState>((set, get) => {
       if (readUpTo) void chatsApi.markChatRead(chatId, me.id, readUpTo).catch((e) => console.warn('[trade-store] markRead failed', e));
     },
 
-    lockChat: async (chatId) => {
+    lockChat: async (chatId, offerMessageId) => {
+      const refusal = lockRefusal(get(), chatId, offerMessageId);
+      if (refusal) return { ok: false, error: describeError({ message: refusal }) };
       if (!USE_SUPABASE) {
         const chat = get().chats[chatId];
-        if (chat) set((state) => ({ lockByListing: { ...state.lockByListing, [chat.listingId]: chatId } }));
+        if (chat) {
+          set((state) => ({
+            lockByListing: { ...state.lockByListing, [chat.listingId]: chatId },
+            lockConfirmations: {
+              ...state.lockConfirmations,
+              [chatId]: { lockedAt: new Date().toISOString(), sellerConfirmedAt: null, buyerConfirmedAt: null },
+            },
+          }));
+        }
         return ok(undefined);
       }
       return attempt(async () => {
-        const lock = await chatsApi.lockTrade(chatId);
+        const lock = await chatsApi.lockTrade(chatId, offerMessageId);
         // Do not wait for the Realtime echo: freeze the siblings right away. 'update', not 'insert':
         // the buyer's Handshake auto-opens on the *other* party's device, never on the seller's.
         set((state) =>
@@ -627,6 +705,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
               chatId: lock.chat_id,
               sellerConfirmedAt: lock.seller_confirmed_at,
               buyerConfirmedAt: lock.buyer_confirmed_at,
+              lockedAt: lock.locked_at,
               updatedAt: lock.updated_at,
             },
             nextLockSeq(),
@@ -641,7 +720,26 @@ export const useTradeStore = create<TradeState>((set, get) => {
         set((state) => {
           const chat = state.chats[chatId];
           if (!chat || state.lockByListing[chat.listingId] !== chatId) return state;
-          return { lockByListing: omit(state.lockByListing, chat.listingId) };
+          // Caller = seller (D1). Read the lock confirmations BEFORE they are omitted, like the RPC does.
+          const lock = state.lockConfirmations[chatId];
+          const outcome = evaluateUnlockOutcome({
+            lockedAtIso: lock?.lockedAt ?? null,
+            sellerConfirmed: Boolean(lock?.sellerConfirmedAt),
+            buyerConfirmed: Boolean(lock?.buyerConfirmedAt),
+          });
+          return {
+            ...(outcome.sellerPenalty > 0
+              ? {
+                  mockStats: {
+                    ...state.mockStats,
+                    rep: Math.max(MIN_REP, Math.min(MAX_REP, Math.round((state.mockStats.rep - outcome.sellerPenalty) * 10) / 10)),
+                    bailsCount: state.mockStats.bailsCount + 1,
+                  },
+                }
+              : {}),
+            lockByListing: omit(state.lockByListing, chat.listingId),
+            lockConfirmations: omit(state.lockConfirmations, chatId),
+          };
         });
         return ok(undefined);
       }
@@ -659,6 +757,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
                 chatId,
                 sellerConfirmedAt: null,
                 buyerConfirmedAt: null,
+                lockedAt: null,
                 updatedAt: null, // a release always applies; see isStaleLock
               },
               nextLockSeq(),
@@ -675,6 +774,16 @@ export const useTradeStore = create<TradeState>((set, get) => {
         const chat = get().chats[chatId];
         get().archiveChat(chatId);
         if (chat) get().removeListing(chat.listingId);
+        const nowIso = new Date().toISOString();
+        set((state) => ({
+          mockStats: {
+            ...state.mockStats,
+            trades: state.mockStats.trades + 1,
+            rep: computeRepAfterTrade(state.mockStats.rep),
+            streak: computeStreakAfterTrade(state.mockStats.streak, state.mockStats.lastTradeAt, nowIso),
+            lastTradeAt: nowIso,
+          },
+        }));
         return ok('completed' as const);
       }
       return attempt(async () => {
@@ -683,7 +792,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
           const chat = get().chats[chatId];
           const now = new Date().toISOString();
           set((state) => {
-            const current = state.lockConfirmations[chatId] ?? { sellerConfirmedAt: null, buyerConfirmedAt: null };
+            const current = state.lockConfirmations[chatId] ?? { lockedAt: null, sellerConfirmedAt: null, buyerConfirmedAt: null };
             return {
               lockConfirmations: {
                 ...state.lockConfirmations,
@@ -736,6 +845,24 @@ export const useTradeStore = create<TradeState>((set, get) => {
 
     bailChat: async (chatId, reason, note) => {
       if (!USE_SUPABASE) {
+        // Read the lock BEFORE removeChat drops it, like the RPC reads trade_locks before deleting it.
+        const state = get();
+        const lock = state.lockConfirmations[chatId];
+        const outcome = evaluateBailOutcome({
+          reason,
+          lockedAtIso: lock?.lockedAt ?? null,
+          callerConfirmed: Boolean(state.chats[chatId]?.myRole === 'buyer' ? lock?.buyerConfirmedAt : lock?.sellerConfirmedAt),
+          partnerConfirmed: Boolean(state.chats[chatId]?.myRole === 'buyer' ? lock?.sellerConfirmedAt : lock?.buyerConfirmedAt),
+        });
+        if (outcome.callerPenalty > 0) {
+          set((s) => ({
+            mockStats: {
+              ...s.mockStats,
+              rep: Math.max(MIN_REP, Math.min(MAX_REP, Math.round((s.mockStats.rep - outcome.callerPenalty) * 10) / 10)),
+              bailsCount: s.mockStats.bailsCount + 1,
+            },
+          }));
+        }
         get().removeChat(chatId);
         return ok(undefined);
       }

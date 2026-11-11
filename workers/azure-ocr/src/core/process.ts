@@ -305,11 +305,12 @@ type SizeOutcome = 'tagged' | 'unchanged' | 'blocked';
  * must never flip or clear a size someone already trusted.
  * - `tagged`: the listing had no `size_class` yet and now does.
  * - `unchanged`: it already had one (or the listing is gone) — NEVER overwritten or downgraded, so this is not
- *   an error, just nothing left to do.
- * - `blocked`: `size_class` is deliberately absent from `guard_listing_update`'s frozen-fields tuple (migration
- *   ...000100_listing_attributes.sql — a value the seller never set cannot be their bait-and-switch), so this
- *   should not happen today. It is still mapped, exactly like `grantLucky`'s `blocked`, so this worker keeps
- *   working (proof still verifies, listing left alone) rather than throwing if that guard's tuple ever changes.
+ *   an error, just nothing left to do. Since migration 20261103000200 a seller may declare the size at creation,
+ *   so a declared size also lands here: the OCR read never replaces it, even when the two disagree.
+ * - `blocked`: someone has already made an offer on it. Migration 20261103000200 added `size_class` to
+ *   `guard_listing_update`'s frozen-fields tuple (it is seller-settable now), so tagging a still-null size after a
+ *   chat exists raises `listing_has_offers`. Mapped exactly like `grantLucky`'s `blocked`: the proof still
+ *   verifies and the listing is left alone.
  * Any other error is thrown, and the proof is retried.
  */
 async function applySizeClass(supabase: SupabaseClient, listingId: string, sizeClass: SizeClass): Promise<SizeOutcome> {

@@ -7,6 +7,7 @@ import { ChatGroupHeader } from '@/components/chats/ChatGroupHeader';
 import { ChatRow } from '@/components/chats/ChatRow';
 import type { Chat, ChatRole } from '@/data/types';
 import { USE_SUPABASE } from '@/lib/data-source';
+import { testIds } from '@/lib/test-ids';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
 const SECTION_TITLE: Record<ChatRole, string> = {
@@ -43,7 +44,7 @@ export default function ChatsInboxScreen() {
     const groupLocked = USE_SUPABASE ? listing.status === 'locked' : !!lockedChatId || !group.every((c) => c.active);
 
     return (
-      <View key={listingId} className="mb-[18px]">
+      <View key={listingId} testID={testIds.chatGroup(listingId)} className="mb-[18px]">
         <ChatGroupHeader listing={listing} offerCount={group.length} locked={groupLocked} />
         <View className="gap-1.5">
           {group.map((chat) => {

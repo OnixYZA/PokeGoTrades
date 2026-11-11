@@ -2,6 +2,7 @@ import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 
+import { SearchSpeciesPill } from '@/components/feed/SearchSpeciesPill';
 import { FilterChip } from '@/components/ui/FilterChip';
 import { FILTER_ATTRIBUTES } from '@/constants/listing-attributes';
 import type { FilterKey, FilterState } from '@/store/listing-filters';
@@ -44,6 +45,13 @@ interface ListingFilterSheetProps {
  * registry's own sections. No local copy of the filter state — every chip reads and writes
  * `useTradeStore`'s `listingFilters` directly through `cycleListingFilter`, so this sheet can never
  * drift from what `store/listing-filters.ts#compileFilter` is actually matching the feed against.
+ *
+ * Nothing here knows about a particular chip family. The 18 Pokémon-type chips are just the registry's
+ * last section ("Type"): they are the same tristate `FilterChip`s in the same `flex-wrap` row as every
+ * other section, so they simply wrap (a chip is content-sized, the widest label is about 100pt, the
+ * 335pt-wide row on a 375pt sheet fits three to four per line, and the sheet's `ScrollView` takes the extra
+ * height). `FilterChip` has no per-chip accent, so they are not tinted by `TYPE_HUE`: that would need a new
+ * `FilterChip` prop, and the include/exclude colour (green/red) must stay the chip's only colour signal.
  */
 export function ListingFilterSheet({ visible, onClose }: ListingFilterSheetProps) {
   const insets = useSafeAreaInsets();
@@ -51,7 +59,9 @@ export function ListingFilterSheet({ visible, onClose }: ListingFilterSheetProps
   const cycleListingFilter = useTradeStore((s) => s.cycleListingFilter);
   const clearListingFilters = useTradeStore((s) => s.clearListingFilters);
 
-  const activeCount = Object.keys(filters).length;
+  const searchPokemonId = useTradeStore((s) => s.searchPokemonId);
+  // The searched species is an active narrowing like a chip, and `clearListingFilters` resets it too.
+  const activeCount = Object.keys(filters).length + (searchPokemonId !== null ? 1 : 0);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -91,6 +101,7 @@ export function ListingFilterSheet({ visible, onClose }: ListingFilterSheetProps
                 contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 18, paddingBottom: insets.bottom + 20, gap: 20 }}
                 showsVerticalScrollIndicator={false}
               >
+                <SearchSpeciesPill />
                 {SECTIONS.map(({ section, attrs }) => (
                   <FilterSectionGroup
                     key={section}

@@ -1,8 +1,9 @@
 import { randomUUID } from 'expo-crypto';
 
-import { findPokemon } from '@/constants/pokedex';
 import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
 import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
+import type { TrainerCreature } from '@/lib/creature-list';
+import { creatureRefFromPick, type PickedCreature, type PickFailure } from '@/lib/creature-pick';
 import type { Database } from '@/lib/database.types';
 import { formatTradeDate } from '@/lib/format';
 import type { PickedProof } from '@/lib/proof-image';
@@ -27,6 +28,11 @@ export interface MyProfile {
   handleIsPlaceholder: boolean;
   team: Team | null;
   friendCode: string | null;
+  /** Server-written reputation stats (`confirm_trade` / `bail_and_block`); see lib/reputation.ts. */
+  rep: number;
+  trades: number;
+  streak: number;
+  bailsCount: number;
 }
 
 /** A problem with the profile form that should be shown next to a field. */
@@ -70,7 +76,7 @@ export async function fetchMyProfile(): Promise<MyProfile> {
   const id = await currentUserId();
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, handle, handle_is_placeholder, team, profile_private(friend_code)')
+    .select('id, handle, handle_is_placeholder, team, rep, trades_count, streak_days, bails_count, profile_private(friend_code)')
     .eq('id', id)
     .single();
   if (error) throw new ProfileError('form', error.message);
@@ -80,6 +86,10 @@ export async function fetchMyProfile(): Promise<MyProfile> {
     handleIsPlaceholder: data.handle_is_placeholder,
     team: data.team,
     friendCode: data.profile_private?.friend_code ?? null,
+    rep: data.rep,
+    trades: data.trades_count,
+    streak: data.streak_days,
+    bailsCount: data.bails_count,
   };
 }
 
@@ -90,34 +100,48 @@ export async function getPostingReadiness(): Promise<'anonymous' | 'incomplete' 
   return isProfileReady(await fetchMyProfile()) ? 'ready' : 'incomplete';
 }
 
-/** Shared by `fetchMyArsenal` and `fetchMyWishlist`: the signed-in trainer's own creatures in one
- *  list, in slot order. Readable by anyone; owned by them. Parsed defensively, the way
- *  `fetchLatestProfileProof` reads `ocr_extracted`: this client never validates jsonb against a schema. */
-async function fetchMyCreatures(list: CreatureList): Promise<CreatureRef[]> {
-  const id = await currentUserId();
+/** Shared by every Arsenal / Wishlist read: the signed-in trainer's own creatures in one list, in slot
+ *  order, each with the id of the row that holds it (see `TrainerCreature` for why the id matters).
+ *  Readable by anyone; owned by them. Parsed defensively, the way `fetchLatestProfileProof` reads
+ *  `ocr_extracted`: this client never validates jsonb against a schema. */
+async function fetchMyCreatureEntries(list: CreatureList): Promise<TrainerCreature[]> {
+  const ownerId = await currentUserId();
   const { data, error } = await supabase
     .from('trainer_creatures')
-    .select('creature')
-    .eq('owner_id', id)
+    .select('id, creature')
+    .eq('owner_id', ownerId)
     .eq('list', list)
     .order('sort_order', { ascending: true });
   if (error) throw new ProfileError('form', error.message);
-  const creatures: CreatureRef[] = [];
-  for (const { creature } of data) {
+  const entries: TrainerCreature[] = [];
+  for (const { id, creature } of data) {
     const ref = parseCreatureRef(creature);
-    if (ref) creatures.push(ref);
+    if (ref) entries.push({ id, creature: ref });
   }
-  return creatures;
+  return entries;
 }
 
-/** The signed-in trainer's Arsenal (what they can offer), in slot order. */
+/** The signed-in trainer's Arsenal (what they can offer), in slot order, with row ids — what the
+ *  profile screen's editable grid needs to address one entry. */
+export async function fetchMyArsenalEntries(): Promise<TrainerCreature[]> {
+  return fetchMyCreatureEntries('arsenal');
+}
+
+/** The signed-in trainer's Wishlist (what they're hunting), in slot order, with row ids. */
+export async function fetchMyWishlistEntries(): Promise<TrainerCreature[]> {
+  return fetchMyCreatureEntries('wishlist');
+}
+
+/** The signed-in trainer's Arsenal as bare creatures, for readers that only need what's in it (the
+ *  chat's offer picker) and never address a row. Anything that edits the list uses
+ *  `fetchMyArsenalEntries` instead. */
 export async function fetchMyArsenal(): Promise<CreatureRef[]> {
-  return fetchMyCreatures('arsenal');
+  return (await fetchMyArsenalEntries()).map((entry) => entry.creature);
 }
 
-/** The signed-in trainer's Wishlist (what they're hunting), in slot order. */
+/** The signed-in trainer's Wishlist as bare creatures. See `fetchMyArsenal`. */
 export async function fetchMyWishlist(): Promise<CreatureRef[]> {
-  return fetchMyCreatures('wishlist');
+  return (await fetchMyWishlistEntries()).map((entry) => entry.creature);
 }
 
 /** How many rows `fetchMyTradeHistory` shows — the live profile's Trade History section has no "load
@@ -182,19 +206,31 @@ async function firstFreeSlot(ownerId: string, list: CreatureList): Promise<numbe
  *  retrying forever against a genuinely full list. */
 const ADD_CREATURE_ATTEMPTS = 3;
 
+/** What a refused pick says to the trainer (see `PickFailure`). The picker already stops the last two, so these
+ *  are what a trainer sees only if a caller skipped it. */
+const PICK_FAILURE_MESSAGE: Record<PickFailure, (list: CreatureList) => string> = {
+  unknown_species: () => "That Pokémon isn't in the dex.",
+  unknown_form: () => "That Pokémon doesn't come in that form.",
+  untradable: (list) => `That Pokémon can't be traded in Pokémon GO, so it can't go in your ${CREATURE_LIST_LABEL[list]}.`,
+};
+
 /**
- * Shared by `addToArsenal` / `addToWishlist`. The stored `name` and `hue` are always read back out of
- * the pokedex by `pokemonId` — never taken from the caller — so a trainer's Arsenal/Wishlist entry can
- * never drift from the one source of truth for what a Pokémon is called or how it's colored (AGENTS.md:
- * never hallucinate game data). `shiny` IS caller-supplied: the picker's own toggle (`PokemonPickerModal`),
- * not something the dex can look up — a species has no fixed shiny-ness.
+ * Shared by `addToArsenal` / `addToWishlist`. The ref is built by `creatureRefFromPick` (lib/creature-pick.ts),
+ * which reads the stored `name` and `hue` back out of the pokedex by `pokemonId` — never from the caller — so a
+ * trainer's Arsenal/Wishlist entry can never drift from the one source of truth for what a Pokémon is called or
+ * how it's colored (AGENTS.md: never hallucinate game data). `shiny` and `formCode` ARE caller-supplied: the
+ * picker's own choices (`PokemonPickerModal`), not something the dex can look up — a species has no fixed
+ * shiny-ness or form. The form is half of the creature's identity (`pokemonId` + `formCode`), so dropping it here
+ * would store Vulpix when the trainer picked Alolan Vulpix; `creatureRefToJson` then writes it as `formCode`
+ * (the key `creature_ref_is_valid` accepts on `trainer_creatures.creature`) and `parseCreatureRef` reads it back.
  */
-async function addCreature(list: CreatureList, pokemonId: number, shiny: boolean): Promise<void> {
-  const entry = findPokemon(pokemonId);
-  if (!entry) throw new ProfileError('form', "That Pokémon isn't in the dex.");
-  // `creatureRefToJson` (not a raw object literal): the one place that omits a falsy `shiny` rather
-  // than sending it as `false` — see that function's own comment on why `creature_ref_is_valid` cares.
-  const creature = creatureRefToJson({ name: entry.name, pokemonId: entry.pokemonId, hue: entry.hue, shiny });
+async function addCreature(list: CreatureList, pick: PickedCreature): Promise<void> {
+  const built = creatureRefFromPick(pick);
+  if (!built.ok) throw new ProfileError('form', PICK_FAILURE_MESSAGE[built.reason](list));
+  // `creatureRefToJson` (not a raw object literal): the one place that omits a falsy `shiny` / an absent
+  // `formCode` rather than sending them as `false` / `null` — see that function's own comment on why
+  // `creature_ref_is_valid` cares.
+  const creature = creatureRefToJson(built.ref);
   const ownerId = await currentUserId();
 
   for (let attempt = 1; attempt <= ADD_CREATURE_ATTEMPTS; attempt++) {
@@ -210,14 +246,56 @@ async function addCreature(list: CreatureList, pokemonId: number, shiny: boolean
   }
 }
 
-/** Adds a Pokémon (by national dex id) to the signed-in trainer's Arsenal, in the lowest free slot. */
-export async function addToArsenal(pokemonId: number, shiny = false): Promise<void> {
-  return addCreature('arsenal', pokemonId, shiny);
+/** Adds a creature (national dex id, shiny flag and form — the picker's `PickedCreature` fits) to the signed-in
+ *  trainer's Arsenal, in the lowest free slot. */
+export async function addToArsenal(pick: PickedCreature): Promise<void> {
+  return addCreature('arsenal', pick);
 }
 
-/** Adds a Pokémon (by national dex id) to the signed-in trainer's Wishlist, in the lowest free slot. */
-export async function addToWishlist(pokemonId: number, shiny = false): Promise<void> {
-  return addCreature('wishlist', pokemonId, shiny);
+/** Adds a creature (national dex id, shiny flag and form) to the signed-in trainer's Wishlist, in the lowest
+ *  free slot. */
+export async function addToWishlist(pick: PickedCreature): Promise<void> {
+  return addCreature('wishlist', pick);
+}
+
+/**
+ * Shared by `removeFromArsenal` / `removeFromWishlist`. Deletes ONE row, addressed by its id: duplicates
+ * are legal (the unique key is the slot, not the creature), so nothing about the creature itself can pick
+ * out the right twin. `list` and `owner_id` are filters on top of the id, not a second way to find the
+ * row: the id alone is already unique, but this way a stale id handed to the wrong list's remover, or one
+ * belonging to another trainer, matches nothing instead of deleting something. RLS
+ * (`trainer_creatures_delete_self`) enforces the owner rule server-side regardless; the filter is just
+ * defence in depth.
+ *
+ * Zero rows deleted is success, deliberately not inspected: DELETE is idempotent, and the only ways to
+ * match nothing are the row already being gone (removed from another device or tab, or this request being
+ * retried after its response was lost) or it not being this trainer's to delete — in every one of which
+ * the state the caller asked for, "this entry is not in my list", already holds. Reporting an error there
+ * would roll back a removal that is in fact done. A real failure (network, permissions) still throws.
+ *
+ * Frees the row's `sort_order` slot immediately; `firstFreeSlot` re-reads the occupied slots from the
+ * table on every add (it caches nothing), so the next add simply takes the lowest free one — possibly
+ * the slot just vacated, which puts the new entry where the removed one was rather than at the end.
+ */
+async function removeCreature(list: CreatureList, rowId: string): Promise<void> {
+  const ownerId = await currentUserId();
+  const { error } = await supabase
+    .from('trainer_creatures')
+    .delete()
+    .eq('id', rowId)
+    .eq('owner_id', ownerId)
+    .eq('list', list);
+  if (error) throw new ProfileError('form', error.message);
+}
+
+/** Removes one entry (by its `TrainerCreature.id`) from the signed-in trainer's Arsenal. */
+export async function removeFromArsenal(rowId: string): Promise<void> {
+  return removeCreature('arsenal', rowId);
+}
+
+/** Removes one entry (by its `TrainerCreature.id`) from the signed-in trainer's Wishlist. */
+export async function removeFromWishlist(rowId: string): Promise<void> {
+  return removeCreature('wishlist', rowId);
 }
 
 export interface ProfileInput {
