@@ -53,6 +53,7 @@ export const listings: Listing[] = [
     sizeClass: null,
     willTravel: true,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'asap',
   },
   {
@@ -85,6 +86,7 @@ export const listings: Listing[] = [
     sizeClass: null,
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'this_week',
   },
   {
@@ -116,6 +118,7 @@ export const listings: Listing[] = [
     sizeClass: 'XXL',
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'flexible',
   },
   {
@@ -147,6 +150,7 @@ export const listings: Listing[] = [
     sizeClass: null,
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'this_month',
   },
   {
@@ -181,6 +185,7 @@ export const listings: Listing[] = [
     sizeClass: 'XXS',
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'flexible',
   },
   {
@@ -212,6 +217,7 @@ export const listings: Listing[] = [
     sizeClass: null,
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'flexible',
   },
 ];

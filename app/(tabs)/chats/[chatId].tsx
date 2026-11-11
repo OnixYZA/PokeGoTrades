@@ -9,6 +9,7 @@ import { ArsenalOfferSheet } from '@/components/chats/ArsenalOfferSheet';
 import { ChatActionRow } from '@/components/chats/ChatActionRow';
 import { Composer } from '@/components/chats/Composer';
 import { FormalOfferCard } from '@/components/chats/FormalOfferCard';
+import { ClosedBanner } from '@/components/chats/ClosedBanner';
 import { FrozenBanner } from '@/components/chats/FrozenBanner';
 import { LockedBanner } from '@/components/chats/LockedBanner';
 import { MessageBubble } from '@/components/chats/MessageBubble';
@@ -206,6 +207,9 @@ export default function ActiveChatScreen() {
         )}
       </View>
 
+      {trade.live && trade.phase === 'closed' && (
+        <ClosedBanner reason={listing?.status === 'withdrawn' ? 'withdrawn' : 'closed'} />
+      )}
       {trade.phase === 'frozen' && <FrozenBanner role={trade.live ? trade.role : 'buyer'} />}
       {showLockedBanner && (
         <LockedBanner

@@ -69,6 +69,8 @@ const KNOWN: Record<string, Omit<ErrorInfo, 'code' | 'sqlState'>> = {
   invalid_offer: { message: 'That offer was rejected. Pick another.', followUp: 'none' },
   empty_offer: { message: 'Add an offer or a message first.', followUp: 'none' },
   client_id_required: { message: 'Something went wrong sending that. Try again.', followUp: 'none' },
+  // Client-side: a location that is coordinate-like is refused before it is stored (constants/locations.ts).
+  invalid_location: { message: 'Use a neighbourhood or city name, not coordinates.', followUp: 'none' },
   note_too_long: { message: 'That note is too long.', followUp: 'none' },
 };
 

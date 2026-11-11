@@ -12,19 +12,20 @@ import {
   CheckSquare,
   ChevronDown,
   Droplet,
-  LocateFixed,
   MapPin,
   Image as ImageIcon,
   Plus,
   Search,
   Shirt,
   X,
+  Zap,
 } from 'lucide-react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
 import { FormPicker } from '@/components/modals/FormPicker';
 import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
+import { LocationPickerSheet } from '@/components/location/LocationPickerSheet';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { GigantamaxSymbol } from '@/components/ui/GigantamaxBadge';
 import { LuckyClover } from '@/components/ui/LuckyBadge';
@@ -56,9 +57,8 @@ import {
   type NewListingInput,
   type ProofKind,
 } from '@/lib/api/listings';
-import { AREAS, VICINITY_RADIUS_LABEL, type AreaName } from '@/constants/locations';
+import { VICINITY_RADIUS_LABEL, type LocationName } from '@/constants/locations';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { useVicinity } from '@/lib/use-vicinity';
 import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
@@ -142,9 +142,21 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   // Only meaningful for a species that can Gigantamax (`canGigantamax`): `handlePickPokemon` clears it on a switch
   // to one that cannot, and the draft re-checks eligibility, so an ineligible G-Max listing can't be submitted.
   const [isGigantamax, setIsGigantamax] = useState(false);
-  // The listing's neighbourhood: starts at the feed's current one, and is always one of `AREAS` (the only
-  // location a listing ever carries; exact GPS is never read, stored or shared).
-  const [area, setArea] = useState<AreaName>(() => filterLocation);
+  // Mutually exclusive with `isGigantamax` (DB check `listings_dynamax_xor_gigantamax`): the toggle handlers below
+  // clear the other one, so the draft can never carry both. Offered for any species until Sprint 2.3 brings
+  // Dynamax eligibility data.
+  const [isDynamax, setIsDynamax] = useState(false);
+  const toggleGigantamax = () => {
+    if (!isGigantamax) setIsDynamax(false);
+    setIsGigantamax(!isGigantamax);
+  };
+  const toggleDynamax = () => {
+    if (!isDynamax) setIsGigantamax(false);
+    setIsDynamax(!isDynamax);
+  };
+  // The listing's location: starts at the feed's current one. It is a place label produced by
+  // `sanitizeLocationLabel` (via the picker), never a coordinate; exact GPS is never read, stored or shared.
+  const [area, setArea] = useState<LocationName>(() => filterLocation);
   const [pokeball, setPokeball] = useState<Pokeball | null>(null);
   // Seller-declared; null leaves it to an appraisal screenshot to tag.
   const [sizeClass, setSizeClass] = useState<PokemonSize | null>(null);
@@ -235,6 +247,9 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       cp: cpResult.cp,
       willTravel,
       isGigantamax: isGigantamax && canGigantamax(selectedCreature.pokemonId),
+      // An ineligible G-Max flag is dropped above, so only a Dynamax the seller still holds can survive; the
+      // `!` guard makes "both true" unrepresentable here even if the two states ever drift apart.
+      isDynamax: isDynamax && !(isGigantamax && canGigantamax(selectedCreature.pokemonId)),
       tradeTimeline,
     };
   }, [
@@ -250,6 +265,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     cpResult,
     willTravel,
     isGigantamax,
+    isDynamax,
     tradeTimeline,
     knowsIv,
     ivAtk,
@@ -613,7 +629,9 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           willTravel={willTravel}
           onToggleWillTravel={() => setWillTravel((v) => !v)}
           gigantamax={isGigantamax}
-          onToggleGigantamax={selectedCreature && canGigantamax(selectedCreature.pokemonId) ? () => setIsGigantamax((v) => !v) : undefined}
+          onToggleGigantamax={selectedCreature && canGigantamax(selectedCreature.pokemonId) ? toggleGigantamax : undefined}
+          dynamax={isDynamax}
+          onToggleDynamax={toggleDynamax}
         />
         <IvSpreadSection
           knowsIv={knowsIv}
@@ -860,6 +878,8 @@ function AttributesCard({
   onToggleWillTravel,
   gigantamax,
   onToggleGigantamax,
+  dynamax,
+  onToggleDynamax,
 }: {
   shiny: boolean;
   onToggleShiny: () => void;
@@ -874,6 +894,9 @@ function AttributesCard({
   gigantamax: boolean;
   /** Undefined hides the row: the chosen species cannot Gigantamax. */
   onToggleGigantamax?: () => void;
+  dynamax: boolean;
+  /** Shown for every species: there is no Dynamax eligibility data until Sprint 2.3. */
+  onToggleDynamax: () => void;
 }) {
   return (
     <View>
@@ -931,6 +954,15 @@ function AttributesCard({
             onPress={onToggleGigantamax}
           />
         )}
+        <AttributeRow
+          icon={<Zap size={18} color={C.blue} strokeWidth={2.2} />}
+          tint="rgba(56,189,248,0.12)"
+          title="Dynamax"
+          description="Can Dynamax in Max Battles"
+          on={dynamax}
+          onGradient={MODAL_SURFACE.toggleBlue}
+          onPress={onToggleDynamax}
+        />
         <AttributeRow
           icon={<Car size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
@@ -1106,35 +1138,28 @@ function PokeballOption({
   );
 }
 
-/** The seller picks the listing's neighbourhood from `AREAS`; buyers only ever see this name plus the vicinity
- *  radius. The web-only shortcut asks the browser for a coarse fix and keeps just the bucketed area. */
-function AreaPicker({ area, onSelect }: { area: AreaName; onSelect: (area: AreaName) => void }) {
+/** The seller picks the listing's location in the shared `LocationPickerSheet` (suggestions, free text, or the
+ *  web-only coarse fix snapped to a known town). Buyers only ever see this place name plus the vicinity radius. */
+function AreaPicker({ area, onSelect }: { area: LocationName; onSelect: (area: LocationName) => void }) {
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<View>(null);
-  const vicinity = useVicinity();
-
-  const pickMyVicinity = async () => {
-    const found = await vicinity.locate();
-    if (found) onSelect(found);
-  };
+  const homeLocation = useTradeStore((s) => s.homeLocation);
 
   return (
     <View>
       <Text className="font-mono mb-1.5" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
-        NEIGHBOURHOOD
+        LOCATION
       </Text>
       <Pressable
-        ref={anchorRef}
-        onPress={() => setOpen((v) => !v)}
+        onPress={() => setOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={`Listing neighbourhood: ${area}`}
-        accessibilityHint="Opens a list of neighbourhoods to choose from"
+        accessibilityLabel={`Listing location: ${area}`}
+        accessibilityHint="Opens a picker to search or type a location"
         accessibilityState={{ expanded: open }}
         className="flex-row items-center gap-2 rounded-[14px] border px-4 py-3.5 active:opacity-80"
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
         <MapPin size={14} color={C.textMuted} />
-        <Text className="flex-1" style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
+        <Text className="flex-1" numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
           {area}
         </Text>
         <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted }}>
@@ -1143,40 +1168,19 @@ function AreaPicker({ area, onSelect }: { area: AreaName; onSelect: (area: AreaN
         <ChevronDown size={16} color={C.textMuted} />
       </Pressable>
       <Text className="mt-1.5" style={{ fontSize: 11, lineHeight: 16, color: C.textMuted }}>
-        Buyers see only this neighbourhood. Your exact GPS location is never shared.
+        Buyers see only this place name, as a {VICINITY_RADIUS_LABEL}. Your exact GPS location is never shared.
       </Text>
-      {vicinity.supported ? (
-        <Pressable
-          onPress={() => void pickMyVicinity()}
-          disabled={vicinity.locating}
-          accessibilityRole="button"
-          accessibilityLabel="Use my vicinity, fuzzed to a neighbourhood"
-          accessibilityHint="Asks your browser for your location and keeps only the neighbourhood"
-          accessibilityState={{ busy: vicinity.locating, disabled: vicinity.locating }}
-          hitSlop={6}
-          className="mt-2 flex-row items-center gap-1.5 self-start active:opacity-70"
-          style={{ opacity: vicinity.locating ? 0.6 : 1 }}
-        >
-          <LocateFixed size={13} color={C.gold} />
-          <Text className="font-display-semi" style={{ fontSize: 12, color: C.gold }}>
-            {vicinity.locating ? 'Locating…' : 'Use my vicinity'}
-          </Text>
-        </Pressable>
-      ) : null}
-      <Dropdown visible={open} onRequestClose={() => setOpen(false)} anchorRef={anchorRef} align="stretch">
-        {AREAS.map((option, i) => (
-          <PokeballOption
-            key={option}
-            label={option}
-            selected={option === area}
-            onPress={() => {
-              onSelect(option);
-              setOpen(false);
-            }}
-            isLast={i === AREAS.length - 1}
-          />
-        ))}
-      </Dropdown>
+      <LocationPickerSheet
+        visible={open}
+        title="Listing location"
+        current={area}
+        homeLocation={homeLocation}
+        onSelect={(label) => {
+          onSelect(label);
+          setOpen(false);
+        }}
+        onClose={() => setOpen(false)}
+      />
     </View>
   );
 }
@@ -1359,8 +1363,8 @@ function LogisticsSection({
   tradeTimeline,
   onSelectTimeline,
 }: {
-  area: AreaName;
-  onSelectArea: (area: AreaName) => void;
+  area: LocationName;
+  onSelectArea: (area: LocationName) => void;
   pokeball: Pokeball | null;
   onSelectPokeball: (pokeball: Pokeball | null) => void;
   sizeClass: PokemonSize | null;

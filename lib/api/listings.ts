@@ -1,6 +1,6 @@
 import type { QueryData } from '@supabase/supabase-js';
 
-import { sanitizeLocationLabel, type AreaName } from '@/constants/locations';
+import { locationKey, sanitizeLocationLabel, type LocationName } from '@/constants/locations';
 import {
   LISTING_TAGS,
   POKEBALLS,
@@ -10,6 +10,7 @@ import {
   type FilterFlagField,
   type PokemonSize,
 } from '@/constants/listing-attributes';
+import { FEED_STATUSES } from '@/store/listing-lifecycle';
 import type { FilterSpec } from '@/store/listing-filters';
 import type { BackgroundHint, Listing, TradeType } from '@/data/types';
 import { creatureRefToJson, parseCreatureRefs } from '@/lib/api/creature-ref';
@@ -42,13 +43,14 @@ type _PokemonSizesMatchDb = Expect<AssertSameMembers<(typeof POKEMON_SIZES)[numb
 type _TradeTimelinesMatchDb = Expect<AssertSameMembers<(typeof TRADE_TIMELINES)[number], Database['public']['Enums']['trade_timeline']>>;
 
 /** `FilterFlagField` (Listing camelCase) -> the actual `listings` column. Only `willTravel` differs. */
-const FLAG_DB_COLUMNS: Record<FilterFlagField, 'shiny' | 'lucky' | 'purified' | 'costume' | 'will_travel' | 'is_gigantamax'> = {
+const FLAG_DB_COLUMNS: Record<FilterFlagField, 'shiny' | 'lucky' | 'purified' | 'costume' | 'will_travel' | 'is_gigantamax' | 'is_dynamax'> = {
   shiny: 'shiny',
   lucky: 'lucky',
   purified: 'purified',
   costume: 'costume',
   willTravel: 'will_travel',
   isGigantamax: 'is_gigantamax',
+  isDynamax: 'is_dynamax',
 };
 
 /** `FilterEnumField` (Listing camelCase) -> the actual `listings` column. */
@@ -60,8 +62,9 @@ const ENUM_DB_COLUMNS: Record<FilterEnumField, 'size_class' | 'pokeball' | 'trad
 
 const PROOF_BUCKET = 'listing-proofs';
 
-/** Statuses the feed shows (SUPABASE_PLAN.md §1.8: completed and withdrawn listings are hidden). */
-const FEED_STATUSES: Database['public']['Enums']['listing_status'][] = ['open', 'locked'];
+/** `FEED_STATUSES` (store/listing-lifecycle.ts) is the one list of what the feed shows; `.in()` wants a mutable
+ *  array of the DB enum, so this is that list typed for the query. */
+const FEED_STATUS_FILTER = [...FEED_STATUSES] as Database['public']['Enums']['listing_status'][];
 
 // ——— errors ———
 
@@ -105,8 +108,8 @@ export function listingErrorMessage(error: unknown): string {
   switch (error.code) {
     case '42501':
       return 'Finish setting up your trainer profile before posting.';
-    case '23503':
-      return 'That area is not available yet.';
+    case 'invalid_location':
+      return error.message;
     case '23514':
       return 'The server rejected some of the listing details. Go back and check them.';
     case 'PGRST116':
@@ -126,7 +129,7 @@ export function listingErrorMessage(error: unknown): string {
  * reads 'NEW' live) in favor of the `pokemon_market_demand` view, fetched separately in `lib/use-feed.ts`.
  */
 const LISTING_COLUMNS =
-  'id, seller_id, status, name, pokemon_id, form_code, costume_code, catch_year, lucky, shiny, cp, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, is_gigantamax, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
+  'id, seller_id, status, name, pokemon_id, form_code, costume_code, catch_year, lucky, shiny, cp, hue, accent, bg, loc, pvp_rank, trade_type, iv_atk, iv_def, iv_sta, looking, tags, notes, untradable, purified, costume, pokeball, size_class, will_travel, is_gigantamax, is_dynamax, trade_timeline, created_at, seller:profiles!listings_seller_id_fkey(handle)';
 
 function selectListings() {
   return supabase.from('listings').select(LISTING_COLUMNS);
@@ -148,14 +151,6 @@ function parseIv(iv: string): { iv_atk: number; iv_def: number; iv_sta: number }
 }
 
 /** DB row -> the `Listing` shape every component already consumes. `dist` stays unset (D3). */
-/** `listings.loc` is a foreign key to `public.areas`, and constants/locations.test.ts pins `AREAS` to that
- *  table, so a row outside `AREAS` means the two drifted. Fail loudly instead of inventing a label. */
-function listingArea(loc: string): AreaName {
-  const area = sanitizeLocationLabel(loc);
-  if (!area) throw new ListingsApiError('Listing has a location outside the supported areas.', 'unknown_area');
-  return area;
-}
-
 export function toListing(row: ListingRow): Listing {
   return {
     id: row.id,
@@ -172,7 +167,9 @@ export function toListing(row: ListingRow): Listing {
     hue: row.hue,
     accent: row.accent,
     bg: row.bg,
-    loc: listingArea(row.loc),
+    // `listings.loc` is a free-text place label; listings_loc_is_place_label (20261112000300) guarantees it is
+    // never a coordinate, so it is used as stored.
+    loc: row.loc,
     pvp: row.pvp_rank,
     tradeType: row.trade_type,
     iv: formatIv(row),
@@ -187,6 +184,7 @@ export function toListing(row: ListingRow): Listing {
     sizeClass: row.size_class,
     willTravel: row.will_travel,
     isGigantamax: row.is_gigantamax,
+    isDynamax: row.is_dynamax,
     tradeTimeline: row.trade_timeline,
   };
 }
@@ -253,8 +251,8 @@ export function applyFilterSpec(query: ListingsQuery, spec: FilterSpec): Listing
 }
 
 /** Open and locked listings in one area, newest first, narrowed by the compiled filter spec. */
-export async function fetchFeedListings(loc: AreaName, spec: FilterSpec): Promise<Listing[]> {
-  const filtered = applyFilterSpec(selectListings().in('status', FEED_STATUSES).eq('loc', loc), spec);
+export async function fetchFeedListings(loc: LocationName, spec: FilterSpec): Promise<Listing[]> {
+  const filtered = applyFilterSpec(selectListings().in('status', FEED_STATUS_FILTER).eq('loc_key', locationKey(loc)), spec);
   const { data, error } = await filtered.order('created_at', { ascending: false });
   if (error) throw apiError(error);
   return data.map(toListing);
@@ -314,6 +312,7 @@ export type NewListingInput = Pick<
   | 'pokeball'
   | 'willTravel'
   | 'isGigantamax'
+  | 'isDynamax'
   | 'tradeTimeline'
   | 'sizeClass'
 > & {
@@ -333,6 +332,8 @@ export type NewListingInput = Pick<
  *  re-applies THESE fields to a row an earlier, partly failed attempt already created, so omitting the key
  *  would leave that attempt's form on the row after the trainer went back to the default. */
 function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
+  const loc = sanitizeLocationLabel(input.loc);
+  if (!loc) throw new ListingsApiError('Pick a neighbourhood or city name, not coordinates.', 'invalid_location');
   return {
     name: speciesName(input),
     pokemon_id: input.pokemonId,
@@ -344,7 +345,7 @@ function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
     hue: input.hue,
     accent: input.accent,
     bg: input.bg,
-    loc: input.loc,
+    loc,
     trade_type: input.tradeType satisfies TradeType,
     ...(parseIv(input.iv) ?? { iv_atk: null, iv_def: null, iv_sta: null }),
     looking: input.looking.map(creatureRefToJson),
@@ -355,6 +356,7 @@ function toFields(input: NewListingInput): Omit<ListingInsert, 'id'> {
     pokeball: input.pokeball,
     will_travel: input.willTravel,
     is_gigantamax: input.isGigantamax,
+    is_dynamax: input.isDynamax,
     trade_timeline: input.tradeTimeline,
   };
 }
@@ -415,6 +417,16 @@ export async function uploadListingProof(listingId: string, proof: ProofUploadIn
     .from('listing_proofs')
     .insert({ listing_id: listingId, kind: proof.kind, storage_path: path });
   if (rowError && rowError.code !== '23505') throw apiError(rowError);
+}
+
+/**
+ * Seller only: takes an open listing off the market (`withdraw_listing`). The server closes every open chat on
+ * it and posts the system message. Throws the RPC's own error (`not_seller`, `unlock_first` while a buyer's
+ * offer is locked, `not_open`) so `describeError` can word it.
+ */
+export async function withdrawListing(listingId: string): Promise<void> {
+  const { error } = await supabase.rpc('withdraw_listing', { p_listing_id: listingId });
+  if (error) throw apiError(error);
 }
 
 /**

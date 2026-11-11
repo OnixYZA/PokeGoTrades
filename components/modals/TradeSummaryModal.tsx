@@ -54,6 +54,7 @@ function listingPills(listing: Listing): Pill[] {
   const form = creatureFormLabel(listing);
   if (form) pills.push({ label: form });
   if (listing.isGigantamax) pills.push({ label: 'Gigantamax' });
+  if (listing.isDynamax) pills.push({ label: 'Dynamax' });
   if (listing.purified) pills.push({ label: 'Purified' });
   if (listing.costume) pills.push({ label: 'Costume' });
   if (listing.cp != null) pills.push({ label: formatCp(listing.cp) });

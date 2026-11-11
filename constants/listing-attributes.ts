@@ -72,7 +72,7 @@ export const POKEBALL_LABELS: Record<Pokeball, string> = {
 
 /** The boolean `listings` columns a filter chip can toggle. Named after the `Listing` field (camelCase);
  *  `lib/api/listings.ts` maps `willTravel` to the DB's `will_travel` for the PostgREST adapter. */
-export const FILTER_FLAGS = ['shiny', 'lucky', 'purified', 'costume', 'willTravel', 'isGigantamax'] as const;
+export const FILTER_FLAGS = ['shiny', 'lucky', 'purified', 'costume', 'willTravel', 'isGigantamax', 'isDynamax'] as const;
 export type FilterFlagField = (typeof FILTER_FLAGS)[number];
 
 /** The nullable/enum `Listing` fields a filter chip can narrow to a set of values. */
@@ -188,6 +188,7 @@ export const FILTER_ATTRIBUTES = [
   flagAttribute('costume', 'Costume'),
   flagAttribute('willTravel', 'Will Travel'),
   flagAttribute('isGigantamax', 'Gigantamax'),
+  flagAttribute('isDynamax', 'Dynamax'),
 
   ...POKEMON_SIZES.map((size) => enumAttribute('sizeClass', size, size, 'Size')),
 

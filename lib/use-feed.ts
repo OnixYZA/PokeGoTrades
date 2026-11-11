@@ -2,7 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
-import type { AreaName } from '@/constants/locations';
+import { locationKey, type LocationName } from '@/constants/locations';
 import { marketSignalKey, type MarketSignal } from '@/constants/market';
 import { MOCK_MARKET_SIGNALS } from '@/data/market';
 import type { Listing } from '@/data/types';
@@ -11,6 +11,7 @@ import { fetchMarketDemand } from '@/lib/api/market';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { useSession } from '@/lib/session';
 import { compileFilter, filterKey, matchesFilter } from '@/store/listing-filters';
+import { isFeedVisible } from '@/store/listing-lifecycle';
 import { useTradeStore } from '@/store/trade-store';
 
 export interface Feed {
@@ -37,14 +38,14 @@ function withMarketSignals(listings: Listing[], signals: Map<string, MarketSigna
 
 /** The pre-Supabase feed: the seeded store, filtered to one area plus the tristate attribute
  *  filters, sorted by the mock distance, with a canned market signal attached. */
-function useMockFeed(loc: AreaName): Feed {
+function useMockFeed(loc: LocationName): Feed {
   const all = useTradeStore(useShallow((s) => Object.values(s.listings)));
   const filters = useTradeStore((s) => s.listingFilters);
   const searchPokemonId = useTradeStore((s) => s.searchPokemonId);
   const listings = useMemo(() => {
     const spec = compileFilter(filters, searchPokemonId);
     const matched = all
-      .filter((l) => l.loc === loc && matchesFilter(l, spec))
+      .filter((l) => locationKey(l.loc) === locationKey(loc) && isFeedVisible(l) && matchesFilter(l, spec))
       .sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
     return withMarketSignals(matched, MOCK_MARKET_MAP);
   }, [all, loc, filters, searchPokemonId]);
@@ -58,7 +59,7 @@ function useMockFeed(loc: AreaName): Feed {
  * into the store so the detail sheet can resolve them by id, and each result set gets one market
  * fetch attached; a market failure never fails the feed itself.
  */
-function useSupabaseFeed(loc: AreaName): Feed {
+function useSupabaseFeed(loc: LocationName): Feed {
   const { user, retry: retrySession } = useSession();
   const userId = user?.id;
   const upsertListings = useTradeStore((s) => s.upsertListings);
@@ -74,10 +75,22 @@ function useSupabaseFeed(loc: AreaName): Feed {
   specRef.current = spec;
   fKeyRef.current = fKey;
 
-  const [loaded, setLoaded] = useState<{ loc: AreaName; filterKey: string; listings: Listing[] }>({
+  // The fetch settles *which* listings the feed shows (`ids`) and their market signals; the listings
+  // themselves are read back out of the store below. Rendering the fetched copies would freeze each row at
+  // its status on arrival, so a withdraw or a realtime `listing_status` lock / withdraw event (both land in
+  // the store, never here) would not reach the feed until the next refetch. The signals are kept here
+  // rather than on the store copy because other store writers (`hydrate`, `refreshChat`,
+  // `fetchListingsByIds`) replace listing objects without `market`.
+  const [loaded, setLoaded] = useState<{
+    loc: LocationName;
+    filterKey: string;
+    ids: string[];
+    signals: Map<string, MarketSignal>;
+  }>({
     loc,
     filterKey: fKey,
-    listings: [],
+    ids: [],
+    signals: new Map(),
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,8 +105,9 @@ function useSupabaseFeed(loc: AreaName): Feed {
       if (request !== latestRequest.current) return; // a newer area / filter / refresh superseded this one
 
       let withMarket = listings;
+      let signals = new Map<string, MarketSignal>();
       try {
-        const signals = await fetchMarketDemand(listings.map((l) => l.pokemonId));
+        signals = await fetchMarketDemand(listings.map((l) => l.pokemonId));
         if (request !== latestRequest.current) return;
         withMarket = withMarketSignals(listings, signals);
       } catch (marketError) {
@@ -102,14 +116,14 @@ function useSupabaseFeed(loc: AreaName): Feed {
         console.warn('[use-feed] market fetch failed', marketError);
       }
 
-      setLoaded({ loc, filterKey: requestFilterKey, listings: withMarket });
+      setLoaded({ loc, filterKey: requestFilterKey, ids: listings.map((l) => l.id), signals });
       upsertListings(withMarket);
       setError(null);
     } catch (reason) {
       if (request !== latestRequest.current) return;
       // Settle `loaded` on this (loc, filter) too, so the stale check below stops reporting "loading"
       // and the error can render instead of a spinner that never ends.
-      setLoaded({ loc, filterKey: requestFilterKey, listings: [] });
+      setLoaded({ loc, filterKey: requestFilterKey, ids: [], signals: new Map() });
       setError(listingErrorMessage(reason));
     } finally {
       if (request === latestRequest.current) setIsLoading(false);
@@ -146,8 +160,18 @@ function useSupabaseFeed(loc: AreaName): Feed {
   // on every filter-chip tap.
   const isStale = loaded.loc !== loc || loaded.filterKey !== fKey;
 
+  const stored = useTradeStore((s) => s.listings);
+  const listings = useMemo(
+    () =>
+      withMarketSignals(
+        loaded.ids.map((id) => stored[id]).filter((l): l is Listing => l !== undefined && isFeedVisible(l)),
+        loaded.signals,
+      ),
+    [loaded, stored],
+  );
+
   return {
-    listings: isStale ? [] : loaded.listings,
+    listings: isStale ? [] : listings,
     isLoading: userId ? isLoading || isStale : false,
     error: userId ? error : 'Could not start a session. Check your connection and try again.',
     refresh,
@@ -155,4 +179,4 @@ function useSupabaseFeed(loc: AreaName): Feed {
 }
 
 /** Chosen once from the build-time flag, so hook order never changes between renders. */
-export const useFeed: (loc: AreaName) => Feed = USE_SUPABASE ? useSupabaseFeed : useMockFeed;
+export const useFeed: (loc: LocationName) => Feed = USE_SUPABASE ? useSupabaseFeed : useMockFeed;

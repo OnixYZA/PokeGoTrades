@@ -21,7 +21,7 @@ create temporary table seed_trainers (
 
 insert into seed_trainers (id, handle, lvl, team, friend_code, safe_loc, bio) values
   -- DriftCoral: verbatim from data/trainer.ts (friend code '2841 · 9903 · 7715')
-  ('a0000000-0000-4000-8000-000000000001', 'DriftCoral', 47, 'Mystic',   '284199037715', 'Adyar · ~500m radius',
+  ('a0000000-0000-4000-8000-000000000001', 'DriftCoral', 47, 'Mystic',   '284199037715', 'Adyar',
      'Long-time hoarder. Only trade in daylight, only in public. Prefer meeting near IIT-M gate.'),
   -- Everyone else: the mock only names them, so level / team / friend code are placeholder fixtures.
   ('a0000000-0000-4000-8000-000000000002', 'AzureRift',  35, 'Mystic',   '100000000002', null, ''),

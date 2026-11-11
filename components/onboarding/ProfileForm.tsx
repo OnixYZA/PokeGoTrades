@@ -1,8 +1,11 @@
 import { useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
+import { ChevronDown, MapPin } from 'lucide-react-native';
 
+import { LocationPickerSheet } from '@/components/location/LocationPickerSheet';
 import { TeamPicker } from '@/components/onboarding/TeamPicker';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import type { LocationName } from '@/constants/locations';
 import { SURFACE } from '@/constants/theme';
 import {
   FRIEND_CODE_LENGTH,
@@ -42,6 +45,9 @@ export function ProfileForm({ initial, prefill, onSaved }: ProfileFormProps) {
         ? formatFriendCode(prefill.friendCode)
         : ''
   );
+  // Optional: stays null (and is not sent) until the trainer picks one.
+  const [homeLocation, setHomeLocation] = useState<LocationName | null>(initial?.homeLocation ?? null);
+  const [pickingHome, setPickingHome] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ProfileError | null>(null);
 
@@ -52,7 +58,7 @@ export function ProfileForm({ initial, prefill, onSaved }: ProfileFormProps) {
     setBusy(true);
     setError(null);
     try {
-      await saveProfile({ handle, team, friendCode });
+      await saveProfile({ handle, team, friendCode, ...(homeLocation ? { homeLocation } : {}) });
       onSaved();
     } catch (reason) {
       setError(reason instanceof ProfileError ? reason : new ProfileError('form', 'Something went wrong. Try again.'));
@@ -110,6 +116,40 @@ export function ProfileForm({ initial, prefill, onSaved }: ProfileFormProps) {
           fallback="Shared only with the trainer whose trade you accept, never shown on your profile."
         />
       </View>
+
+      <View className="gap-2">
+        <Label>Home location (optional)</Label>
+        <Pressable
+          onPress={() => setPickingHome(true)}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel={`Home location: ${homeLocation ?? 'Not set'}`}
+          accessibilityHint="Opens a picker to search or type a neighbourhood or city"
+          className={`${INPUT_CLASS} flex-row items-center gap-2 active:opacity-80`}
+        >
+          <MapPin size={14} color="#6d7690" />
+          <Text className="flex-1" numberOfLines={1} style={{ fontSize: 15, color: homeLocation ? '#e8ecf5' : '#6d7690' }}>
+            {homeLocation ?? 'Not set'}
+          </Text>
+          <ChevronDown size={16} color="#6d7690" />
+        </Pressable>
+        <Hint
+          message={errorFor('homeLocation')}
+          fallback="Offered as a one-tap location when you list or browse. Only the place name is shared, never GPS."
+        />
+      </View>
+      <LocationPickerSheet
+        visible={pickingHome}
+        title="Home location"
+        showHomeRow={false}
+        current={homeLocation}
+        homeLocation={homeLocation}
+        onSelect={(label) => {
+          setHomeLocation(label);
+          setPickingHome(false);
+        }}
+        onClose={() => setPickingHome(false)}
+      />
 
       {errorFor('form') ? <Hint message={errorFor('form')} /> : null}
 

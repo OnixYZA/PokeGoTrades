@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AREAS } from '../constants/locations';
+import { KNOWN_LOCALITIES } from '../constants/locations';
 import { requestVicinity, type GeolocationLike } from './vicinity';
 
 const fake = (impl: GeolocationLike['getCurrentPosition']): GeolocationLike => ({
@@ -34,10 +34,10 @@ describe('requestVicinity', () => {
     expect(await requestVicinity(geo)).toEqual({ ok: false, reason: 'out-of-area' });
   });
 
-  it('never returns coordinates, only an area name', async () => {
+  it('never returns coordinates, only a locality name', async () => {
     const geo = fake((ok) => ok({ coords: { latitude: 13.0067, longitude: 80.2574 } }));
     const result = await requestVicinity(geo);
-    if (result.ok) expect(AREAS).toContain(result.area);
+    if (result.ok) expect(KNOWN_LOCALITIES.map((l) => l.name)).toContain(result.area);
     expect(JSON.stringify(result)).not.toMatch(/13\.0067|80\.2574/);
   });
 });

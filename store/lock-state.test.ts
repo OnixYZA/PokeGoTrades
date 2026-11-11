@@ -99,6 +99,7 @@ function makeListing(partial: Partial<Listing> = {}): Listing {
     sizeClass: null,
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'flexible',
     status: 'open',
     ...partial,

@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { IconButton } from '@/components/ui/IconButton';
 import { ToastHost } from '@/components/ui/ToastHost';
+import { formatVicinityLabel, sanitizeLocationLabel } from '@/constants/locations';
 import { getHandshake, type Handshake } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { describeError } from '@/lib/rpc-errors';
@@ -485,6 +486,8 @@ function FriendCodeCard({
 }
 
 function WarningCallout({ safeLoc }: { safeLoc?: string | null }) {
+  // Sanitized again on display: an older client may have stored the "<Place> · ~500m radius" display string.
+  const label = safeLoc ? sanitizeLocationLabel(safeLoc) : null;
   return (
     <View
       className="mb-5 flex-row gap-3 rounded-xl border p-4"
@@ -497,7 +500,7 @@ function WarningCallout({ safeLoc }: { safeLoc?: string | null }) {
         </Text>
         <Text style={{ fontSize: 13, color: C.goldPale, lineHeight: 19.5 }}>
           Coordinate your meet-up safely in the chat. Never share your home address.
-          {safeLoc ? ` Their preferred meet zone: ${safeLoc}.` : ''}
+          {label ? ` Their preferred meet zone: ${formatVicinityLabel(label)}.` : ''}
         </Text>
       </View>
     </View>

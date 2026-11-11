@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { BlurView } from 'expo-blur';
-import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Ruler, Send, Trophy, X, Zap } from 'lucide-react-native';
+import { Bolt, Car, CircleDot, Clock, Dumbbell, MapPin, Ruler, Send, Trash2, Trophy, X, Zap } from 'lucide-react-native';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -17,6 +17,7 @@ import { SafeMeetZone } from '@/components/profile/SafeMeetZone';
 import { LookingForRow } from '@/components/listing/LookingForRow';
 import { StardustCard } from '@/components/listing/StardustCard';
 import { BuyerOfferModal } from '@/components/modals/BuyerOfferModal';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { IconButton } from '@/components/ui/IconButton';
 import { GigantamaxBadge } from '@/components/ui/GigantamaxBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
@@ -37,6 +38,7 @@ import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName, creatureFormLabel, formatCp } from '@/lib/format';
 import { goBack } from '@/lib/navigation';
 import { toast } from '@/lib/toast';
+import { withdrawRefusal } from '@/store/listing-lifecycle';
 import { useTradeStore } from '@/store/trade-store';
 
 const SHEET_TRAVEL = 900;
@@ -50,6 +52,12 @@ export default function ListingDetailScreen() {
   const insets = useSafeAreaInsets();
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showMeetup, setShowMeetup] = useState(false);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const withdrawListing = useTradeStore((s) => s.withdrawListing);
+  // A lock can live only in `lockByListing` (the mock, or a live `lock` event ahead of its `listing_status`), so
+  // the withdraw control reads it too, through the same `withdrawRefusal` rule the store enforces.
+  const lockHeld = useTradeStore((s) => (id ? s.lockByListing[id] !== undefined : false));
 
   const translateY = useSharedValue(SHEET_TRAVEL);
   const overlayOpacity = useSharedValue(0);
@@ -150,7 +158,8 @@ export default function ListingDetailScreen() {
   };
 
   // With Supabase the button reflects the listing's real state: yours, no longer open, or fair game.
-  const isOwn = USE_SUPABASE && listing.sellerId !== undefined && listing.sellerId === me?.id;
+  // The mock has no accounts: a listing the trainer created there is marked `seller: 'You'`.
+  const isOwn = USE_SUPABASE ? listing.sellerId !== undefined && listing.sellerId === me?.id : listing.seller === 'You';
   const notOpen = USE_SUPABASE && listing.status !== undefined && listing.status !== 'open';
   const offerDisabled = listing.untradable || isOwn || notOpen;
   const offerLabel = listing.untradable
@@ -162,6 +171,33 @@ export default function ListingDetailScreen() {
           ? 'Locked'
           : 'No longer available'
         : 'Make Offer';
+
+  // Own listing: the seller manages it instead of offering on it. A locked one cannot be withdrawn until the
+  // seller unlocks it in the chat (`withdraw_listing` raises `unlock_first`).
+  const refusal = withdrawRefusal(listing, lockHeld);
+  const ownLocked = refusal === 'unlock_first';
+  const withdrawLabel = withdrawing
+    ? 'Withdrawing…'
+    : ownLocked
+      ? 'Locked: unlock in chat first'
+      : listing.status === 'withdrawn'
+        ? 'Withdrawn'
+        : listing.status === 'completed'
+          ? 'Traded'
+          : 'Withdraw listing';
+  const canWithdraw = !withdrawing && refusal === null;
+
+  const handleWithdraw = async () => {
+    setConfirmWithdraw(false);
+    setWithdrawing(true);
+    const r = await withdrawListing(listing.id);
+    if (r.ok) {
+      toast('Listing withdrawn.', 'success');
+      close();
+    } else {
+      setWithdrawing(false); // the store already toasted why
+    }
+  };
 
   return (
     <View className="flex-1 items-center justify-end" style={{ pointerEvents: 'box-none' }}>
@@ -331,6 +367,14 @@ export default function ListingDetailScreen() {
           </View>
         ) : null}
 
+        {isOwn && ownLocked ? (
+          <View className="border-t border-border-subtle px-[22px] pt-3">
+            <Text className="font-mono text-text-muted" style={{ fontSize: 11, lineHeight: 16 }}>
+              A buyer&apos;s offer is locked. Unlock it from the chat before withdrawing.
+            </Text>
+          </View>
+        ) : null}
+
         <View
           className="flex-row gap-2 border-t border-border-subtle px-[22px] pt-3.5"
           style={[SURFACE.ctaFade, { paddingBottom: Math.max(insets.bottom, 26) }]}
@@ -343,15 +387,27 @@ export default function ListingDetailScreen() {
           >
             <MapPin size={20} color="#4fb3ff" />
           </IconButton>
-          <PrimaryButton
-            label={offerLabel}
-            flex={1}
-            style={SURFACE.ctaBlue}
-            textColor="#04121f"
-            icon={!offerDisabled ? <Send size={16} color="#04121f" /> : undefined}
-            onPress={() => void startOffer()}
-            disabled={offerDisabled}
-          />
+          {isOwn ? (
+            <PrimaryButton
+              label={withdrawLabel}
+              flex={1}
+              style={{ backgroundColor: '#ff5c8a' }}
+              textColor="#1a0610"
+              icon={canWithdraw ? <Trash2 size={16} color="#1a0610" /> : undefined}
+              onPress={() => setConfirmWithdraw(true)}
+              disabled={!canWithdraw}
+            />
+          ) : (
+            <PrimaryButton
+              label={offerLabel}
+              flex={1}
+              style={SURFACE.ctaBlue}
+              textColor="#04121f"
+              icon={!offerDisabled ? <Send size={16} color="#04121f" /> : undefined}
+              onPress={() => void startOffer()}
+              disabled={offerDisabled}
+            />
+          )}
         </View>
       </Animated.View>
 
@@ -363,6 +419,15 @@ export default function ListingDetailScreen() {
       >
         <BuyerOfferModal listing={listing} onCancel={() => setShowOfferModal(false)} onOffered={handleOffered} />
       </Modal>
+      <ConfirmModal
+        visible={confirmWithdraw}
+        title="Withdraw this listing?"
+        message="It leaves the feed and every open chat on it closes. This can't be undone."
+        confirmLabel="Withdraw"
+        destructive
+        onConfirm={() => void handleWithdraw()}
+        onCancel={() => setConfirmWithdraw(false)}
+      />
       <ToastHost />
     </View>
   );

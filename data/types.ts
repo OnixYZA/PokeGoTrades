@@ -1,4 +1,4 @@
-import type { AreaName } from '@/constants/locations';
+import type { LocationName } from '@/constants/locations';
 import type { ListingTag, Pokeball, PokemonSize, TradeTimeline } from '@/constants/listing-attributes';
 import type { MarketSignal } from '@/constants/market';
 
@@ -62,7 +62,8 @@ export interface Listing extends CreatureRef {
   /** Kilometres from the viewer. Mock data only: proximity is not persisted (SUPABASE_PLAN.md D3),
    *  so Supabase-backed listings leave it undefined and the UI hides the badge. */
   dist?: number;
-  loc: AreaName;
+  /** Free-text place label (a neighbourhood, city or meetup zone), never a coordinate. */
+  loc: LocationName;
   pvp: string;
   tradeType: TradeType;
   iv: string;
@@ -96,6 +97,9 @@ export interface Listing extends CreatureRef {
   /** Seller-declared Gigantamax Pokémon (migration …20261103000300). Only offered for species
    *  `canGigantamax` (constants/pokedex.ts) names. */
   isGigantamax: boolean;
+  /** Seller-declared (regular) Dynamax Pokémon (migration …20261112000200). Mutually exclusive with
+   *  `isGigantamax`: a specimen is one or the other. No species eligibility data yet (Sprint 2.3). */
+  isDynamax: boolean;
   tradeTimeline: TradeTimeline;
   /** Live want/have signal for this (pokemonId, shiny) pair (`pokemon_market_demand`). Undefined
    *  until `useFeed` fetches it, or if that fetch failed — never treat absence as "no demand",

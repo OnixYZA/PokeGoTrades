@@ -82,7 +82,7 @@ export function buildPublicTrainerProfile(handle: string): Trainer {
     lvl: 20 + (seed % 30),
     team: ['Mystic', 'Valor', 'Instinct'][seed % 3],
     bio: pick(BIOS, seed, 0),
-    safeLoc: `${pick([...AREAS], seed, 0)} · ~500m radius`,
+    safeLoc: pick([...AREAS], seed, 0),
     trades: 8 + (seed % 250),
     rep: Math.round((3.5 + ((seed % 15) / 10)) * 10) / 10,
     streak: seed % 45,

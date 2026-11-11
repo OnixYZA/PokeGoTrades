@@ -1,10 +1,22 @@
+import { useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { LocationPickerSheet } from '@/components/location/LocationPickerSheet';
 import { SafeMeetZone } from '@/components/profile/SafeMeetZone';
+import { formatVicinityLabel, sanitizeLocationLabel } from '@/constants/locations';
 import { SURFACE } from '@/constants/theme';
 import type { Trainer } from '@/data/types';
+import { useTradeStore } from '@/store/trade-store';
 
-export function ProfileHero({ trainer }: { trainer: Trainer }) {
+/** `editableHome` is true only for the signed-in trainer's own hero; public profiles show the zone read-only. */
+export function ProfileHero({ trainer, editableHome = false }: { trainer: Trainer; editableHome?: boolean }) {
+  const homeLocation = useTradeStore((s) => s.homeLocation);
+  const saveHomeLocation = useTradeStore((s) => s.saveHomeLocation);
+  const [editing, setEditing] = useState(false);
+  // Own hero: exactly the stored home, so clearing it shows "Not set". Public hero: the trainer's own zone, or
+  // "Not set"; never an invented default.
+  const zone = editableHome ? homeLocation : sanitizeLocationLabel(trainer.safeLoc);
+
   return (
     <View className="relative mb-3.5 overflow-hidden rounded-[22px] border border-border p-5" style={SURFACE.profileHero}>
       <View
@@ -50,7 +62,26 @@ export function ProfileHero({ trainer }: { trainer: Trainer }) {
         {trainer.bio}
       </Text>
 
-      <SafeMeetZone location={trainer.safeLoc} />
+      <SafeMeetZone location={zone ? formatVicinityLabel(zone) : 'Not set'}onEdit={editableHome ? () => setEditing(true) : undefined} />
+      {editableHome ? (
+        <LocationPickerSheet
+          visible={editing}
+          title="Home location"
+          showHomeRow={false}
+          current={homeLocation}
+          homeLocation={homeLocation}
+          allowClear={homeLocation !== null}
+          onSelect={async (label) => {
+            const result = await saveHomeLocation(label);
+            if (result.ok) setEditing(false);
+          }}
+          onClear={async () => {
+            const result = await saveHomeLocation(null);
+            if (result.ok) setEditing(false);
+          }}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
     </View>
   );
 }

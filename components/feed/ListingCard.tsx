@@ -117,11 +117,11 @@ export function ListingCard({ listing }: { listing: Listing }) {
         ) : null}
 
         <View className="mt-1.5 flex-row items-center justify-between" style={{ pointerEvents: 'box-none' }}>
-          <View className="flex-row items-center gap-1" style={{ pointerEvents: 'box-none' }}>
+          <View className="flex-row items-center gap-1" style={{ flexShrink: 1, pointerEvents: 'box-none' }}>
             {/* The neighbourhood, never a distance: the same fact in mock and Supabase mode, and the only
              *  location a listing reveals. */}
             <MapPin size={12} color="#6d7690" />
-            <Text className="font-mono text-text-muted" style={{ fontSize: 11, pointerEvents: 'none' }}>
+            <Text className="font-mono text-text-muted" numberOfLines={1} style={{ fontSize: 11, flexShrink: 1, pointerEvents: 'none' }}>
               {listing.loc} ·
             </Text>
             <Pressable

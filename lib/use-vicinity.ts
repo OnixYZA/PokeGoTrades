@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 
-import type { AreaName } from '@/constants/locations';
+import type { LocationName } from '@/constants/locations';
 import { toast } from '@/lib/toast';
 import { getGeolocation, requestVicinity, VICINITY_FAILURE_MESSAGES } from '@/lib/vicinity';
 
@@ -11,7 +11,7 @@ export function useVicinity() {
   const busy = useRef(false);
   const supported = getGeolocation() !== null;
 
-  const locate = useCallback(async (): Promise<AreaName | null> => {
+  const locate = useCallback(async (): Promise<LocationName | null> => {
     if (busy.current) return null;
     busy.current = true;
     setLocating(true);

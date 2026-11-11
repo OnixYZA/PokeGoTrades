@@ -108,6 +108,7 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
       ]);
       if (request !== latestRequest.current) return; // a newer load started while this one was in flight
       setProfile(nextProfile);
+      useTradeStore.getState().setHomeLocation(nextProfile.homeLocation);
       dispatchLists({ type: 'loaded', arsenal: nextArsenal, wishlist: nextWishlist });
       setTradeHistory(nextTradeHistory);
       setStatus('ready');
@@ -311,7 +312,7 @@ export default function ProfileScreen() {
     // offering controls that can't work.
     body = (
       <>
-        <ProfileHero trainer={trainer} />
+        <ProfileHero trainer={trainer} editableHome />
         <RepStats trainer={trainer} bailsCount={trainer.bailsCount} />
         <ArsenalGrid arsenal={MOCK_ARSENAL} />
         <WishlistGrid wishlist={MOCK_WISHLIST} />

@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { create } from 'zustand';
 
-import type { AreaName } from '@/constants/locations';
+import { DEFAULT_LOCATION, sanitizeLocationLabel, type LocationName } from '@/constants/locations';
 import { chats as seedChats, fallbackOffers } from '@/data/chats';
 import { listings as seedListings } from '@/data/listings';
 import { trainer as mockTrainer } from '@/data/trainer';
@@ -16,7 +16,8 @@ import type {
   ListingStatus,
 } from '@/data/types';
 import * as chatsApi from '@/lib/api/chats';
-import { fetchListingsByIds } from '@/lib/api/listings';
+import { fetchListingsByIds, withdrawListing as withdrawListingApi } from '@/lib/api/listings';
+import { fetchHomeLocation, saveHomeLocation as saveHomeLocationApi } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName } from '@/lib/format';
 import { openPrivateChannel } from '@/lib/realtime';
@@ -31,6 +32,7 @@ import {
   type LockConfirmations,
   type LockVersion,
 } from './lock-state';
+import { applyListingWithdrawn, withdrawRefusal } from './listing-lifecycle';
 import { cycleFilter, setFilterMode, type FilterKey, type FilterMode, type FilterState } from './listing-filters';
 import { offerAvailability } from './offer-state';
 
@@ -216,8 +218,15 @@ interface TradeState {
   clearHandshakeRequest: () => void;
 
   // ——— filters / prefs ———
-  filterLocation: AreaName;
-  setFilterLocation: (loc: AreaName) => void;
+  filterLocation: LocationName;
+  setFilterLocation: (loc: LocationName) => void;
+  /** The trainer's own home location (`profile_private.safe_loc`), or null when unset. Offered as a one-tap row
+   *  in the location picker. Mock mode starts from the mock trainer's; live mode loads it in `hydrate`. */
+  homeLocation: LocationName | null;
+  /** Local-only set (the profile screen seeds it from `fetchMyProfile`). */
+  setHomeLocation: (loc: LocationName | null) => void;
+  /** Sanitizes and persists the home location (live) or sets it locally (mock). Null clears it. */
+  saveHomeLocation: (loc: LocationName | null) => Promise<ActionResult>;
   friendship: FriendshipLabel;
   setFriendship: (level: FriendshipLabel) => void;
   /** Tristate feed-attribute filters (constants/listing-attributes.ts / store/listing-filters.ts).
@@ -278,6 +287,13 @@ interface TradeState {
   withdrawConfirmation: (chatId: string) => Promise<ActionResult>;
   /** Bail & Block: closes the chat (and every open chat with that trainer), releases the lock, blocks. */
   bailChat: (chatId: string, reason: chatsApi.BailReason, note?: string) => Promise<ActionResult>;
+  /**
+   * Seller only: takes a listing off the market and closes every open chat on it (`withdraw_listing`).
+   * Refused while a buyer's offer is locked ('unlock_first'): the seller must unlock in the chat first. The
+   * state change (listing `withdrawn`, chats `closed`) is applied once the server confirms, without waiting
+   * for the realtime echo, so the feed and the open threads update at once.
+   */
+  withdrawListing: (listingId: string) => Promise<ActionResult>;
 
   // ——— live sync (Supabase only) ———
   setMe: (me: { id: string } | null) => void;
@@ -540,8 +556,27 @@ export const useTradeStore = create<TradeState>((set, get) => {
     handshakeRequest: null,
     clearHandshakeRequest: () => set({ handshakeRequest: null }),
 
-    filterLocation: 'Adyar',
-    setFilterLocation: (loc) => set({ filterLocation: loc }),
+    filterLocation: DEFAULT_LOCATION,
+    // Sanitized here too, not only in the picker: this value becomes the feed's `loc_key` query, so nothing
+    // coordinate-like may reach it whichever caller sets it. An unusable label keeps the current location.
+    setFilterLocation: (loc) => set((state) => ({ filterLocation: sanitizeLocationLabel(loc) ?? state.filterLocation })),
+    homeLocation: USE_SUPABASE ? null : sanitizeLocationLabel(mockTrainer.safeLoc),
+    setHomeLocation: (loc) => set({ homeLocation: loc }),
+    saveHomeLocation: async (loc) => {
+      const value = loc === null ? null : sanitizeLocationLabel(loc);
+      if (loc !== null && value === null) {
+        const error = describeError({ message: 'invalid_location' });
+        toast(error.message);
+        return { ok: false, error };
+      }
+      if (!USE_SUPABASE || !get().me) {
+        set({ homeLocation: value });
+        return ok(undefined);
+      }
+      const result = await attempt(() => saveHomeLocationApi(value));
+      if (result.ok) set({ homeLocation: value });
+      return result;
+    },
     friendship: 'Great',
     setFriendship: (level) => set({ friendship: level }),
     listingFilters: {},
@@ -843,6 +878,25 @@ export const useTradeStore = create<TradeState>((set, get) => {
       });
     },
 
+    withdrawListing: async (listingId) => {
+      // Same rule the detail screen disables its button by (`withdrawRefusal`), checked again here. Toasted, so a
+      // refusal is never silent even if a screen ever shows the button live.
+      const refusal = withdrawRefusal(get().listings[listingId], get().lockByListing[listingId] !== undefined);
+      if (refusal) {
+        const info = describeError({ message: refusal });
+        toast(info.message);
+        return { ok: false, error: info };
+      }
+      if (!USE_SUPABASE) {
+        set((state) => applyListingWithdrawn(state, listingId));
+        return ok(undefined);
+      }
+      return attempt(async () => {
+        await withdrawListingApi(listingId);
+        set((state) => applyListingWithdrawn(state, listingId));
+      });
+    },
+
     bailChat: async (chatId, reason, note) => {
       if (!USE_SUPABASE) {
         // Read the lock BEFORE removeChat drops it, like the RPC reads trade_locks before deleting it.
@@ -881,6 +935,14 @@ export const useTradeStore = create<TradeState>((set, get) => {
       if (!USE_SUPABASE || !get().me) return;
       const seq = ++inboxRead;
       const readSeq = nextLockSeq();
+      // Best effort and in its own try/catch: a failed home-location read must never break the inbox.
+      void (async () => {
+        try {
+          set({ homeLocation: await fetchHomeLocation() });
+        } catch (error) {
+          console.warn('[trade-store] home location read failed', error);
+        }
+      })();
       try {
         const [inbox, locks] = await Promise.all([chatsApi.fetchInbox(), chatsApi.fetchMyLocks()]);
         const listings = await fetchListingsByIds([...new Set(inbox.map((chat) => chat.listingId))]);
@@ -997,7 +1059,7 @@ export const useTradeStore = create<TradeState>((set, get) => {
       focusedChats.clear();
       chatReads.clear();
       inboxRead++; // invalidate anything already in flight
-      set({ chats: {}, messages: {}, lockByListing: {}, lockConfirmations: {}, lockEventVersion: {}, handshakeRequest: null, me: null });
+      set({ chats: {}, messages: {}, lockByListing: {}, lockConfirmations: {}, lockEventVersion: {}, handshakeRequest: null, homeLocation: null, me: null });
     },
   };
 });
