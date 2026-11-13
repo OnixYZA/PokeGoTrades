@@ -20,6 +20,7 @@ import { fetchListingsByIds, withdrawListing as withdrawListingApi } from '@/lib
 import { fetchHomeLocation, saveHomeLocation as saveHomeLocationApi } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureDisplayName } from '@/lib/format';
+import { readProofBytes, type PickedProof } from '@/lib/proof-image';
 import { openPrivateChannel } from '@/lib/realtime';
 import { computeRepAfterTrade, computeStreakAfterTrade, evaluateBailOutcome, evaluateUnlockOutcome, MAX_REP, MIN_REP } from '@/lib/reputation';
 import { describeError, type ErrorInfo } from '@/lib/rpc-errors';
@@ -173,7 +174,7 @@ export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; error
 export type OfferSelection = { kind: 'creature'; offer: FormalOffer } | { kind: 'custom' };
 
 /** What the trainer is sending from the composer. */
-export type OutgoingMessage = { text: string } | { offer: FormalOffer };
+export type OutgoingMessage = { text: string } | { offer: FormalOffer } | { image: PickedProof; caption?: string };
 
 const CUSTOM_OFFER_BODY = "Custom offer — let's work out the details here.";
 
@@ -348,7 +349,10 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMe
         (message.clientId !== undefined && m.clientId === message.clientId && m.senderId === message.senderId),
     );
     if (index === -1) merged.push(message);
-    else merged[index] = message;
+    else {
+      const existingMsg = merged[index];
+      merged[index] = existingMsg.imageUri && !message.imageUri ? { ...message, imageUri: existingMsg.imageUri } : message;
+    }
   }
   return sortMessages(merged);
 }
@@ -372,6 +376,12 @@ function seedMockStats(): MockTrainerStats {
 function dropChat(state: TradeState, chatId: string): Partial<TradeState> {
   const chat = state.chats[chatId];
   if (!chat) return {};
+  for (const msg of state.messages[chatId] ?? []) {
+    if (msg.clientId) {
+      pendingImageProofs.delete(msg.clientId);
+      uploadedImageClients.delete(msg.clientId);
+    }
+  }
   return {
     chats: omit(state.chats, chatId),
     messages: omit(state.messages, chatId),
@@ -382,6 +392,11 @@ function dropChat(state: TradeState, chatId: string): Partial<TradeState> {
 }
 
 // ——— module state for the live layer ———
+
+/** Pending image proofs awaiting upload/retry, keyed by `clientId`. */
+const pendingImageProofs = new Map<string, PickedProof>();
+/** `clientId`s whose image object has already been uploaded to Storage so retries skip re-uploading. */
+const uploadedImageClients = new Set<string>();
 
 /** Chats whose `chat:<id>` channel is open right now, so `resync` knows which threads to gap-fill. */
 const focusedChats = new Set<string>();
@@ -575,11 +590,29 @@ export const useTradeStore = create<TradeState>((set, get) => {
   async function deliver(chatId: string, bubble: ChatMessage, meId: string): Promise<ActionResult> {
     const clientId = bubble.clientId as string;
     try {
+      if (bubble.kind === 'image') {
+        if (!uploadedImageClients.has(clientId)) {
+          const proof = pendingImageProofs.get(clientId);
+          if (proof) {
+            const { data, contentType } = await readProofBytes(proof);
+            await chatsApi.uploadChatImage({ chatId, senderId: meId, clientId, data, contentType });
+            uploadedImageClients.add(clientId);
+          }
+        }
+      }
       const row = await chatsApi.sendChatMessage(
         chatId,
-        { clientId, kind: bubble.offer ? 'offer' : 'text', body: bubble.text, offer: bubble.offer },
+        {
+          clientId,
+          kind: bubble.kind === 'image' ? 'image' : bubble.offer ? 'offer' : 'text',
+          body: bubble.text,
+          offer: bubble.offer,
+          imagePath: bubble.imagePath,
+        },
         meId,
       );
+      pendingImageProofs.delete(clientId);
+      uploadedImageClients.delete(clientId);
       set((state) => ({ messages: { ...state.messages, [chatId]: mergeMessages(state.messages[chatId] ?? [], [row]) } }));
       return { ok: true, value: undefined };
     } catch (error) {
@@ -589,6 +622,8 @@ export const useTradeStore = create<TradeState>((set, get) => {
         try {
           const landed = await chatsApi.fetchMessageByClientId(chatId, meId, clientId);
           if (landed) {
+            pendingImageProofs.delete(clientId);
+            uploadedImageClients.delete(clientId);
             set((state) => ({
               messages: { ...state.messages, [chatId]: mergeMessages(state.messages[chatId] ?? [], [landed]) },
             }));
@@ -603,6 +638,8 @@ export const useTradeStore = create<TradeState>((set, get) => {
         // RLS refused (frozen, closed, bailed, blocked): refetch so the composer disables itself.
         toast(info.message);
         void get().resync();
+      } else if (bubble.kind === 'image') {
+        toast(info.message);
       }
       return { ok: false, error: info };
     }
@@ -761,6 +798,23 @@ export const useTradeStore = create<TradeState>((set, get) => {
 
     sendMessage: async (chatId, message) => {
       if (!USE_SUPABASE) {
+        if ('image' in message) {
+          const caption = message.caption?.trim() ?? '';
+          const preview = chatsApi.chatImagePreviewText(message.caption);
+          set((state) => ({
+            ...(state.chats[chatId]
+              ? { chats: { ...state.chats, [chatId]: { ...state.chats[chatId], preview } } }
+              : {}),
+            messages: {
+              ...state.messages,
+              [chatId]: [
+                ...(state.messages[chatId] ?? []),
+                { role: 'me', kind: 'image', text: caption, imageUri: message.image.uri, time: timeNow() },
+              ],
+            },
+          }));
+          return ok(undefined);
+        }
         const offer = 'offer' in message ? message.offer : undefined;
         set((state) => ({
           messages: {
@@ -773,20 +827,39 @@ export const useTradeStore = create<TradeState>((set, get) => {
 
       const me = get().me;
       if (!me) return { ok: false, error: NOT_SIGNED_IN };
-      const clientId = randomUUID();
+      const clientId = randomUUID().toLowerCase();
       const createdAt = new Date().toISOString();
-      const bubble: ChatMessage = {
-        id: clientId,
-        clientId,
-        senderId: me.id,
-        role: 'me',
-        kind: 'offer' in message ? 'offer' : 'text',
-        text: 'text' in message ? message.text : '',
-        offer: 'offer' in message ? message.offer : undefined,
-        createdAt,
-        time: chatsApi.formatMessageTime(createdAt),
-        delivery: 'pending',
-      };
+      let bubble: ChatMessage;
+      if ('image' in message) {
+        const imagePath = chatsApi.chatImageStoragePath(chatId, me.id, clientId);
+        pendingImageProofs.set(clientId, message.image);
+        bubble = {
+          id: clientId,
+          clientId,
+          senderId: me.id,
+          role: 'me',
+          kind: 'image',
+          text: message.caption?.trim() ?? '',
+          imagePath,
+          imageUri: message.image.uri,
+          createdAt,
+          time: chatsApi.formatMessageTime(createdAt),
+          delivery: 'pending',
+        };
+      } else {
+        bubble = {
+          id: clientId,
+          clientId,
+          senderId: me.id,
+          role: 'me',
+          kind: 'offer' in message ? 'offer' : 'text',
+          text: 'text' in message ? message.text : '',
+          offer: 'offer' in message ? message.offer : undefined,
+          createdAt,
+          time: chatsApi.formatMessageTime(createdAt),
+          delivery: 'pending',
+        };
+      }
       set((state) => ({ messages: { ...state.messages, [chatId]: [...(state.messages[chatId] ?? []), bubble] } }));
       return deliver(chatId, bubble, me.id);
     },
@@ -1161,6 +1234,9 @@ export const useTradeStore = create<TradeState>((set, get) => {
       inboxRefreshTimer = null;
       focusedChats.clear();
       chatReads.clear();
+      pendingImageProofs.clear();
+      uploadedImageClients.clear();
+      chatsApi.clearChatImageUrlCache();
       inboxRead++; // invalidate anything already in flight
       set({ chats: {}, messages: {}, lockByListing: {}, lockConfirmations: {}, lockEventVersion: {}, handshakeRequest: null, homeLocation: null, me: null });
     },

@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { ArsenalOfferSheet } from '@/components/chats/ArsenalOfferSheet';
 import { ChatActionRow } from '@/components/chats/ChatActionRow';
+import { ChatAttachmentSheet } from '@/components/chats/ChatAttachmentSheet';
 import { Composer } from '@/components/chats/Composer';
 import { FormalOfferCard } from '@/components/chats/FormalOfferCard';
 import { ClosedBanner } from '@/components/chats/ClosedBanner';
@@ -58,6 +59,7 @@ export default function ActiveChatScreen() {
   const subscribeToChat = useTradeStore((s) => s.subscribeToChat);
 
   const [draft, setDraft] = useState('');
+  const [showAttachSheet, setShowAttachSheet] = useState(false);
   const [showArsenal, setShowArsenal] = useState(false);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [loadState, setLoadState] = useState<LoadState>(chat ? 'ready' : 'loading');
@@ -93,6 +95,14 @@ export default function ActiveChatScreen() {
       clearHandshakeRequest();
     }
   }, [handshakeRequest, chatId, trade.phase, clearHandshakeRequest]);
+
+  // Immediately close active attachment/offer sheets if the chat becomes non-composable (frozen/closed/bailed/completed).
+  useEffect(() => {
+    if (!trade.canCompose) {
+      setShowAttachSheet(false);
+      setShowArsenal(false);
+    }
+  }, [trade.canCompose]);
 
   if (!chat || !chatId) {
     if (!USE_SUPABASE) return null;
@@ -262,12 +272,35 @@ export default function ActiveChatScreen() {
           onSend={send}
           phase={composerPhase}
           disabled={!trade.canCompose}
-          onOpenArsenal={() => setShowArsenal(true)}
+          onOpenAttachments={() => setShowAttachSheet(true)}
         />
       </View>
 
+      <Modal
+        visible={showAttachSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAttachSheet(false)}
+        statusBarTranslucent
+      >
+        {showAttachSheet ? (
+          <ChatAttachmentSheet
+            disabled={!trade.canCompose}
+            onOpenArsenal={() => {
+              setShowAttachSheet(false);
+              setShowArsenal(true);
+            }}
+            onSendImage={(image, caption) => {
+              setShowAttachSheet(false);
+              void sendMessage(chatId, { image, caption });
+            }}
+            onCancel={() => setShowAttachSheet(false)}
+          />
+        ) : null}
+      </Modal>
+
       <Modal visible={showArsenal} transparent animationType="slide" onRequestClose={() => setShowArsenal(false)}>
-        <ArsenalOfferSheet onSelect={sendFormalOffer} onCancel={() => setShowArsenal(false)} />
+        {showArsenal ? <ArsenalOfferSheet onSelect={sendFormalOffer} onCancel={() => setShowArsenal(false)} /> : null}
       </Modal>
 
       <Modal

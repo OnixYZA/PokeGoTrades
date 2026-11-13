@@ -149,7 +149,11 @@ export interface ChatMessage {
   clientId?: string;
   /** `null` for system rows. `role` is derived from this at mapping time: 'me' has no meaning on the other device. */
   senderId?: string | null;
-  kind?: 'text' | 'offer' | 'system';
+  kind?: 'text' | 'offer' | 'image' | 'system';
+  /** Storage path inside `chat-images` (`<chatId>/<senderId>/<clientId>`). */
+  imagePath?: string;
+  /** Optimistic local URI (or resolved preview URI) for an image message. */
+  imageUri?: string;
   /** ISO timestamp; `time` is the display string derived from it. */
   createdAt?: string;
   systemEvent?: string;

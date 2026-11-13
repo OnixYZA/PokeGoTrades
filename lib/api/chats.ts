@@ -85,6 +85,19 @@ export function offerToJson(offer: FormalOffer): Json {
 // `lib/api/creature-ref.ts`, so vitest can cover it; re-exported so the chat screens keep importing it from here.
 export { creatureToOffer } from '@/lib/api/creature-ref';
 
+export const CHAT_IMAGES_BUCKET = 'chat-images';
+export const CHAT_IMAGE_SIGNED_URL_TTL_SECONDS = 3600;
+const CHAT_IMAGE_CACHE_TTL_MS = 50 * 60 * 1000;
+
+export function chatImageStoragePath(chatId: string, senderId: string, clientId: string): string {
+  return `${chatId}/${senderId}/${clientId}`;
+}
+
+export function chatImagePreviewText(caption?: string): string {
+  const trimmed = caption?.trim() ?? '';
+  return trimmed.length > 0 ? `📷 ${trimmed}` : '📷 Photo';
+}
+
 /** `role` has no meaning on the wire ('me' is a different person on the other device), so it is derived here. */
 export function toChatMessage(row: MessageRow, meId: string | null): ChatMessage {
   const role: ChatMessage['role'] = row.sender_id === null ? 'system' : row.sender_id === meId ? 'me' : 'them';
@@ -96,6 +109,7 @@ export function toChatMessage(row: MessageRow, meId: string | null): ChatMessage
     kind: row.kind,
     text: row.body,
     offer: row.kind === 'offer' ? toFormalOffer(row.offer) : undefined,
+    imagePath: row.image_path ?? undefined,
     systemEvent: row.system_event ?? undefined,
     createdAt: row.created_at,
     time: formatMessageTime(row.created_at),
@@ -357,9 +371,10 @@ export async function fetchMyLocks(): Promise<TradeLockRow[]> {
 export interface OutgoingChatMessage {
   /** Idempotency key: `chat_messages` is unique on (sender_id, client_id), so a retry cannot double-post. */
   clientId: string;
-  kind: 'text' | 'offer';
+  kind: 'text' | 'offer' | 'image';
   body?: string;
   offer?: FormalOffer;
+  imagePath?: string;
 }
 
 /** Inserts a message as the caller (`sender_id` defaults to `auth.uid()`; RLS checks the chat is postable). */
@@ -372,11 +387,63 @@ export async function sendChatMessage(chatId: string, message: OutgoingChatMessa
       kind: message.kind,
       body: message.body ?? '',
       offer: message.offer ? offerToJson(message.offer) : null,
+      image_path: message.kind === 'image' ? (message.imagePath ?? null) : null,
     })
     .select()
     .single();
   if (error) throw apiError(error);
   return toChatMessage(data, meId);
+}
+
+/**
+ * Uploads one chat proof/screenshot image to `chat-images/<chatId>/<senderId>/<clientId>`.
+ * Treats 409 / already-exists as idempotent retry success so re-delivering the message never fails on storage.
+ */
+export async function uploadChatImage(input: {
+  chatId: string;
+  senderId: string;
+  clientId: string;
+  data: ArrayBuffer;
+  contentType: string;
+}): Promise<string> {
+  const path = chatImageStoragePath(input.chatId, input.senderId, input.clientId);
+  const { error } = await supabase.storage.from(CHAT_IMAGES_BUCKET).upload(path, input.data, {
+    contentType: input.contentType,
+    upsert: false,
+  });
+  if (error) {
+    const isDuplicate =
+      ('statusCode' in error && String(error.statusCode) === '409') ||
+      /already exists|duplicate/i.test(error.message);
+    if (isDuplicate) return path;
+    throw apiError(error);
+  }
+  return path;
+}
+
+const chatImageUrlCache = new Map<string, { url: string; expiresAt: number }>();
+
+/** Clears the in-memory signed URL cache (used on sign-out / tests). */
+export function clearChatImageUrlCache(): void {
+  chatImageUrlCache.clear();
+}
+
+/** Signs a private `chat-images` path for 60 minutes and caches the URL in memory for 50 minutes. */
+export async function getChatImageUrl(imagePath: string): Promise<string | null> {
+  if (!imagePath) return null;
+  const cached = chatImageUrlCache.get(imagePath);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+
+  const { data, error } = await supabase.storage
+    .from(CHAT_IMAGES_BUCKET)
+    .createSignedUrl(imagePath, CHAT_IMAGE_SIGNED_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) return null;
+
+  chatImageUrlCache.set(imagePath, {
+    url: data.signedUrl,
+    expiresAt: Date.now() + CHAT_IMAGE_CACHE_TTL_MS,
+  });
+  return data.signedUrl;
 }
 
 /** After a duplicate-key error the message already landed; this fetches it so the bubble can reconcile. */
@@ -478,7 +545,9 @@ export function parseMessageEvent(payload: unknown, meId: string | null): ChatMe
   if (!isRecord(payload)) return null;
   const { id, chat_id, kind, body, created_at } = payload;
   if (!isString(id) || !isString(chat_id) || !isString(created_at) || !isString(body)) return null;
-  if (kind !== 'text' && kind !== 'offer' && kind !== 'system') return null;
+  if (kind !== 'text' && kind !== 'offer' && kind !== 'image' && kind !== 'system') return null;
+  const imagePath = nullableString(payload.image_path);
+  if (kind === 'image' && (!imagePath || imagePath.length === 0)) return null;
   return toChatMessage(
     {
       id,
@@ -489,6 +558,7 @@ export function parseMessageEvent(payload: unknown, meId: string | null): ChatMe
       sender_id: nullableString(payload.sender_id),
       client_id: nullableString(payload.client_id),
       offer: (payload.offer ?? null) as Json | null,
+      image_path: imagePath,
       system_event: nullableString(payload.system_event) as MessageRow['system_event'],
     },
     meId
