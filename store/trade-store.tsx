@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { create } from 'zustand';
 
-import { DEFAULT_LOCATION, sanitizeLocationLabel, type LocationName } from '@/constants/locations';
+import { ALL_LOCATIONS, locationKey, sanitizeFilterLocation, sanitizeLocationLabel, type LocationName } from '@/constants/locations';
 import { chats as seedChats, fallbackOffers } from '@/data/chats';
 import { listings as seedListings } from '@/data/listings';
 import { trainer as mockTrainer } from '@/data/trainer';
@@ -220,6 +220,8 @@ interface TradeState {
   // ——— filters / prefs ———
   filterLocation: LocationName;
   setFilterLocation: (loc: LocationName) => void;
+  recentLocations: LocationName[];
+  addRecentLocation: (loc: LocationName) => void;
   /** The trainer's own home location (`profile_private.safe_loc`), or null when unset. Offered as a one-tap row
    *  in the location picker. Mock mode starts from the mock trainer's; live mode loads it in `hydrate`. */
   homeLocation: LocationName | null;
@@ -411,6 +413,71 @@ function beginChatRead(chatId: string): number {
   return seq;
 }
 
+const FILTER_LOCATION_STORAGE_KEY = 'pokegotrades.filterLocation';
+const RECENT_LOCATIONS_STORAGE_KEY = 'pokegotrades.recentLocations';
+const MAX_RECENT_LOCATIONS = 5;
+
+function readStoredFilterLocation(): LocationName {
+  if (typeof localStorage === 'undefined') return ALL_LOCATIONS;
+  try {
+    const raw = localStorage.getItem(FILTER_LOCATION_STORAGE_KEY);
+    if (!raw) return ALL_LOCATIONS;
+    return sanitizeFilterLocation(raw) ?? ALL_LOCATIONS;
+  } catch {
+    return ALL_LOCATIONS;
+  }
+}
+
+function writeStoredFilterLocation(loc: LocationName): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(FILTER_LOCATION_STORAGE_KEY, loc);
+  } catch {
+    /* ignore storage quota / private mode errors */
+  }
+}
+
+function readStoredRecentLocations(): LocationName[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(RECENT_LOCATIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const result: LocationName[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed) {
+      if (typeof item !== 'string') continue;
+      const clean = sanitizeLocationLabel(item);
+      if (!clean) continue;
+      const key = locationKey(clean);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(clean);
+      if (result.length >= MAX_RECENT_LOCATIONS) break;
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredRecentLocations(locs: LocationName[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(RECENT_LOCATIONS_STORAGE_KEY, JSON.stringify(locs));
+  } catch {
+    /* ignore storage quota / private mode errors */
+  }
+}
+
+function prependRecentLocation(existing: LocationName[], loc: string): LocationName[] {
+  const clean = sanitizeLocationLabel(loc);
+  if (!clean) return existing;
+  const key = locationKey(clean);
+  return [clean, ...existing.filter((item) => locationKey(item) !== key)].slice(0, MAX_RECENT_LOCATIONS);
+}
+
 const NOT_SIGNED_IN: ErrorInfo = {
   code: 'no_session',
   message: 'You are signed out. Reopen the app and try again.',
@@ -556,12 +623,34 @@ export const useTradeStore = create<TradeState>((set, get) => {
     handshakeRequest: null,
     clearHandshakeRequest: () => set({ handshakeRequest: null }),
 
-    filterLocation: DEFAULT_LOCATION,
-    // Sanitized here too, not only in the picker: this value becomes the feed's `loc_key` query, so nothing
+    filterLocation: readStoredFilterLocation(),
+    recentLocations: readStoredRecentLocations(),
+    addRecentLocation: (loc) =>
+      set((state) => {
+        const next = prependRecentLocation(state.recentLocations, loc);
+        if (next === state.recentLocations) return state;
+        writeStoredRecentLocations(next);
+        return { recentLocations: next };
+      }),
+    // Sanitized here too, not only in the picker: this value becomes the feed's location query, so nothing
     // coordinate-like may reach it whichever caller sets it. An unusable label keeps the current location.
-    setFilterLocation: (loc) => set((state) => ({ filterLocation: sanitizeLocationLabel(loc) ?? state.filterLocation })),
+    setFilterLocation: (loc) =>
+      set((state) => {
+        const next = sanitizeFilterLocation(loc) ?? state.filterLocation;
+        writeStoredFilterLocation(next);
+        const nextRecent = prependRecentLocation(state.recentLocations, next);
+        if (nextRecent !== state.recentLocations) writeStoredRecentLocations(nextRecent);
+        return { filterLocation: next, recentLocations: nextRecent };
+      }),
     homeLocation: USE_SUPABASE ? null : sanitizeLocationLabel(mockTrainer.safeLoc),
-    setHomeLocation: (loc) => set({ homeLocation: loc }),
+    setHomeLocation: (loc) =>
+      set((state) => {
+        const clean = loc === null ? null : sanitizeLocationLabel(loc);
+        if (!clean) return { homeLocation: null };
+        const nextRecent = prependRecentLocation(state.recentLocations, clean);
+        if (nextRecent !== state.recentLocations) writeStoredRecentLocations(nextRecent);
+        return { homeLocation: clean, recentLocations: nextRecent };
+      }),
     saveHomeLocation: async (loc) => {
       const value = loc === null ? null : sanitizeLocationLabel(loc);
       if (loc !== null && value === null) {
@@ -569,12 +658,26 @@ export const useTradeStore = create<TradeState>((set, get) => {
         toast(error.message);
         return { ok: false, error };
       }
+      const applyHome = (state: TradeState): Partial<TradeState> => {
+        const nextRecent = value ? prependRecentLocation(state.recentLocations, value) : state.recentLocations;
+        if (nextRecent !== state.recentLocations) writeStoredRecentLocations(nextRecent);
+        const shouldSyncFilter =
+          state.homeLocation !== null &&
+          value !== null &&
+          locationKey(state.filterLocation) === locationKey(state.homeLocation);
+        if (shouldSyncFilter) writeStoredFilterLocation(value);
+        return {
+          homeLocation: value,
+          recentLocations: nextRecent,
+          ...(shouldSyncFilter ? { filterLocation: value } : {}),
+        };
+      };
       if (!USE_SUPABASE || !get().me) {
-        set({ homeLocation: value });
+        set(applyHome);
         return ok(undefined);
       }
       const result = await attempt(() => saveHomeLocationApi(value));
-      if (result.ok) set({ homeLocation: value });
+      if (result.ok) set(applyHome);
       return result;
     },
     friendship: 'Great',

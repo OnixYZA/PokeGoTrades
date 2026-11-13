@@ -1,87 +1,33 @@
 /**
- * Flexible place labels and the location privacy model (decision D3, revised for Sprint 2.1).
+ * Flexible place labels and the location privacy model (decision D3, revised for Sprint 2.1 + API-backed search).
  *
  * PRIVACY MODEL
  *  - A location is a free-text PLACE LABEL ("Adyar", "Indiranagar, Bengaluru", "Phoenix Mall gate"), never a
- *    coordinate. The only way to obtain a `LocationName` is `sanitizeLocationLabel`, which canonicalises known
- *    places, keeps custom labels as typed, snaps a coordinate pair to the nearest KNOWN locality and REJECTS
- *    anything else that looks like a coordinate (plus codes, degree notation, geo: URIs, long decimals).
- *  - A trainer's exact position never leaves the device. A GPS fix is snapped HERE, on-device, to the nearest
- *    known locality (`snapToLocality`) and only that name is used. We never snap to a grid and never build a
- *    label out of numbers: a grid cell is still a coordinate.
- *  - The database enforces the same rule: `listings.loc` and `profile_private.safe_loc` carry CHECK constraints
- *    that refuse coordinate-like text even from a modified client (migration 20261112000300_flexible_locations.sql).
+ *    coordinate. The only ways to obtain a `LocationName` are `sanitizeLocationLabel` / `customLocationChoice` /
+ *    `formatPlaceLabel`, which normalize city aliases, keep custom labels as typed, and UNCONDITIONALLY REJECT
+ *    anything that looks like a coordinate (decimal pairs, plus codes, degree notation, geo: URIs, long decimals)
+ *    as well as the reserved filter value `'All locations'`.
+ *  - A trainer's exact position never leaves the device. Any GPS fix is coarsened HERE, on-device (`coarsenCoords`,
+ *    rounded to 2 decimal places / ~1.1 km) before any network reverse-geocode request is ever issued.
+ *  - The database enforces the same coordinate rule: `listings.loc` and `profile_private.safe_loc` carry CHECK
+ *    constraints that refuse coordinate-like text even from a modified client (migration 20261112000300).
  *    `looksLikeCoordinates` below is the client mirror of those regexes; keep them in step.
  *  - Distances are never shown. The UI says "<Place> · ~1–2 km vicinity" and nothing finer.
  *  - Functions here never store, log or return the input coordinates.
- *
- * `AREAS` is the original six Chennai presets and must equal the `public.areas` seed in the same order
- * (`sort_order`); constants/locations.test.ts parses the migration and fails if they drift. That table is now a
- * legacy preset list: nothing references it any more.
  *
  * Zero dependencies (relative imports only, no React Native, no network): loadable from vitest and from React
  * Native alike.
  */
 
-/** The original Chennai presets, pinned to the `public.areas` seed. */
-export const AREAS = ['Adyar', 'East Tambaram', 'Velachery', 'T. Nagar', 'Anna Nagar', 'Besant Nagar'] as const;
-
 /**
- * A place label. Only ever produced by `sanitizeLocationLabel` (or `customLocationChoice` / `snapToLocality`,
- * which share its rules), so a value of this type is never coordinate-like. It is a plain string on purpose:
- * custom labels are free text.
+ * A place label. Only ever produced by `sanitizeLocationLabel` / `customLocationChoice` / `formatPlaceLabel`
+ * (or `sanitizeFilterLocation` when `'All locations'` is allowed), so a value of this type is never
+ * coordinate-like. It is a plain string on purpose: custom labels are free text.
  */
 export type LocationName = string;
 
-export interface Locality {
-  name: string;
-  lat: number;
-  lng: number;
-  /** Alternative spellings / names that resolve to `name` (matched case-insensitively). */
-  aliases?: readonly string[];
-}
-
-/**
- * APPROXIMATE locality centres, hand-placed from general map knowledge. NOT surveyed data and not boundaries:
- * they only need to be good enough to snap a GPS fix to the nearest known town. The six `AREAS` come first
- * with their original coordinates.
- */
-export const KNOWN_LOCALITIES: readonly Locality[] = [
-  { name: 'Adyar', lat: 13.0012, lng: 80.2565 },
-  { name: 'East Tambaram', lat: 12.9249, lng: 80.1 },
-  { name: 'Velachery', lat: 12.9815, lng: 80.218 },
-  { name: 'T. Nagar', lat: 13.0418, lng: 80.2341 },
-  { name: 'Anna Nagar', lat: 13.085, lng: 80.2101 },
-  { name: 'Besant Nagar', lat: 13.0002, lng: 80.2668 },
-  { name: 'Tambaram', lat: 12.9249, lng: 80.1275 },
-  { name: 'Chromepet', lat: 12.9516, lng: 80.1462 },
-  { name: 'Guindy', lat: 13.0067, lng: 80.2206 },
-  { name: 'Mylapore', lat: 13.0368, lng: 80.2676 },
-  { name: 'Nungambakkam', lat: 13.0569, lng: 80.2425 },
-  { name: 'Porur', lat: 13.0382, lng: 80.1565 },
-  { name: 'Sholinganallur', lat: 12.901, lng: 80.2279, aliases: ['OMR'] },
-  { name: 'Perambur', lat: 13.1167, lng: 80.2333 },
-  { name: 'Thiruvanmiyur', lat: 12.9830, lng: 80.2594 },
-  { name: 'Kilpauk', lat: 13.0836, lng: 80.2412 },
-  { name: 'Puducherry', lat: 11.9416, lng: 79.8083, aliases: ['Pondicherry', 'Pondy'] },
-  { name: 'Bengaluru', lat: 12.9716, lng: 77.5946, aliases: ['Bangalore'] },
-  { name: 'Indiranagar', lat: 12.9784, lng: 77.6408 },
-  { name: 'Koramangala', lat: 12.9352, lng: 77.6245 },
-  { name: 'Whitefield', lat: 12.9698, lng: 77.75 },
-  { name: 'Coimbatore', lat: 11.0168, lng: 76.9558 },
-  { name: 'Madurai', lat: 9.9252, lng: 78.1198 },
-  { name: 'Tiruchirappalli', lat: 10.7905, lng: 78.7047, aliases: ['Trichy'] },
-  { name: 'Vellore', lat: 12.9165, lng: 79.1325 },
-  { name: 'Hyderabad', lat: 17.385, lng: 78.4867 },
-  { name: 'Mumbai', lat: 19.076, lng: 72.8777 },
-  { name: 'Delhi', lat: 28.6139, lng: 77.209, aliases: ['New Delhi'] },
-  { name: 'Kolkata', lat: 22.5726, lng: 88.3639 },
-  { name: 'Pune', lat: 18.5204, lng: 73.8567 },
-  { name: 'Kochi', lat: 9.9312, lng: 76.2673 },
-];
-
-/** The feed's initial location, and the fallback when nothing else is known. */
-export const DEFAULT_LOCATION: LocationName = 'Adyar';
+/** Sentinel filter value meaning "show listings from every location". Never stored on a listing or home profile. */
+export const ALL_LOCATIONS = 'All locations' as const;
 
 /** Longest custom label a listing may carry. Mirrors `listings_loc_is_place_label` (migration 20261112000300). */
 export const LOCATION_MAX_LENGTH = 60;
@@ -91,37 +37,25 @@ export const HOME_LOCATION_MAX_LENGTH = 80;
 
 export const VICINITY_RADIUS_LABEL = '~1–2 km vicinity';
 
-/** A coordinate farther than this from every known locality has no label (it is not "near" anything we know). */
-export const SNAP_CUTOFF_KM = 25;
-
-const EARTH_RADIUS_KM = 6371;
-
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const rad = Math.PI / 180;
-  const dLat = (lat2 - lat1) * rad;
-  const dLng = (lng2 - lng1) * rad;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
-  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(a)));
+/** True when `loc` is the reserved "All locations" filter sentinel (case-insensitive, trimmed). */
+export function isAllLocations(loc: string | null | undefined): boolean {
+  if (typeof loc !== 'string') return false;
+  return loc.replace(/\s+/g, ' ').trim().toLowerCase() === 'all locations';
 }
 
 /**
- * Nearest KNOWN locality to a coordinate, or null for non-finite / out-of-range input or a point farther than
- * `SNAP_CUTOFF_KM` from every locality. Never returns or logs the input.
+ * Validates and coarsens raw GPS coordinates on-device to 2 decimal places (~1.1 km) before any network
+ * reverse-geocode request. Returns null for non-number, non-finite, or out-of-range coordinates.
  */
-export function snapToLocality(lat: number, lng: number): LocationName | null {
+export function coarsenCoords(lat: number, lng: number): { lat: number; lng: number } | null {
   if (typeof lat !== 'number' || typeof lng !== 'number') return null;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-  let best: string | null = null;
-  let bestKm = Infinity;
-  for (const loc of KNOWN_LOCALITIES) {
-    const km = haversineKm(lat, lng, loc.lat, loc.lng);
-    if (km < bestKm) {
-      bestKm = km;
-      best = loc.name;
-    }
-  }
-  return bestKm <= SNAP_CUTOFF_KM ? best : null;
+  const round2 = (n: number): number => {
+    const rounded = Math.round(n * 100) / 100;
+    return rounded === 0 ? 0 : rounded;
+  };
+  return { lat: round2(lat), lng: round2(lng) };
 }
 
 /**
@@ -154,7 +88,6 @@ export function looksLikeCoordinates(text: string): boolean {
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
-const DECIMAL_PAIR_CAPTURE = /(-?\d{1,3}\.\d+)\s*[,;/ ]\s*(-?\d{1,3}\.\d+)/;
 
 /**
  * The app's OWN display suffix (" · ~500m radius" from older clients, " · ~1–2 km vicinity" from
@@ -163,51 +96,66 @@ const DECIMAL_PAIR_CAPTURE = /(-?\d{1,3}\.\d+)\s*[,;/ ]\s*(-?\d{1,3}\.\d+)/;
  */
 const VICINITY_SUFFIX = /\s*·\s*~?\s*\d+(?:\s*[–-]\s*\d+)?\s*(?:m|km)\b.*$/i;
 
+const CITY_ALIASES: Readonly<Record<string, string>> = {
+  bangalore: 'Bengaluru',
+  'bengaluru urban': 'Bengaluru',
+  pondicherry: 'Puducherry',
+  pondy: 'Puducherry',
+  trichy: 'Tiruchirappalli',
+  gurgaon: 'Gurugram',
+  'new delhi': 'Delhi',
+  madras: 'Chennai',
+  bombay: 'Mumbai',
+  calcutta: 'Kolkata',
+  cochin: 'Kochi',
+  mysore: 'Mysuru',
+  mangalore: 'Mangaluru',
+  trivandrum: 'Thiruvananthapuram',
+  vizag: 'Visakhapatnam',
+};
+
+function normalizeCityAlias(segment: string): string {
+  return CITY_ALIASES[segment.toLowerCase()] ?? segment;
+}
+
 function cleanLabel(input: string): string {
-  return input
+  const collapsed = input
     .replace(/\s+/g, ' ')
     .replace(CONTROL_CHARS, '')
     .trim()
     .replace(VICINITY_SUFFIX, '')
     .trim();
-}
-
-function findKnown(cleaned: string): string | null {
-  const lower = cleaned.toLowerCase();
-  for (const loc of KNOWN_LOCALITIES) {
-    if (loc.name.toLowerCase() === lower) return loc.name;
-    if (loc.aliases?.some((a) => a.toLowerCase() === lower)) return loc.name;
-  }
-  return null;
+  if (collapsed === '') return '';
+  if (!collapsed.includes(',')) return normalizeCityAlias(collapsed);
+  // Leave coordinate-like strings intact so `looksLikeCoordinates` always detects them reliably.
+  if (looksLikeCoordinates(collapsed)) return collapsed;
+  return collapsed
+    .split(',')
+    .map((part) => normalizeCityAlias(part.trim()))
+    .filter(Boolean)
+    .join(', ');
 }
 
 export type CustomLocationChoice =
   | { ok: true; label: LocationName }
-  | { ok: false; reason: 'coordinates' | 'too_long' | 'empty' };
+  | { ok: false; reason: 'coordinates' | 'too_long' | 'empty' | 'reserved' };
 
 /** Applies the label rules to one string and reports why it failed. The single source of truth for them. */
 export function customLocationChoice(query: string): CustomLocationChoice {
   if (typeof query !== 'string') return { ok: false, reason: 'empty' };
   const cleaned = cleanLabel(query);
   if (cleaned === '') return { ok: false, reason: 'empty' };
-  const known = findKnown(cleaned);
-  if (known) return { ok: true, label: known };
-  const pair = DECIMAL_PAIR_CAPTURE.exec(cleaned);
-  if (pair) {
-    const snapped = snapToLocality(Number(pair[1]), Number(pair[2]));
-    return snapped ? { ok: true, label: snapped } : { ok: false, reason: 'coordinates' };
-  }
+  if (isAllLocations(cleaned)) return { ok: false, reason: 'reserved' };
   if (looksLikeCoordinates(cleaned)) return { ok: false, reason: 'coordinates' };
   if (cleaned.length > LOCATION_MAX_LENGTH) return { ok: false, reason: 'too_long' };
   return { ok: true, label: cleaned };
 }
 
 /**
- * Coerces any location-ish string to a place label: a known place (case-insensitive name or alias) becomes its
- * canonical spelling, a custom label is kept as typed (trimmed, whitespace collapsed, control characters
- * removed, at most 60 chars), a decimal coordinate pair is snapped to the nearest KNOWN locality, and any other
- * coordinate-like text is rejected. A legacy " · ~500m radius" display suffix is stripped. On failure it falls
- * back to `fallback`, sanitized by the same rules without a further fallback. Never returns coordinate-like text.
+ * Coerces a place-label string: normalizes known city aliases, collapses whitespace, strips control
+ * characters and legacy vicinity suffixes, caps at `LOCATION_MAX_LENGTH` (60), and unconditionally rejects
+ * coordinate-like text as well as the reserved `'All locations'` sentinel. On failure it falls back to
+ * `fallback`, sanitized by the same rules without recursing. Never returns coordinate-like text.
  */
 export function sanitizeLocationLabel(input: string, fallback?: string): LocationName | null {
   const first = customLocationChoice(input);
@@ -218,22 +166,125 @@ export function sanitizeLocationLabel(input: string, fallback?: string): Locatio
 }
 
 /**
- * Place suggestions for a query: with no query, the original presets followed by a few cities; otherwise
- * case-insensitive prefix matches on a name or alias first, then substring matches, as canonical names.
+ * Sanitizes a feed-filter location: accepts `'All locations'` (normalized to `ALL_LOCATIONS`) or delegates
+ * to `sanitizeLocationLabel`. Falls back to `fallback` under the same rules if `input` is invalid.
  */
-export function suggestLocalities(query: string, limit = 8): LocationName[] {
-  const q = (typeof query === 'string' ? query : '').replace(/\s+/g, ' ').trim().toLowerCase();
-  if (q === '') {
-    return [...AREAS, 'Puducherry', 'Bengaluru', 'Coimbatore', 'Madurai'].slice(0, limit);
+export function sanitizeFilterLocation(input: string, fallback?: string): LocationName | null {
+  if (typeof input === 'string') {
+    const cleaned = cleanLabel(input);
+    if (isAllLocations(cleaned)) return ALL_LOCATIONS;
   }
-  const prefix: string[] = [];
-  const contains: string[] = [];
-  for (const loc of KNOWN_LOCALITIES) {
-    const names = [loc.name, ...(loc.aliases ?? [])].map((n) => n.toLowerCase());
-    if (names.some((n) => n.startsWith(q))) prefix.push(loc.name);
-    else if (names.some((n) => n.includes(q))) contains.push(loc.name);
+  const direct = sanitizeLocationLabel(input);
+  if (direct !== null) return direct;
+  if (fallback === undefined) return null;
+  if (typeof fallback === 'string') {
+    const cleanedFallback = cleanLabel(fallback);
+    if (isAllLocations(cleanedFallback)) return ALL_LOCATIONS;
   }
-  return [...new Set([...prefix, ...contains])].slice(0, limit);
+  return sanitizeLocationLabel(fallback);
+}
+
+export interface PlaceComponents {
+  name?: string | null;
+  locality?: string | null;
+  district?: string | null;
+  city?: string | null;
+  county?: string | null;
+  state?: string | null;
+}
+
+function cleanComponent(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const cleaned = cleanLabel(value);
+  if (cleaned === '' || isAllLocations(cleaned) || looksLikeCoordinates(cleaned)) return null;
+  return cleaned;
+}
+
+/**
+ * Formats structured geocoder components (Photon / BigDataCloud) into canonical `'Neighbourhood, City'` or
+ * `'City'`, deduplicating when primary equals city, normalizing aliases, falling back cleanly if the combined
+ * label exceeds `LOCATION_MAX_LENGTH`, and always passing through `sanitizeLocationLabel`.
+ */
+export function formatPlaceLabel(parts: PlaceComponents): LocationName | null {
+  const primary = cleanComponent(parts.name) ?? cleanComponent(parts.locality) ?? cleanComponent(parts.district);
+  const city = cleanComponent(parts.city) ?? cleanComponent(parts.county);
+  const state = cleanComponent(parts.state);
+
+  if (primary && city) {
+    if (locationKey(primary) === locationKey(city)) {
+      // Prefer whichever spelling carries casing (e.g. 'Chennai' over 'chennai').
+      const preferred = city === city.toLowerCase() && primary !== primary.toLowerCase() ? primary : city;
+      return sanitizeLocationLabel(preferred);
+    }
+    const combined = `${primary}, ${city}`;
+    return sanitizeLocationLabel(combined) ?? sanitizeLocationLabel(primary) ?? sanitizeLocationLabel(city);
+  }
+
+  if (primary) {
+    return sanitizeLocationLabel(primary);
+  }
+
+  if (city) {
+    return sanitizeLocationLabel(city);
+  }
+
+  if (state) {
+    return sanitizeLocationLabel(state);
+  }
+
+  return null;
+}
+
+/**
+ * Extracts the sanitized city scope from a comma-separated place label (e.g. `'Indiranagar, Bengaluru'` ->
+ * `'Bengaluru'`). Returns `null` for single-segment labels (`'Bengaluru'`, `'Adyar'`) and `'All locations'`.
+ */
+export function extractCity(label: LocationName): LocationName | null {
+  if (typeof label !== 'string' || isAllLocations(label)) return null;
+  const idx = label.lastIndexOf(',');
+  if (idx === -1) return null;
+  return sanitizeLocationLabel(label.slice(idx + 1));
+}
+
+/**
+ * Ranks how closely `listingLoc` matches `filterLoc`:
+ * - `0`: `ALL_LOCATIONS`, exact match, exact neighbourhood match (e.g. filter `'Indiranagar, Bengaluru'` matches
+ *        listing `'Indiranagar'`), or city-wide match when `filterLoc` itself is a city (e.g. `'Bengaluru'`
+ *        matches `'Koramangala, Bengaluru'`).
+ * - `1`: city-wide / sibling-neighbourhood match when `filterLoc` names a neighbourhood (e.g. filter
+ *        `'Indiranagar, Bengaluru'` matches listing `'Bengaluru'` or `'Koramangala, Bengaluru'`).
+ * - `2`: no match.
+ */
+export function locationMatchRank(listingLoc: LocationName, filterLoc: LocationName): 0 | 1 | 2 {
+  if (isAllLocations(filterLoc)) return 0;
+
+  const listing = sanitizeLocationLabel(listingLoc);
+  const filter = sanitizeLocationLabel(filterLoc);
+  if (!listing || !filter) return 2;
+
+  if (locationKey(listing) === locationKey(filter)) return 0;
+
+  const filterCity = extractCity(filter);
+  const listingCity = extractCity(listing);
+
+  if (filterCity) {
+    const filterNeighbourhood = filter.slice(0, filter.lastIndexOf(',')).trim();
+    if (!listingCity && filterNeighbourhood && locationKey(listing) === locationKey(filterNeighbourhood)) {
+      return 0;
+    }
+    if (locationKey(listing) === locationKey(filterCity)) return 1;
+    if (listingCity && locationKey(listingCity) === locationKey(filterCity)) return 1;
+    return 2;
+  }
+
+  if (listingCity && locationKey(listingCity) === locationKey(filter)) return 0;
+
+  return 2;
+}
+
+/** True when `listingLoc` passes `filterLoc` (`locationMatchRank < 2`). */
+export function matchesLocationFilter(listingLoc: LocationName, filterLoc: LocationName): boolean {
+  return locationMatchRank(listingLoc, filterLoc) < 2;
 }
 
 /** Case-insensitive match key. Mirrors the DB's `listings.loc_key` generated column (`lower(loc)`). */
@@ -242,12 +293,13 @@ export function locationKey(label: LocationName): string {
 }
 
 export function formatVicinityLabel(label: LocationName): string {
+  if (isAllLocations(label)) return ALL_LOCATIONS;
   return `${label} · ${VICINITY_RADIUS_LABEL}`;
 }
 
 /**
- * Shared bad-input fixtures: each must be refused (or snapped to a known name) by `sanitizeLocationLabel` and
- * refused by the database CHECK constraints. Keep in sync with supabase/tests/flexible_locations.test.sql.
+ * Shared bad-input fixtures: each must be refused by `sanitizeLocationLabel` and refused by the database CHECK
+ * constraints. Keep in sync with supabase/tests/flexible_locations.test.sql.
  */
 export const COORDINATE_LIKE_SAMPLES: readonly string[] = [
   '13.0012, 80.2565',

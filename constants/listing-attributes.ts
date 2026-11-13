@@ -25,6 +25,7 @@
  *             the dex) never matches an include and is never dropped by an exclude, mirroring a NULL enum.
  */
 // Type-only: the registry needs the `PokemonType` vocabulary at compile time but no dex data at runtime.
+import type { BackgroundHint, Listing } from '@/data/types';
 import type { PokemonType } from './pokedex';
 
 // ——— enums (mirror the DB enums in lib/database.types.ts exactly — see the assertion in lib/api/listings.ts) ———
@@ -56,6 +57,36 @@ export const LISTING_TAGS = [
   'Level 1',
 ] as const;
 export type ListingTag = (typeof LISTING_TAGS)[number];
+
+export const SPECIAL_BACKGROUND_LABEL = 'Special Background' as const;
+
+export function hasSpecialBackground(bg: BackgroundHint): boolean {
+  return bg === 'legacy';
+}
+
+export function backgroundBadgeLabel(bg: BackgroundHint): typeof SPECIAL_BACKGROUND_LABEL | null {
+  return hasSpecialBackground(bg) ? SPECIAL_BACKGROUND_LABEL : null;
+}
+
+export function listingBackgroundFromToggle(specialBackground: boolean): Exclude<BackgroundHint, 'shadow'> {
+  return specialBackground ? 'legacy' : 'meta';
+}
+
+/** Purified / Costume / a verified size, plus every seller tag ("Level 1" included) — one flat list so
+ *  the "+N" overflow count and the wrap behavior are consistent regardless of which kind of badge a
+ *  listing happens to carry. */
+export function attributeBadges(
+  listing: Pick<Listing, 'purified' | 'costume' | 'tags'> & { sizeClass?: Listing['sizeClass'] },
+): { key: string; label: string }[] {
+  const badges: { key: string; label: string }[] = [];
+  if (listing.purified) badges.push({ key: 'purified', label: 'Purified' });
+  if (listing.costume) badges.push({ key: 'costume', label: 'Costume' });
+  // No "✓": since migration 20261103000200 a seller may declare the size themselves, and nothing records
+  // whether a given size was declared or read off an appraisal proof, so a check mark would claim more than we know.
+  if (listing.sizeClass) badges.push({ key: 'size', label: listing.sizeClass });
+  for (const tag of listing.tags) badges.push({ key: `tag:${tag}`, label: tag });
+  return badges;
+}
 
 // ——— display labels ———
 

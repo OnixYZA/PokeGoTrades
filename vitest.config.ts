@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 // Minimal config for the pure-function unit tests under data/, store/, constants/, lib/ and scripts/.
@@ -7,6 +8,11 @@ import { defineConfig } from 'vitest/config';
 // their way. `lib/**` and `scripts/**` only pick up the Node-safe, relative-import-only modules (see
 // R1 in the sprite-pipeline agent instructions) — nothing here needs react-native or expo-*.
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname),
+    },
+  },
   test: {
     include: ['data/**/*.test.ts', 'store/**/*.test.ts', 'constants/**/*.test.ts', 'lib/**/*.test.ts', 'scripts/**/*.test.ts'],
   },

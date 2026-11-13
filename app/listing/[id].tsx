@@ -25,7 +25,7 @@ import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Sprite } from '@/components/ui/Sprite';
-import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
+import { BackgroundBadge, hasSpecialBackground } from '@/components/ui/BackgroundBadge';
 import { StatTile } from '@/components/ui/StatTile';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { TypeBadge } from '@/components/ui/TypeBadge';
@@ -187,6 +187,12 @@ export default function ListingDetailScreen() {
           ? 'Traded'
           : 'Withdraw listing';
   const canWithdraw = !withdrawing && refusal === null;
+  const hasHeroRowBadges =
+    Boolean(listing.lucky) ||
+    Boolean(listing.isGigantamax) ||
+    Boolean(listing.isDynamax) ||
+    hasSpecialBackground(listing.bg) ||
+    Boolean(listing.untradable);
 
   const handleWithdraw = async () => {
     setConfirmWithdraw(false);
@@ -262,19 +268,21 @@ export default function ListingDetailScreen() {
                 </Text>
               </View>
               <TypeBadge creature={listing} style={{ marginTop: 8 }} />
-              <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
-                {listing.lucky && <LuckyBadge />}
-                {listing.isGigantamax && <GigantamaxBadge />}
-                {listing.isDynamax && <DynamaxBadge />}
-                <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
-                {listing.untradable && (
-                  <View className="rounded-[6px] border px-2 py-[3px]" style={{ backgroundColor: 'rgba(255,92,138,0.15)', borderColor: 'rgba(255,92,138,0.3)' }}>
-                    <Text className="font-display-semi uppercase" style={{ fontSize: 10, letterSpacing: 0.8, color: '#ff5c8a' }}>
-                      Untradable
-                    </Text>
-                  </View>
-                )}
-              </View>
+              {hasHeroRowBadges && (
+                <View className="mt-2 flex-row flex-wrap gap-1.5 items-center">
+                  {listing.lucky && <LuckyBadge />}
+                  {listing.isGigantamax && <GigantamaxBadge />}
+                  {listing.isDynamax && <DynamaxBadge />}
+                  <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
+                  {listing.untradable && (
+                    <View className="rounded-[6px] border px-2 py-[3px]" style={{ backgroundColor: 'rgba(255,92,138,0.15)', borderColor: 'rgba(255,92,138,0.3)' }}>
+                      <Text className="font-display-semi uppercase" style={{ fontSize: 10, letterSpacing: 0.8, color: '#ff5c8a' }}>
+                        Untradable
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
           </View>
 

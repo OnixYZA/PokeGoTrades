@@ -47,6 +47,7 @@ import {
   TRADE_TIMELINES,
   TRADE_TIMELINE_LABELS,
   PROOF_KIND_LABELS,
+  listingBackgroundFromToggle,
   type ListingTag,
   type Pokeball,
   type PokemonSize,
@@ -61,7 +62,7 @@ import {
   type NewListingInput,
   type ProofKind,
 } from '@/lib/api/listings';
-import { VICINITY_RADIUS_LABEL, type LocationName } from '@/constants/locations';
+import { isAllLocations, sanitizeLocationLabel, VICINITY_RADIUS_LABEL, type LocationName } from '@/constants/locations';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
@@ -131,6 +132,7 @@ interface CreateListingModalProps {
 export function CreateListingModal({ onClose, onSave, onPublish }: CreateListingModalProps) {
   const insets = useSafeAreaInsets();
   const filterLocation = useTradeStore((s) => s.filterLocation);
+  const homeLocation = useTradeStore((s) => s.homeLocation);
 
   const [step, setStep] = useState<Step>('form');
   const [selectedCreature, setSelectedCreature] = useState<PokedexEntry | null>(null);
@@ -140,7 +142,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [formCode, setFormCode] = useState<string | null>(null);
   const [shiny, setShiny] = useState(true);
   const [purified, setPurified] = useState(false);
-  const [specialBackground, setSpecialBackground] = useState(true);
+  const [specialBackground, setSpecialBackground] = useState(false);
   const [costume, setCostume] = useState(false);
   const [willTravel, setWillTravel] = useState(false);
   // The listing's Max Battle form as ONE value, so Dynamax and Gigantamax are mutually exclusive by construction
@@ -149,9 +151,21 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   // There is no Dynamax eligibility list in the pinned sources (PokeAPI / the PokeMiners game master), so every
   // species may be marked Dynamax and that stays unchecked.
   const [maxForm, setMaxForm] = useState<MaxForm>('standard');
-  // The listing's location: starts at the feed's current one. It is a place label produced by
-  // `sanitizeLocationLabel` (via the picker), never a coordinate; exact GPS is never read, stored or shared.
-  const [area, setArea] = useState<LocationName>(() => filterLocation);
+  // The listing's location: starts from the active feed filter (unless 'All locations'), or the trainer's
+  // home location, or null until picked. Never defaults to a hardcoded city/neighbourhood or 'All locations'.
+  const [area, setArea] = useState<LocationName | null>(
+    () =>
+      (!isAllLocations(filterLocation) ? sanitizeLocationLabel(filterLocation) : null) ??
+      (homeLocation ? sanitizeLocationLabel(homeLocation) : null) ??
+      null,
+  );
+
+  useEffect(() => {
+    if (area === null && homeLocation) {
+      const sanitized = sanitizeLocationLabel(homeLocation);
+      if (sanitized) setArea(sanitized);
+    }
+  }, [area, homeLocation]);
   const [pokeball, setPokeball] = useState<Pokeball | null>(null);
   // Seller-declared; null leaves it to an appraisal screenshot to tag.
   const [sizeClass, setSizeClass] = useState<PokemonSize | null>(null);
@@ -206,10 +220,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   /** Exactly what gets inserted: only the fields a trainer supplies (see `NewListingInput`). */
   const cpResult = useMemo(() => parseCp(cpText), [cpText]);
   const draft = useMemo<NewListingInput | null>(() => {
-    // CP is required: with no creature or no valid CP there is no draft, so nothing downstream (preview,
-    // publish) can run without them.
-    if (!selectedCreature || !cpResult.ok) return null;
-    const bg: NewListingInput['bg'] = shiny ? 'shiny' : specialBackground ? 'legacy' : 'meta';
+    // Creature, valid CP, and a concrete location are all required before preview/publish.
+    const validArea = area && !isAllLocations(area) ? sanitizeLocationLabel(area) : null;
+    if (!selectedCreature || !cpResult.ok || !validArea) return null;
+    const bg: NewListingInput['bg'] = listingBackgroundFromToggle(specialBackground);
     const tradeType: TradeType = shiny ? 'Unregistered (Shiny/Legendary)' : 'Unregistered (Standard)';
     // `wanted` is already shaped as `CreatureRef[]` (see `handlePickPokemon` below), so no re-mapping.
     const looking: CreatureRef[] = wanted;
@@ -227,7 +241,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       shiny,
       accent: '#fbbf24',
       bg,
-      loc: area,
+      loc: validArea,
       tradeType,
       iv: knowsIv ? `${ivAtk}/${ivDef}/${ivSta}` : 'Unrated',
       looking,
@@ -921,7 +935,7 @@ function AttributesCard({
           icon={<ImageIcon size={18} color={C.pink} strokeWidth={2.2} />}
           tint="rgba(236,72,153,0.12)"
           title="Special Background"
-          description="Legacy Move or event background art"
+          description="Location card or event background art"
           on={specialBackground}
           onGradient={MODAL_SURFACE.togglePink}
           onPress={onToggleSpecialBackground}
@@ -1180,31 +1194,42 @@ function PokeballOption({
 
 /** The seller picks the listing's location in the shared `LocationPickerSheet` (suggestions, free text, or the
  *  web-only coarse fix snapped to a known town). Buyers only ever see this place name plus the vicinity radius. */
-function AreaPicker({ area, onSelect }: { area: LocationName; onSelect: (area: LocationName) => void }) {
+function AreaPicker({ area, onSelect }: { area: LocationName | null; onSelect: (area: LocationName) => void }) {
   const [open, setOpen] = useState(false);
   const homeLocation = useTradeStore((s) => s.homeLocation);
 
   return (
     <View>
-      <Text className="font-mono mb-1.5" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
-        LOCATION
-      </Text>
+      <View className="mb-1.5 flex-row items-center justify-between">
+        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
+          LOCATION
+        </Text>
+        <Text className="font-mono" style={{ fontSize: 10, color: C.pink, letterSpacing: 1 }}>
+          REQUIRED
+        </Text>
+      </View>
       <Pressable
         onPress={() => setOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={`Listing location: ${area}`}
+        accessibilityLabel={area ? `Listing location: ${area}` : 'Listing location: Select neighbourhood or city'}
         accessibilityHint="Opens a picker to search or type a location"
         accessibilityState={{ expanded: open }}
         className="flex-row items-center gap-2 rounded-[14px] border px-4 py-3.5 active:opacity-80"
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
-        <MapPin size={14} color={C.textMuted} />
-        <Text className="flex-1" numberOfLines={1} style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
-          {area}
+        <MapPin size={14} color={area ? C.textMuted : C.textDim} />
+        <Text
+          className="flex-1"
+          numberOfLines={1}
+          style={{ fontSize: 14, fontWeight: '600', color: area ? C.textPrimary : C.textDim }}
+        >
+          {area ?? 'Select neighbourhood or city'}
         </Text>
-        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted }}>
-          {VICINITY_RADIUS_LABEL}
-        </Text>
+        {area ? (
+          <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted }}>
+            {VICINITY_RADIUS_LABEL}
+          </Text>
+        ) : null}
         <ChevronDown size={16} color={C.textMuted} />
       </Pressable>
       <Text className="mt-1.5" style={{ fontSize: 11, lineHeight: 16, color: C.textMuted }}>
@@ -1403,7 +1428,7 @@ function LogisticsSection({
   tradeTimeline,
   onSelectTimeline,
 }: {
-  area: LocationName;
+  area: LocationName | null;
   onSelectArea: (area: LocationName) => void;
   pokeball: Pokeball | null;
   onSelectPokeball: (pokeball: Pokeball | null) => void;

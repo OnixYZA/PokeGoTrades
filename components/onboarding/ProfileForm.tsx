@@ -16,6 +16,7 @@ import {
   type MyProfile,
   type Team,
 } from '@/lib/api/profile';
+import { useTradeStore } from '@/store/trade-store';
 
 const INPUT_CLASS = 'rounded-[14px] border border-border bg-bg-card px-4 py-[14px]';
 
@@ -59,6 +60,7 @@ export function ProfileForm({ initial, prefill, onSaved }: ProfileFormProps) {
     setError(null);
     try {
       await saveProfile({ handle, team, friendCode, ...(homeLocation ? { homeLocation } : {}) });
+      useTradeStore.getState().setHomeLocation(homeLocation);
       onSaved();
     } catch (reason) {
       setError(reason instanceof ProfileError ? reason : new ProfileError('form', 'Something went wrong. Try again.'));

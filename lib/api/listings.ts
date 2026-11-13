@@ -1,6 +1,13 @@
 import type { QueryData } from '@supabase/supabase-js';
 
-import { locationKey, sanitizeLocationLabel, type LocationName } from '@/constants/locations';
+import {
+  extractCity,
+  isAllLocations,
+  locationKey,
+  locationMatchRank,
+  sanitizeLocationLabel,
+  type LocationName,
+} from '@/constants/locations';
 import {
   LISTING_TAGS,
   POKEBALLS,
@@ -252,12 +259,57 @@ export function applyFilterSpec(query: ListingsQuery, spec: FilterSpec): Listing
   return query;
 }
 
-/** Open and locked listings in one area, newest first, narrowed by the compiled filter spec. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+function quotePostgrestValue(value: string): string {
+  return `"${value.replace(/[\\"]/g, '\\$&')}"`;
+}
+
+/**
+ * Builds the PostgREST `.or(...)` filter string for feed location discovery:
+ * - Returns `null` for `ALL_LOCATIONS` (no location filter).
+ * - Matches the city scope (`eq` + `like "%, <city>"`) and exact neighbourhood (`eq`) when comma-separated,
+ *   with SQL LIKE escaping (`%`, `_`, `\`) and PostgREST double-quoting (`"`, `\`).
+ */
+export function buildLocationOrClause(loc: LocationName): string | null {
+  if (isAllLocations(loc)) return null;
+  const cleaned = sanitizeLocationLabel(loc);
+  if (!cleaned) return null;
+
+  const cityScope = extractCity(cleaned) ?? cleaned;
+  const cityKey = locationKey(cityScope);
+  const predicates = new Set<string>();
+
+  const commaIdx = cleaned.lastIndexOf(',');
+  if (commaIdx !== -1) {
+    const neighbourhood = cleaned.slice(0, commaIdx).trim();
+    if (neighbourhood) {
+      predicates.add(`loc_key.eq.${quotePostgrestValue(locationKey(neighbourhood))}`);
+    }
+    predicates.add(`loc_key.eq.${quotePostgrestValue(locationKey(cleaned))}`);
+  }
+
+  predicates.add(`loc_key.eq.${quotePostgrestValue(cityKey)}`);
+  predicates.add(`loc_key.like.${quotePostgrestValue(`%, ${escapeLikePattern(cityKey)}`)}`);
+
+  return [...predicates].join(',');
+}
+
+/** Open and locked listings in one area/city scope, exact matches ranked first then newest first, narrowed by the compiled filter spec. */
 export async function fetchFeedListings(loc: LocationName, spec: FilterSpec): Promise<Listing[]> {
-  const filtered = applyFilterSpec(selectListings().in('status', FEED_STATUS_FILTER).eq('loc_key', locationKey(loc)), spec);
+  let query = selectListings().in('status', FEED_STATUS_FILTER);
+  const orClause = buildLocationOrClause(loc);
+  if (orClause !== null) {
+    query = query.or(orClause);
+  }
+  const filtered = applyFilterSpec(query, spec);
   const { data, error } = await filtered.order('created_at', { ascending: false });
   if (error) throw apiError(error);
-  return data.map(toListing);
+  return data
+    .map(toListing)
+    .sort((a, b) => locationMatchRank(a.loc, loc) - locationMatchRank(b.loc, loc));
 }
 
 /**

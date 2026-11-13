@@ -2,7 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { locationKey, type LocationName } from '@/constants/locations';
+import { locationMatchRank, matchesLocationFilter, type LocationName } from '@/constants/locations';
 import { marketSignalKey, type MarketSignal } from '@/constants/market';
 import { MOCK_MARKET_SIGNALS } from '@/data/market';
 import type { Listing } from '@/data/types';
@@ -45,8 +45,8 @@ function useMockFeed(loc: LocationName): Feed {
   const listings = useMemo(() => {
     const spec = compileFilter(filters, searchPokemonId);
     const matched = all
-      .filter((l) => locationKey(l.loc) === locationKey(loc) && isFeedVisible(l) && matchesFilter(l, spec))
-      .sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+      .filter((l) => matchesLocationFilter(l.loc, loc) && isFeedVisible(l) && matchesFilter(l, spec))
+      .sort((a, b) => locationMatchRank(a.loc, loc) - locationMatchRank(b.loc, loc) || (a.dist ?? 0) - (b.dist ?? 0));
     return withMarketSignals(matched, MOCK_MARKET_MAP);
   }, [all, loc, filters, searchPokemonId]);
   return { listings, isLoading: false, error: null, refresh: noopRefresh };

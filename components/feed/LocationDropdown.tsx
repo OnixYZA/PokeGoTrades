@@ -4,7 +4,7 @@ import { ChevronDown, MapPin } from 'lucide-react-native';
 
 import { LocationPickerSheet } from '@/components/location/LocationPickerSheet';
 import { SURFACE } from '@/constants/theme';
-import { VICINITY_RADIUS_LABEL } from '@/constants/locations';
+import { isAllLocations, VICINITY_RADIUS_LABEL } from '@/constants/locations';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { useTradeStore } from '@/store/trade-store';
 
@@ -24,7 +24,11 @@ export function LocationDropdown() {
       <Pressable
         onPress={() => setOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={`Location: ${filterLocation}. ${VICINITY_RADIUS_LABEL}`}
+        accessibilityLabel={
+          isAllLocations(filterLocation)
+            ? 'Location: All locations'
+            : `Location: ${filterLocation}. ${VICINITY_RADIUS_LABEL}`
+        }
         accessibilityHint="Change the feed location"
         accessibilityState={{ expanded: open }}
         className="flex-row items-center gap-2 rounded-xl border border-border-strong px-3 py-2.5 active:opacity-80"
@@ -47,6 +51,7 @@ export function LocationDropdown() {
         title="Feed location"
         current={filterLocation}
         homeLocation={homeLocation}
+        allowAllLocations
         onSelect={(loc) => {
           setFilterLocation(loc);
           setOpen(false);

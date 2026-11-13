@@ -1,7 +1,15 @@
 import { formatTradeDate } from '@/lib/format';
 
 import type { CreatureRef, Trainer } from './types';
-import { AREAS } from '../constants/locations';
+
+const MOCK_SAFE_LOCATIONS = [
+  'Indiranagar, Bengaluru',
+  'Koramangala, Bengaluru',
+  'Adyar, Chennai',
+  'Bandra West, Mumbai',
+  'Jubilee Hills, Hyderabad',
+  'Koregaon Park, Pune',
+] as const;
 
 /**
  * Other trainers (listing sellers, chat partners) only exist in the mock data as a name string —
@@ -82,7 +90,7 @@ export function buildPublicTrainerProfile(handle: string): Trainer {
     lvl: 20 + (seed % 30),
     team: ['Mystic', 'Valor', 'Instinct'][seed % 3],
     bio: pick(BIOS, seed, 0),
-    safeLoc: pick([...AREAS], seed, 0),
+    safeLoc: pick([...MOCK_SAFE_LOCATIONS], seed, 0),
     trades: 8 + (seed % 250),
     rep: Math.round((3.5 + ((seed % 15) / 10)) * 10) / 10,
     streak: seed % 45,
