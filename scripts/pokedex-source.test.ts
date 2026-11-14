@@ -759,10 +759,14 @@ describe('checkTradability', () => {
     pokemonTemplate(800, 'NECROZMA', 'NECROZMA_ULTRA', ['Psychic', 'Dragon'], undefined, ultraTradable),
   ];
 
-  it('agrees on Zacian: Hero is tradable and Crowned Sword is not, each checked on its own template', () => {
+  it('agrees on Zacian: Hero and Crowned Sword are both tradable in the app, each checked on its own template', () => {
     const report = check([ZACIAN_ROW], ZACIAN, ['pm888.fHERO.icon.png', 'pm888.fCROWNED_SWORD.icon.png']);
     expect(report.disagreements).toEqual([]);
-    expect(report.overridden).toEqual([]);
+    // The game master calls Crowned Sword untradable and the app lists it: the documented override, matched on the
+    // template named ZACIAN_CROWNED_SWORD through the app spelling CROWNED_SWORD.
+    expect(report.overridden).toEqual([
+      { pokemonId: 888, name: 'Zacian', formCode: 'CROWNED_SWORD', gameMasterTradable: false, reason: TRADABILITY_OVERRIDES[1].reason },
+    ]);
     expect(report.checked).toBe(3); // the default form (formless), HERO, CROWNED_SWORD
   });
 
@@ -785,21 +789,29 @@ describe('checkTradability', () => {
     ]);
   });
 
-  it('REPORTS a form the game master calls tradable though the rule is silent about it (Crowned Sword)', () => {
+  it('REPORTS a form the game master calls tradable though the rule is silent about it (Alolan Vulpix, synthetic rule)', () => {
+    const rulesNamingAlola: TradabilityRules = {
+      isUntradable: (id, code) => (id === 37 && code === 'ALOLA') || isPokemonUntradable(id, code),
+      formCombinations: [],
+    };
+    expect(check([VULPIX_ROW], VULPIX, [], rulesNamingAlola).disagreements).toEqual([
+      { pokemonId: 37, name: 'Vulpix', formCode: 'ALOLA', gameMasterTradable: true },
+    ]);
+    // ...and with the real rules, which are silent about it, the same file agrees.
+    expect(check([VULPIX_ROW], VULPIX).disagreements).toEqual([]);
+  });
+
+  it('THROWS when the game master starts calling Crowned Sword tradable: the override no longer matches a difference', () => {
     const templates = [
       pokemonTemplate(888, 'ZACIAN', undefined, ['Fairy', 'Steel']),
       pokemonTemplate(888, 'ZACIAN', 'ZACIAN_HERO', ['Fairy']),
       pokemonTemplate(888, 'ZACIAN', 'ZACIAN_CROWNED_SWORD', ['Fairy', 'Steel']), // tradable here
     ];
-    const rulesWithoutCrowned: TradabilityRules = {
-      isUntradable: (id, code) => isPokemonUntradable(id, code) && !(id === 888 && code === 'CROWNED_SWORD'),
-      formCombinations: [],
-    };
-    expect(check([ZACIAN_ROW], templates, [], rulesWithoutCrowned).disagreements).toEqual([]); // the rule says tradable, the file says tradable
-    // ...and with the real rule the same file is a disagreement.
-    expect(check([ZACIAN_ROW], templates).disagreements).toEqual([
-      { pokemonId: 888, name: 'Zacian', formCode: 'CROWNED_SWORD', gameMasterTradable: true },
-    ]);
+    expect(() => check([ZACIAN_ROW], templates)).toThrow(/TRADABILITY_OVERRIDES entry #888 CROWNED_SWORD no longer matches/);
+    // ...and it is an override, not a rule: were the app to refuse the form again, the game master would agree
+    // and the entry would be just as stale.
+    const rulesRefusingCrowned: TradabilityRules = { isUntradable: (id, code) => (id === 888 && code === 'CROWNED_SWORD') || isPokemonUntradable(id, code), formCombinations: [] };
+    expect(() => check([ZACIAN_ROW], ZACIAN, [], rulesRefusingCrowned)).toThrow(/TRADABILITY_OVERRIDES entry #888 CROWNED_SWORD no longer matches/);
   });
 
   it('REPORTS a species the game master calls untradable and the app lets trade', () => {
@@ -818,11 +830,15 @@ describe('checkTradability', () => {
   });
 
   describe('the override list', () => {
-    it('lists exactly Pecharunt: the game master says tradable, the app says untradable', () => {
+    it('lists exactly Pecharunt and the two Crowned forms, each with its direction', () => {
       expect(TRADABILITY_OVERRIDES).toEqual([
         { pokemonId: 1025, formCode: null, gameMasterTradable: true, reason: expect.stringContaining('Mythical') },
+        { pokemonId: 888, formCode: 'CROWNED_SWORD', gameMasterTradable: false, reason: expect.stringContaining('owner decision, 2026-11-12') },
+        { pokemonId: 889, formCode: 'CROWNED_SHIELD', gameMasterTradable: false, reason: expect.stringContaining('owner decision, 2026-11-12') },
       ]);
-      expect(isPokemonUntradable(1025)).toBe(true);
+      expect(isPokemonUntradable(1025)).toBe(true); // game master tradable, app untradable
+      expect(isPokemonUntradable(888, 'CROWNED_SWORD')).toBe(false); // game master untradable, app tradable
+      expect(isPokemonUntradable(889, 'CROWNED_SHIELD')).toBe(false);
     });
 
     it('accepts the listed difference and reports it as overridden, not as a disagreement', () => {
@@ -884,8 +900,9 @@ describe('checkTradability', () => {
     });
 
     it('matches the app spelling: a template named like the species prefix resolves through the sprite art', () => {
-      // Zacian's rule is CROWNED_SWORD; the template is ZACIAN_CROWNED_SWORD.
-      expect(check([ZACIAN_ROW], ZACIAN).unmatchedFormRules).toEqual([]);
+      // A rule keyed CROWNED_SWORD (synthetic: the real list no longer names it) meets ZACIAN_CROWNED_SWORD.
+      const rules: TradabilityRules = { isUntradable: isPokemonUntradable, formCombinations: [{ pokemonId: 888, formCode: 'CROWNED_SWORD' }] };
+      expect(check([ZACIAN_ROW], ZACIAN, [], rules).unmatchedFormRules).toEqual([]);
     });
   });
 });
@@ -1088,6 +1105,12 @@ describe('renderDataFile', () => {
     expect(out).toContain('all agree except 1 documented override: #1025 Pecharunt: game master tradable, app untradable on purpose');
     expect(out).toContain('The generator refuses to write while any other differ (TRADABILITY_OVERRIDES).');
     expect(text([VULPIX_ROW], VULPIX)).toContain('all agree. The generator refuses');
+  });
+
+  it('lists several overrides in species order, with the direction of each', () => {
+    const out = text([ZACIAN_ROW, species(1025, 'Pecharunt', ['Poison', 'Ghost'])], [...ZACIAN, pokemonTemplate(1025, 'PECHARUNT', undefined, ['Poison', 'Ghost'])]);
+    expect(out).toContain('all agree except 2 documented overrides: #888 Zacian CROWNED_SWORD: game master untradable, app tradable on purpose (');
+    expect(out).toContain('; #1025 Pecharunt: game master tradable, app untradable on purpose (');
   });
 
   it('says which unflagged event forms it left out, and names the table in the rules', () => {

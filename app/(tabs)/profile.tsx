@@ -1,9 +1,10 @@
 import { router, useFocusEffect } from 'expo-router';
-import { ChevronLeft, LogOut, Share2, UserRound } from 'lucide-react-native';
+import { ChevronLeft, HelpCircle, LogOut, Share2, UserRound } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
+import { TradeGuideModal } from '@/components/modals/TradeGuideModal';
 import { ShareTradeListModal } from '@/components/modals/ShareTradeListModal';
 import { ArsenalGrid } from '@/components/profile/ArsenalGrid';
 import { LiveIdentityCard } from '@/components/profile/LiveIdentityCard';
@@ -37,8 +38,10 @@ import {
 } from '@/lib/creature-list';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureFullName } from '@/lib/format';
+import { goBack } from '@/lib/navigation';
 import { useSession } from '@/lib/session';
 import { toast } from '@/lib/toast';
+import type { TradeGuideStepId } from '@/lib/trade-guide';
 import { useTradeStore } from '@/store/trade-store';
 
 /** Which grid the "+" button on the live profile opened the picker for. */
@@ -107,6 +110,7 @@ function useMyProfileData(permanentUserId: string | null): MyProfileData {
       ]);
       if (request !== latestRequest.current) return; // a newer load started while this one was in flight
       setProfile(nextProfile);
+      useTradeStore.getState().setHomeLocation(nextProfile.homeLocation);
       dispatchLists({ type: 'loaded', arsenal: nextArsenal, wishlist: nextWishlist });
       setTradeHistory(nextTradeHistory);
       setStatus('ready');
@@ -185,6 +189,8 @@ export default function ProfileScreen() {
   const [signingOut, setSigningOut] = useState(false);
   // Which grid's "+" button opened the picker, if any — also doubles as the picker's `visible` flag.
   const [pickerFor, setPickerFor] = useState<CreatureListKind | null>(null);
+  // The in-app guide (one modal, opened at the step the entry point asks for).
+  const [guideStep, setGuideStep] = useState<TradeGuideStepId | null>(null);
   // Blocks a second selection from firing a second insert while the first is still in flight; the
   // picker itself is already closed by then (see `addPokemon`), so this only guards a fast re-open.
   const [addingCreature, setAddingCreature] = useState(false);
@@ -310,8 +316,8 @@ export default function ProfileScreen() {
     // offering controls that can't work.
     body = (
       <>
-        <ProfileHero trainer={trainer} />
-        <RepStats trainer={trainer} bailsCount={trainer.bailsCount} />
+        <ProfileHero trainer={trainer} editableHome />
+        <RepStats trainer={trainer} bailsCount={trainer.bailsCount} onOpenGuide={setGuideStep} />
         <ArsenalGrid arsenal={MOCK_ARSENAL} />
         <WishlistGrid wishlist={MOCK_WISHLIST} />
         <ShareTradeListButton onPress={() => setShareVisible(true)} />
@@ -392,7 +398,7 @@ export default function ProfileScreen() {
       {/* Header with back button */}
       <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3 pt-1.5">
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => goBack('/')}
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={6}
@@ -415,8 +421,12 @@ export default function ProfileScreen() {
         contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 12, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* The guide's entry in EVERY state (mock, live, signed out): the live branch has no RepStats. */}
+        <GuideButton onPress={() => setGuideStep('listings')} />
         {body}
       </ScrollView>
+
+      <TradeGuideModal visible={guideStep !== null} initialStep={guideStep ?? undefined} onClose={() => setGuideStep(null)} />
 
       {/* Mounted unconditionally: `pickerFor` can only ever be set from the live "ready" branch above,
        *  so this is inert (closed) in every other state. */}
@@ -460,6 +470,23 @@ export default function ProfileScreen() {
         </Modal>
       )}
     </View>
+  );
+}
+
+/** "How trading & rep work": opens the in-app guide. Always rendered, so live and mock profiles both reach it. */
+function GuideButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="How trading & rep work"
+      className="mb-3 flex-row items-center justify-center gap-2 rounded-2xl border border-border-strong bg-bg-card py-3 active:opacity-80"
+    >
+      <HelpCircle size={15} color="#4fb3ff" />
+      <Text className="font-display-med" style={{ fontSize: 13, color: '#e8ecf5' }}>
+        How trading &amp; rep work
+      </Text>
+    </Pressable>
   );
 }
 

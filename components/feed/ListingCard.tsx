@@ -3,14 +3,16 @@ import { MapPin } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/Avatar';
-import { BackgroundBadge } from '@/components/ui/BackgroundBadge';
+import { BackgroundBadge, hasSpecialBackground } from '@/components/ui/BackgroundBadge';
 import { DemandBadge } from '@/components/ui/DemandBadge';
+import { DynamaxBadge } from '@/components/ui/DynamaxBadge';
 import { GigantamaxBadge } from '@/components/ui/GigantamaxBadge';
 import { LuckyBadge } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { Sprite } from '@/components/ui/Sprite';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { TypeBadge } from '@/components/ui/TypeBadge';
+import { attributeBadges } from '@/constants/listing-attributes';
 import { creatureHue } from '@/constants/pokedex';
 import { hueBleed, SURFACE } from '@/constants/theme';
 import type { Listing } from '@/data/types';
@@ -20,24 +22,17 @@ import { creatureDisplayName, creatureFormLabel, formatCp } from '@/lib/format';
  *  a listing with every attribute set (and a full 5 tags) from overflowing a 360pt-wide card. */
 const MAX_VISIBLE_BADGES = 4;
 
-/** Purified / Costume / a verified size, plus every seller tag ("Level 1" included) — one flat list so
- *  the "+N" overflow count and the wrap behavior are consistent regardless of which kind of badge a
- *  listing happens to carry. */
-function attributeBadges(listing: Listing): { key: string; label: string }[] {
-  const badges: { key: string; label: string }[] = [];
-  if (listing.purified) badges.push({ key: 'purified', label: 'Purified' });
-  if (listing.costume) badges.push({ key: 'costume', label: 'Costume' });
-  // No "✓": since migration 20261103000200 a seller may declare the size themselves, and nothing records
-  // whether a given size was declared or read off an appraisal proof, so a check mark would claim more than we know.
-  if (listing.sizeClass) badges.push({ key: 'size', label: listing.sizeClass });
-  for (const tag of listing.tags) badges.push({ key: `tag:${tag}`, label: tag });
-  return badges;
-}
+export { attributeBadges };
 
 export function ListingCard({ listing }: { listing: Listing }) {
   const badges = attributeBadges(listing);
   const visibleBadges = badges.slice(0, MAX_VISIBLE_BADGES);
   const hiddenBadgeCount = badges.length - visibleBadges.length;
+  const hasSpecialRowBadges =
+    hasSpecialBackground(listing.bg) ||
+    listing.lucky ||
+    Boolean(listing.isGigantamax) ||
+    Boolean(listing.isDynamax);
 
   return (
     <View
@@ -90,11 +85,14 @@ export function ListingCard({ listing }: { listing: Listing }) {
           </Text>
         )}
 
-        <View className="mt-0.5 flex-row flex-wrap items-center gap-1.5" style={{ pointerEvents: 'none' }}>
-          <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
-          {listing.lucky && <LuckyBadge size="sm" />}
-          {listing.isGigantamax && <GigantamaxBadge size="sm" />}
-        </View>
+        {hasSpecialRowBadges && (
+          <View className="mt-0.5 flex-row flex-wrap items-center gap-1.5" style={{ pointerEvents: 'none' }}>
+            <BackgroundBadge bg={listing.bg} hue={creatureHue(listing)} accent={listing.accent} />
+            {listing.lucky && <LuckyBadge size="sm" />}
+            {listing.isGigantamax && <GigantamaxBadge size="sm" />}
+            {listing.isDynamax && <DynamaxBadge size="sm" />}
+          </View>
+        )}
 
         {visibleBadges.length > 0 && (
           <View className="flex-row flex-wrap items-center gap-1.5" style={{ pointerEvents: 'none' }}>
@@ -117,11 +115,11 @@ export function ListingCard({ listing }: { listing: Listing }) {
         ) : null}
 
         <View className="mt-1.5 flex-row items-center justify-between" style={{ pointerEvents: 'box-none' }}>
-          <View className="flex-row items-center gap-1" style={{ pointerEvents: 'box-none' }}>
+          <View className="flex-row items-center gap-1" style={{ flexShrink: 1, pointerEvents: 'box-none' }}>
             {/* The neighbourhood, never a distance: the same fact in mock and Supabase mode, and the only
              *  location a listing reveals. */}
             <MapPin size={12} color="#6d7690" />
-            <Text className="font-mono text-text-muted" style={{ fontSize: 11, pointerEvents: 'none' }}>
+            <Text className="font-mono text-text-muted" numberOfLines={1} style={{ fontSize: 11, flexShrink: 1, pointerEvents: 'none' }}>
               {listing.loc} ·
             </Text>
             <Pressable

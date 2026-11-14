@@ -2,6 +2,8 @@ import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
 
+import { sniffImageMime } from '@/lib/image-sniff';
+
 /** Mirrors both proof buckets' limits (supabase/config.toml): `listing-proofs` (migration …000600) and
  *  `profile-proofs` (migration …000100) are each capped at 5 MiB, jpeg/png/webp. */
 export const PROOF_MAX_BYTES = 5 * 1024 * 1024;
@@ -34,6 +36,20 @@ export interface PickedProof {
   sizeBytes: number | null;
   /** Browser file behind the uri. Only set on web, where expo-file-system's `File` does not exist. */
   webFile?: Blob;
+  /** Eagerly cached bytes read at pick time on web so Android Chrome File/content URI expiry before Submit doesn't fail. */
+  bytes?: ArrayBuffer;
+}
+
+/**
+ * Returns true when an error indicates the underlying file or content URI could no longer be read
+ * (e.g. Android Chrome expiring a File/content URI between pick time and submit time).
+ */
+export function isUnreadableFileError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const name = 'name' in error && typeof error.name === 'string' ? error.name : undefined;
+  if (name === 'NotFoundError' || name === 'NotReadableError') return true;
+  const message = 'message' in error && typeof error.message === 'string' ? error.message : undefined;
+  return message !== undefined && /could not be found/i.test(message);
 }
 
 export function formatBytes(bytes: number): string {
@@ -71,14 +87,47 @@ export async function pickProofImage(): Promise<PickedProof | null> {
   if (result.canceled) return null;
 
   const asset = result.assets[0];
-  const contentType = contentTypeFor(asset);
+  const filename = asset.fileName ?? asset.uri.split('/').pop() ?? 'proof';
   if (asset.fileSize !== undefined && asset.fileSize > PROOF_MAX_BYTES) {
     throw new ProofImageError(`That image is ${formatBytes(asset.fileSize)}. The limit is 5 MB.`);
   }
 
+  if (Platform.OS === 'web') {
+    let rawBytes: ArrayBuffer;
+    try {
+      if (asset.file) {
+        rawBytes = await asset.file.arrayBuffer();
+      } else {
+        const response = await fetch(asset.uri);
+        if (!response.ok) throw new Error('fetch failed');
+        rawBytes = await response.arrayBuffer();
+      }
+    } catch {
+      throw new ProofImageError('Could not read that photo from your device. Please re-select the screenshot.');
+    }
+
+    if (rawBytes.byteLength > PROOF_MAX_BYTES) {
+      throw new ProofImageError(`That image is ${formatBytes(rawBytes.byteLength)}. The limit is 5 MB.`);
+    }
+    const sniffed = sniffImageMime(rawBytes);
+    if (!sniffed) {
+      throw new ProofImageError('That file is not a JPEG, PNG or WebP image.');
+    }
+
+    return {
+      uri: asset.uri,
+      filename,
+      contentType: sniffed,
+      sizeBytes: rawBytes.byteLength,
+      webFile: asset.file,
+      bytes: rawBytes,
+    };
+  }
+
+  const contentType = contentTypeFor(asset);
   return {
     uri: asset.uri,
-    filename: asset.fileName ?? asset.uri.split('/').pop() ?? 'proof',
+    filename,
     contentType,
     sizeBytes: asset.fileSize ?? null,
     webFile: asset.file,
@@ -88,17 +137,48 @@ export async function pickProofImage(): Promise<PickedProof | null> {
 /**
  * Reads the picked image as an ArrayBuffer for `supabase.storage.upload`. Blob, File and FormData
  * bodies do not work on React Native, and web has no expo-file-system `File`, hence the split.
+ *
+ * Also checks the bytes: the buckets' MIME allowlist only trusts the Content-Type header, so the returned
+ * `contentType` is the one sniffed from the bytes (authoritative), not the picker's claim, and a file that is
+ * not really a JPEG, PNG or WebP is refused here.
  */
-export async function readProofBytes(proof: PickedProof): Promise<ArrayBuffer> {
+export async function readProofBytes(proof: PickedProof): Promise<{ data: ArrayBuffer; contentType: ProofMimeType }> {
   let data: ArrayBuffer;
-  if (Platform.OS === 'web') {
-    const blob = proof.webFile ?? (await (await fetch(proof.uri)).blob());
-    data = await blob.arrayBuffer();
+  if (proof.bytes !== undefined) {
+    data = proof.bytes;
   } else {
-    data = await new File(proof.uri).arrayBuffer();
+    try {
+      if (Platform.OS === 'web') {
+        let blob: Blob;
+        if (proof.webFile) {
+          blob = proof.webFile;
+        } else {
+          const response = await fetch(proof.uri);
+          if (!response.ok) {
+            throw new ProofImageError(
+              'Could not read that photo from your device. Please remove it and pick the screenshot again.'
+            );
+          }
+          blob = await response.blob();
+        }
+        data = await blob.arrayBuffer();
+      } else {
+        data = await new File(proof.uri).arrayBuffer();
+      }
+    } catch (error) {
+      if (error instanceof ProofImageError) throw error;
+      if (isUnreadableFileError(error)) {
+        throw new ProofImageError(
+          'Could not read that photo from your device. Please remove it and pick the screenshot again.'
+        );
+      }
+      throw error;
+    }
   }
   if (data.byteLength > PROOF_MAX_BYTES) {
     throw new ProofImageError(`That image is ${formatBytes(data.byteLength)}. The limit is 5 MB.`);
   }
-  return data;
+  const sniffed = sniffImageMime(data);
+  if (!sniffed) throw new ProofImageError('That file is not a JPEG, PNG or WebP image.');
+  return { data, contentType: sniffed };
 }

@@ -25,9 +25,18 @@
  *             the dex) never matches an include and is never dropped by an exclude, mirroring a NULL enum.
  */
 // Type-only: the registry needs the `PokemonType` vocabulary at compile time but no dex data at runtime.
+import type { BackgroundHint, Listing } from '@/data/types';
 import type { PokemonType } from './pokedex';
 
 // ——— enums (mirror the DB enums in lib/database.types.ts exactly — see the assertion in lib/api/listings.ts) ———
+
+/** The proof screenshot kinds a listing may carry, mirroring the `proof_kind` DB enum, with the label shown in
+ *  the Create Listing proof slots and the in-app guide (one place, so the two can't drift). */
+export const PROOF_KIND_LABELS = {
+  appraisal: 'Appraisal',
+  movesets: 'Movesets',
+  event_badge: 'Event Badge',
+} as const;
 
 export const TRADE_TIMELINES = ['asap', 'this_week', 'this_month', 'flexible'] as const;
 export type TradeTimeline = (typeof TRADE_TIMELINES)[number];
@@ -48,6 +57,36 @@ export const LISTING_TAGS = [
   'Level 1',
 ] as const;
 export type ListingTag = (typeof LISTING_TAGS)[number];
+
+export const SPECIAL_BACKGROUND_LABEL = 'Special Background' as const;
+
+export function hasSpecialBackground(bg: BackgroundHint): boolean {
+  return bg === 'legacy';
+}
+
+export function backgroundBadgeLabel(bg: BackgroundHint): typeof SPECIAL_BACKGROUND_LABEL | null {
+  return hasSpecialBackground(bg) ? SPECIAL_BACKGROUND_LABEL : null;
+}
+
+export function listingBackgroundFromToggle(specialBackground: boolean): Exclude<BackgroundHint, 'shadow'> {
+  return specialBackground ? 'legacy' : 'meta';
+}
+
+/** Purified / Costume / a verified size, plus every seller tag ("Level 1" included) — one flat list so
+ *  the "+N" overflow count and the wrap behavior are consistent regardless of which kind of badge a
+ *  listing happens to carry. */
+export function attributeBadges(
+  listing: Pick<Listing, 'purified' | 'costume' | 'tags'> & { sizeClass?: Listing['sizeClass'] },
+): { key: string; label: string }[] {
+  const badges: { key: string; label: string }[] = [];
+  if (listing.purified) badges.push({ key: 'purified', label: 'Purified' });
+  if (listing.costume) badges.push({ key: 'costume', label: 'Costume' });
+  // No "✓": since migration 20261103000200 a seller may declare the size themselves, and nothing records
+  // whether a given size was declared or read off an appraisal proof, so a check mark would claim more than we know.
+  if (listing.sizeClass) badges.push({ key: 'size', label: listing.sizeClass });
+  for (const tag of listing.tags) badges.push({ key: `tag:${tag}`, label: tag });
+  return badges;
+}
 
 // ——— display labels ———
 
@@ -72,7 +111,7 @@ export const POKEBALL_LABELS: Record<Pokeball, string> = {
 
 /** The boolean `listings` columns a filter chip can toggle. Named after the `Listing` field (camelCase);
  *  `lib/api/listings.ts` maps `willTravel` to the DB's `will_travel` for the PostgREST adapter. */
-export const FILTER_FLAGS = ['shiny', 'lucky', 'purified', 'costume', 'willTravel', 'isGigantamax'] as const;
+export const FILTER_FLAGS = ['shiny', 'lucky', 'purified', 'costume', 'willTravel', 'isGigantamax', 'isDynamax'] as const;
 export type FilterFlagField = (typeof FILTER_FLAGS)[number];
 
 /** The nullable/enum `Listing` fields a filter chip can narrow to a set of values. */
@@ -188,6 +227,7 @@ export const FILTER_ATTRIBUTES = [
   flagAttribute('costume', 'Costume'),
   flagAttribute('willTravel', 'Will Travel'),
   flagAttribute('isGigantamax', 'Gigantamax'),
+  flagAttribute('isDynamax', 'Dynamax'),
 
   ...POKEMON_SIZES.map((size) => enumAttribute('sizeClass', size, size, 'Size')),
 

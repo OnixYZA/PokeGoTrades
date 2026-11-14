@@ -12,7 +12,6 @@ import {
   CheckSquare,
   ChevronDown,
   Droplet,
-  LocateFixed,
   MapPin,
   Image as ImageIcon,
   Plus,
@@ -22,16 +21,21 @@ import {
 } from 'lucide-react-native';
 
 import { ListingCard } from '@/components/feed/ListingCard';
+import { CrownedFormToggle } from '@/components/modals/CrownedFormToggle';
 import { FormPicker } from '@/components/modals/FormPicker';
 import { PokemonPickerModal, type PickedCreature } from '@/components/modals/PokemonPickerModal';
 import { Chip } from '@/components/ui/Chip';
+import { LocationPickerSheet } from '@/components/location/LocationPickerSheet';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { DynamaxSymbol } from '@/components/ui/DynamaxBadge';
 import { GigantamaxSymbol } from '@/components/ui/GigantamaxBadge';
+import { MAX_BADGE_PALETTES } from '@/constants/max-badges';
+import { availableMaxForms, coerceMaxForm, maxFormFlags, type MaxForm } from '@/constants/max-form';
 import { LuckyClover } from '@/components/ui/LuckyBadge';
 import { ShinyGlint } from '@/components/ui/ShinyGlint';
 import { TextBadge } from '@/components/ui/TextBadge';
 import { useTradeStore } from '@/store/trade-store';
-import { canGigantamax, findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
+import { canGigantamax, crownedToggleOf, findPokemon, formatTypes, formsOf, isPokemonUntradable, typesOf, type PokedexEntry } from '@/constants/pokedex';
 import type { CreatureRef, Listing, TradeType } from '@/data/types';
 import { appendDistinctCreature, creatureRefFromPick } from '@/lib/creature-pick';
 import { CP_MAX, CP_MIN, creatureFormLabel, creatureFullName, dexLabel, parseCp } from '@/lib/format';
@@ -42,6 +46,8 @@ import {
   POKEMON_SIZES,
   TRADE_TIMELINES,
   TRADE_TIMELINE_LABELS,
+  PROOF_KIND_LABELS,
+  listingBackgroundFromToggle,
   type ListingTag,
   type Pokeball,
   type PokemonSize,
@@ -56,9 +62,8 @@ import {
   type NewListingInput,
   type ProofKind,
 } from '@/lib/api/listings';
-import { AREAS, VICINITY_RADIUS_LABEL, type AreaName } from '@/constants/locations';
+import { isAllLocations, sanitizeLocationLabel, VICINITY_RADIUS_LABEL, type LocationName } from '@/constants/locations';
 import { USE_SUPABASE } from '@/lib/data-source';
-import { useVicinity } from '@/lib/use-vicinity';
 import { formatBytes, pickProofImage, readProofBytes, type PickedProof } from '@/lib/proof-image';
 import { spriteVariantKey, spriteVariantOf } from '@/lib/sprite-url';
 
@@ -78,9 +83,9 @@ const MAX_WANTED = 3;
 /** The three proof slots, one image each — the same kinds as the `proof_kind` enum, so a listing can
  *  structurally hold at most three (`listing_proofs_one_per_kind`). */
 const PROOF_KINDS: { proofKind: ProofKind; label: 'Appraisal' | 'Movesets' | 'Event Badge' }[] = [
-  { proofKind: 'appraisal', label: 'Appraisal' },
-  { proofKind: 'movesets', label: 'Movesets' },
-  { proofKind: 'event_badge', label: 'Event Badge' },
+  { proofKind: 'appraisal', label: PROOF_KIND_LABELS.appraisal },
+  { proofKind: 'movesets', label: PROOF_KIND_LABELS.movesets },
+  { proofKind: 'event_badge', label: PROOF_KIND_LABELS.event_badge },
 ];
 
 interface ProofUpload {
@@ -127,6 +132,7 @@ interface CreateListingModalProps {
 export function CreateListingModal({ onClose, onSave, onPublish }: CreateListingModalProps) {
   const insets = useSafeAreaInsets();
   const filterLocation = useTradeStore((s) => s.filterLocation);
+  const homeLocation = useTradeStore((s) => s.homeLocation);
 
   const [step, setStep] = useState<Step>('form');
   const [selectedCreature, setSelectedCreature] = useState<PokedexEntry | null>(null);
@@ -136,15 +142,30 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   const [formCode, setFormCode] = useState<string | null>(null);
   const [shiny, setShiny] = useState(true);
   const [purified, setPurified] = useState(false);
-  const [specialBackground, setSpecialBackground] = useState(true);
+  const [specialBackground, setSpecialBackground] = useState(false);
   const [costume, setCostume] = useState(false);
   const [willTravel, setWillTravel] = useState(false);
-  // Only meaningful for a species that can Gigantamax (`canGigantamax`): `handlePickPokemon` clears it on a switch
-  // to one that cannot, and the draft re-checks eligibility, so an ineligible G-Max listing can't be submitted.
-  const [isGigantamax, setIsGigantamax] = useState(false);
-  // The listing's neighbourhood: starts at the feed's current one, and is always one of `AREAS` (the only
-  // location a listing ever carries; exact GPS is never read, stored or shared).
-  const [area, setArea] = useState<AreaName>(() => filterLocation);
+  // The listing's Max Battle form as ONE value, so Dynamax and Gigantamax are mutually exclusive by construction
+  // (the DB check `listings_dynamax_xor_gigantamax` is only the backstop). Gigantamax is only meaningful for a
+  // species that can (`canGigantamax`): `handlePickPokemon` and the draft both run it through `coerceMaxForm`.
+  // There is no Dynamax eligibility list in the pinned sources (PokeAPI / the PokeMiners game master), so every
+  // species may be marked Dynamax and that stays unchecked.
+  const [maxForm, setMaxForm] = useState<MaxForm>('standard');
+  // The listing's location: starts from the active feed filter (unless 'All locations'), or the trainer's
+  // home location, or null until picked. Never defaults to a hardcoded city/neighbourhood or 'All locations'.
+  const [area, setArea] = useState<LocationName | null>(
+    () =>
+      (!isAllLocations(filterLocation) ? sanitizeLocationLabel(filterLocation) : null) ??
+      (homeLocation ? sanitizeLocationLabel(homeLocation) : null) ??
+      null,
+  );
+
+  useEffect(() => {
+    if (area === null && homeLocation) {
+      const sanitized = sanitizeLocationLabel(homeLocation);
+      if (sanitized) setArea(sanitized);
+    }
+  }, [area, homeLocation]);
   const [pokeball, setPokeball] = useState<Pokeball | null>(null);
   // Seller-declared; null leaves it to an appraisal screenshot to tag.
   const [sizeClass, setSizeClass] = useState<PokemonSize | null>(null);
@@ -199,10 +220,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
   /** Exactly what gets inserted: only the fields a trainer supplies (see `NewListingInput`). */
   const cpResult = useMemo(() => parseCp(cpText), [cpText]);
   const draft = useMemo<NewListingInput | null>(() => {
-    // CP is required: with no creature or no valid CP there is no draft, so nothing downstream (preview,
-    // publish) can run without them.
-    if (!selectedCreature || !cpResult.ok) return null;
-    const bg: NewListingInput['bg'] = shiny ? 'shiny' : specialBackground ? 'legacy' : 'meta';
+    // Creature, valid CP, and a concrete location are all required before preview/publish.
+    const validArea = area && !isAllLocations(area) ? sanitizeLocationLabel(area) : null;
+    if (!selectedCreature || !cpResult.ok || !validArea) return null;
+    const bg: NewListingInput['bg'] = listingBackgroundFromToggle(specialBackground);
     const tradeType: TradeType = shiny ? 'Unregistered (Shiny/Legendary)' : 'Unregistered (Standard)';
     // `wanted` is already shaped as `CreatureRef[]` (see `handlePickPokemon` below), so no re-mapping.
     const looking: CreatureRef[] = wanted;
@@ -220,7 +241,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       shiny,
       accent: '#fbbf24',
       bg,
-      loc: area,
+      loc: validArea,
       tradeType,
       iv: knowsIv ? `${ivAtk}/${ivDef}/${ivSta}` : 'Unrated',
       looking,
@@ -234,7 +255,8 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       sizeClass,
       cp: cpResult.cp,
       willTravel,
-      isGigantamax: isGigantamax && canGigantamax(selectedCreature.pokemonId),
+      // One form value yields both flags, so "both true" is unrepresentable; an ineligible G-Max is coerced away.
+      ...maxFormFlags(coerceMaxForm(maxForm, canGigantamax(selectedCreature.pokemonId))),
       tradeTimeline,
     };
   }, [
@@ -249,7 +271,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
     sizeClass,
     cpResult,
     willTravel,
-    isGigantamax,
+    maxForm,
     tradeTimeline,
     knowsIv,
     ivAtk,
@@ -308,7 +330,7 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       if (!entry || isPokemonUntradable(entry.pokemonId)) return;
       // Re-picking the same species keeps its form; a different one starts on its default form.
       if (entry.pokemonId !== selectedCreature?.pokemonId) setFormCode(null);
-      if (!canGigantamax(entry.pokemonId)) setIsGigantamax(false);
+      setMaxForm((f) => coerceMaxForm(f, canGigantamax(entry.pokemonId)));
       setSelectedCreature(entry);
     } else if (target === 'wanted') {
       // `creatureRefFromPick` is the one place a pick becomes a ref: dex name and hue, the trainer's shiny and
@@ -440,11 +462,10 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
       // The listing row goes first: the storage policy only accepts proofs for a listing that already
       // exists and is the caller's. Every step is idempotent for `draftId`, so a retry is safe.
       const proofs = await Promise.all(
-        uploads.map(async (u) => ({
-          kind: u.proofKind,
-          contentType: u.image.contentType,
-          data: await readProofBytes(u.image),
-        }))
+        uploads.map(async (u) => {
+          const { data, contentType } = await readProofBytes(u.image);
+          return { kind: u.proofKind, contentType, data };
+        })
       );
       const listing = await publishListing(draft, proofs);
       if (uploads.length > 0) {
@@ -597,10 +618,19 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
         showsVerticalScrollIndicator={false}
       >
         <CreatureSelector selected={selectedCreature} formCode={formCode} onPress={() => setPickerFor('creature')} />
-        {selectedCreature && (
-          // Keyed by species so the picker's refusal notice never outlives the species it was about.
-          <FormPicker key={selectedCreature.pokemonId} pokemonId={selectedCreature.pokemonId} formCode={formCode} onChange={handlePickForm} />
-        )}
+        {selectedCreature &&
+          (crownedToggleOf(selectedCreature.pokemonId) ? (
+            // Zacian / Zamazenta: Hero or Crowned is a two-state toggle, driven by `CROWNED_FORM_TOGGLES`.
+            <CrownedFormToggle
+              key={selectedCreature.pokemonId}
+              toggle={crownedToggleOf(selectedCreature.pokemonId)!}
+              formCode={formCode}
+              onChange={handlePickForm}
+            />
+          ) : (
+            // Keyed by species so the picker's refusal notice never outlives the species it was about.
+            <FormPicker key={selectedCreature.pokemonId} pokemonId={selectedCreature.pokemonId} formCode={formCode} onChange={handlePickForm} />
+          ))}
         <CpSection cpText={cpText} onChangeCp={setCpText} />
         <AttributesCard
           shiny={shiny}
@@ -613,8 +643,11 @@ export function CreateListingModal({ onClose, onSave, onPublish }: CreateListing
           onToggleCostume={() => setCostume((v) => !v)}
           willTravel={willTravel}
           onToggleWillTravel={() => setWillTravel((v) => !v)}
-          gigantamax={isGigantamax}
-          onToggleGigantamax={selectedCreature && canGigantamax(selectedCreature.pokemonId) ? () => setIsGigantamax((v) => !v) : undefined}
+        />
+        <MaxFormSelector
+          value={maxForm}
+          onChange={setMaxForm}
+          canGigantamax={!!selectedCreature && canGigantamax(selectedCreature.pokemonId)}
         />
         <IvSpreadSection
           knowsIv={knowsIv}
@@ -859,8 +892,6 @@ function AttributesCard({
   onToggleCostume,
   willTravel,
   onToggleWillTravel,
-  gigantamax,
-  onToggleGigantamax,
 }: {
   shiny: boolean;
   onToggleShiny: () => void;
@@ -872,9 +903,6 @@ function AttributesCard({
   onToggleCostume: () => void;
   willTravel: boolean;
   onToggleWillTravel: () => void;
-  gigantamax: boolean;
-  /** Undefined hides the row: the chosen species cannot Gigantamax. */
-  onToggleGigantamax?: () => void;
 }) {
   return (
     <View>
@@ -907,7 +935,7 @@ function AttributesCard({
           icon={<ImageIcon size={18} color={C.pink} strokeWidth={2.2} />}
           tint="rgba(236,72,153,0.12)"
           title="Special Background"
-          description="Legacy Move or event background art"
+          description="Location card or event background art"
           on={specialBackground}
           onGradient={MODAL_SURFACE.togglePink}
           onPress={onToggleSpecialBackground}
@@ -921,17 +949,6 @@ function AttributesCard({
           onGradient={MODAL_SURFACE.togglePink}
           onPress={onToggleCostume}
         />
-        {onToggleGigantamax && (
-          <AttributeRow
-            icon={<GigantamaxSymbol size={18} color="#ff2a5f" />}
-            tint="rgba(255,42,95,0.12)"
-            title="Gigantamax"
-            description="Can Gigantamax in Max Battles"
-            on={gigantamax}
-            onGradient={MODAL_SURFACE.toggleCrimson}
-            onPress={onToggleGigantamax}
-          />
-        )}
         <AttributeRow
           icon={<Car size={18} color={C.blue} strokeWidth={2.2} />}
           tint="rgba(56,189,248,0.12)"
@@ -946,6 +963,74 @@ function AttributesCard({
     </View>
   );
 }
+
+/** The Max Battle form picker: ONE choice (standard / Dynamax / Gigantamax), so a listing is never both. The
+ *  options come from `availableMaxForms`, so Gigantamax is only offered to species that can; Dynamax is offered
+ *  for every species because the pinned sources carry no Dynamax eligibility data. */
+function MaxFormSelector({
+  value,
+  onChange,
+  canGigantamax,
+}: {
+  value: MaxForm;
+  onChange: (form: MaxForm) => void;
+  canGigantamax: boolean;
+}) {
+  const forms = availableMaxForms(canGigantamax);
+  // The rendered selection is coerced the same way as the draft, so it can never show an ineligible form.
+  const selectedForm = coerceMaxForm(value, canGigantamax);
+  return (
+    <View>
+      <Text className="font-mono-semi mb-2.5" style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1.1 }}>
+        MAX BATTLE FORM
+      </Text>
+      <View accessibilityRole="radiogroup" accessibilityLabel="Max battle form" className="flex-row gap-2">
+        {forms.map((form) => {
+          const selected = form === selectedForm;
+          const palette = form === 'standard' ? null : MAX_BADGE_PALETTES[form];
+          const color = selected && palette ? palette.color : C.textMuted;
+          return (
+            <Pressable
+              key={form}
+              onPress={() => onChange(form)}
+              accessibilityRole="radio"
+              accessibilityLabel={MAX_FORM_LABELS[form]}
+              accessibilityState={{ selected }}
+              className="flex-1 flex-row items-center justify-center gap-1.5 rounded-[12px] border px-2 py-2.5 active:opacity-80"
+              style={{
+                minHeight: 44, // the minimum touch target; padding + one text line alone came to ~39pt
+                backgroundColor: selected ? (palette ? palette.background : C.bgCard) : C.bgCard,
+                borderColor: selected ? (palette ? palette.border : C.textMuted) : C.borderDefault,
+              }}
+            >
+              {form === 'dynamax' ? (
+                <DynamaxSymbol size={16} color={MAX_BADGE_PALETTES.dynamax.color} />
+              ) : form === 'gigantamax' ? (
+                <GigantamaxSymbol size={16} color={MAX_BADGE_PALETTES.gigantamax.color} />
+              ) : (
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.textMuted }} />
+              )}
+              <Text style={{ fontSize: 13, fontWeight: '600', color: selected ? C.textPrimary : color }}>
+                {MAX_FORM_LABELS[form]}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>
+        {canGigantamax
+          ? 'Pick one: a Pokémon is either Dynamax or Gigantamax, not both.'
+          : 'Gigantamax is offered only for species with a G-Max form.'}
+      </Text>
+    </View>
+  );
+}
+
+const MAX_FORM_LABELS: Record<MaxForm, string> = {
+  standard: 'Standard',
+  dynamax: 'Dynamax',
+  gigantamax: 'Gigantamax',
+};
 
 /** One ATK/DEF/STA stepper, clamped to the DB's `between 0 and 15` check — there's no way to type an
  *  out-of-range or non-integer value in through +/- buttons, so `parseIv` on the write path can never
@@ -1107,77 +1192,60 @@ function PokeballOption({
   );
 }
 
-/** The seller picks the listing's neighbourhood from `AREAS`; buyers only ever see this name plus the vicinity
- *  radius. The web-only shortcut asks the browser for a coarse fix and keeps just the bucketed area. */
-function AreaPicker({ area, onSelect }: { area: AreaName; onSelect: (area: AreaName) => void }) {
+/** The seller picks the listing's location in the shared `LocationPickerSheet` (suggestions, free text, or the
+ *  web-only coarse fix snapped to a known town). Buyers only ever see this place name plus the vicinity radius. */
+function AreaPicker({ area, onSelect }: { area: LocationName | null; onSelect: (area: LocationName) => void }) {
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<View>(null);
-  const vicinity = useVicinity();
-
-  const pickMyVicinity = async () => {
-    const found = await vicinity.locate();
-    if (found) onSelect(found);
-  };
+  const homeLocation = useTradeStore((s) => s.homeLocation);
 
   return (
     <View>
-      <Text className="font-mono mb-1.5" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
-        NEIGHBOURHOOD
-      </Text>
+      <View className="mb-1.5 flex-row items-center justify-between">
+        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted, letterSpacing: 0.8 }}>
+          LOCATION
+        </Text>
+        <Text className="font-mono" style={{ fontSize: 10, color: C.pink, letterSpacing: 1 }}>
+          REQUIRED
+        </Text>
+      </View>
       <Pressable
-        ref={anchorRef}
-        onPress={() => setOpen((v) => !v)}
+        onPress={() => setOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={`Listing neighbourhood: ${area}`}
-        accessibilityHint="Opens a list of neighbourhoods to choose from"
+        accessibilityLabel={area ? `Listing location: ${area}` : 'Listing location: Select neighbourhood or city'}
+        accessibilityHint="Opens a picker to search or type a location"
         accessibilityState={{ expanded: open }}
         className="flex-row items-center gap-2 rounded-[14px] border px-4 py-3.5 active:opacity-80"
         style={{ backgroundColor: C.bgCard, borderColor: C.borderDefault }}
       >
-        <MapPin size={14} color={C.textMuted} />
-        <Text className="flex-1" style={{ fontSize: 14, fontWeight: '600', color: C.textPrimary }}>
-          {area}
+        <MapPin size={14} color={area ? C.textMuted : C.textDim} />
+        <Text
+          className="flex-1"
+          numberOfLines={1}
+          style={{ fontSize: 14, fontWeight: '600', color: area ? C.textPrimary : C.textDim }}
+        >
+          {area ?? 'Select neighbourhood or city'}
         </Text>
-        <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted }}>
-          {VICINITY_RADIUS_LABEL}
-        </Text>
+        {area ? (
+          <Text className="font-mono" style={{ fontSize: 10, color: C.textMuted }}>
+            {VICINITY_RADIUS_LABEL}
+          </Text>
+        ) : null}
         <ChevronDown size={16} color={C.textMuted} />
       </Pressable>
       <Text className="mt-1.5" style={{ fontSize: 11, lineHeight: 16, color: C.textMuted }}>
-        Buyers see only this neighbourhood. Your exact GPS location is never shared.
+        Buyers see only this place name, as a {VICINITY_RADIUS_LABEL}. Your exact GPS location is never shared.
       </Text>
-      {vicinity.supported ? (
-        <Pressable
-          onPress={() => void pickMyVicinity()}
-          disabled={vicinity.locating}
-          accessibilityRole="button"
-          accessibilityLabel="Use my vicinity, fuzzed to a neighbourhood"
-          accessibilityHint="Asks your browser for your location and keeps only the neighbourhood"
-          accessibilityState={{ busy: vicinity.locating, disabled: vicinity.locating }}
-          hitSlop={6}
-          className="mt-2 flex-row items-center gap-1.5 self-start active:opacity-70"
-          style={{ opacity: vicinity.locating ? 0.6 : 1 }}
-        >
-          <LocateFixed size={13} color={C.gold} />
-          <Text className="font-display-semi" style={{ fontSize: 12, color: C.gold }}>
-            {vicinity.locating ? 'Locating…' : 'Use my vicinity'}
-          </Text>
-        </Pressable>
-      ) : null}
-      <Dropdown visible={open} onRequestClose={() => setOpen(false)} anchorRef={anchorRef} align="stretch">
-        {AREAS.map((option, i) => (
-          <PokeballOption
-            key={option}
-            label={option}
-            selected={option === area}
-            onPress={() => {
-              onSelect(option);
-              setOpen(false);
-            }}
-            isLast={i === AREAS.length - 1}
-          />
-        ))}
-      </Dropdown>
+      <LocationPickerSheet
+        visible={open}
+        title="Listing location"
+        current={area}
+        homeLocation={homeLocation}
+        onSelect={(label) => {
+          onSelect(label);
+          setOpen(false);
+        }}
+        onClose={() => setOpen(false)}
+      />
     </View>
   );
 }
@@ -1360,8 +1428,8 @@ function LogisticsSection({
   tradeTimeline,
   onSelectTimeline,
 }: {
-  area: AreaName;
-  onSelectArea: (area: AreaName) => void;
+  area: LocationName | null;
+  onSelectArea: (area: LocationName) => void;
   pokeball: Pokeball | null;
   onSelectPokeball: (pokeball: Pokeball | null) => void;
   sizeClass: PokemonSize | null;

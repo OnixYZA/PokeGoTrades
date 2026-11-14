@@ -18,6 +18,7 @@ import {
   REP_GAIN_PER_COMPLETED_TRADE,
   REP_PENALTY_POST_GRACE_BAIL,
   REP_PENALTY_UNRESPONSIVE_NO_SHOW,
+  REP_TIER_THRESHOLDS,
   type BailReason,
 } from './reputation';
 
@@ -235,11 +236,12 @@ const taggedLine = (sql: string, tag: string): string => {
   return line;
 };
 
-// 000400 is applied on hosted and immutable; 000500 redefines bail_and_block / unlock_trade (latest = what hosted
-// runs), so the penalty constants are pinned in BOTH.
+// 000400 is applied on hosted and immutable; 000500 redefines bail_and_block / unlock_trade, and 20261112000100
+// recreates bail_and_block again (latest definition), so the penalty constants are pinned in ALL THREE.
 describe.each([
   '20261103000400_reputation_and_anti_bail.sql',
   '20261103000500_tighten_reputation_loopholes.sql',
+  '20261112000100_security_hardening.sql',
 ])('SQL drift guard (supabase/migrations/%s)', (file) => {
   const sql = readMigration(file);
   const lineWith = (tag: string) => taggedLine(sql, tag);
@@ -301,5 +303,21 @@ describe('SQL drift guard (20261103000500: tightened rules)', () => {
     expect(body.indexOf('REP_PENALTY_POST_GRACE_BAIL')).toBeLessThan(body.indexOf('delete from public.trade_locks'));
     expect(body).toContain('v_lock.buyer_confirmed_at is not null and v_lock.seller_confirmed_at is null');
     expect(body).toContain('where id = v_uid');
+  });
+});
+
+describe('REP_TIER_THRESHOLDS', () => {
+  it('is descending, ends at MIN_REP, and getRepStanding agrees at every boundary', () => {
+    const mins = REP_TIER_THRESHOLDS.map((t) => t.min);
+    expect([...mins].sort((a, b) => b - a)).toEqual(mins);
+    expect(mins[mins.length - 1]).toBe(MIN_REP);
+    for (const t of REP_TIER_THRESHOLDS) {
+      expect(getRepStanding(t.min).tier).toBe(t.tier);
+      expect(getRepStanding(t.min).label).toBe(t.label);
+    }
+    // Just below each non-final boundary falls to the next tier down.
+    REP_TIER_THRESHOLDS.slice(0, -1).forEach((t, i) => {
+      expect(getRepStanding(t.min - 0.001).tier).toBe(REP_TIER_THRESHOLDS[i + 1].tier);
+    });
   });
 });

@@ -2,9 +2,10 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, MessageSquareText, Send } from 'lucide-react-native';
+import { Check, MessageSquareText, Send, X } from 'lucide-react-native';
 
 import { Chip } from '@/components/ui/Chip';
+import { IconButton } from '@/components/ui/IconButton';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { isPokemonUntradable } from '@/constants/pokedex';
 import type { CreatureRef, Listing } from '@/data/types';
@@ -73,8 +74,15 @@ export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModa
       className="flex-1 justify-end"
       style={{ backgroundImage: 'linear-gradient(180deg, rgba(8,8,12,0.4), rgba(8,8,12,0.9) 30%, rgba(8,8,12,0.98))' }}
     >
+      <Pressable
+        style={{ flex: 1 }}
+        onPress={onCancel}
+        disabled={submitting}
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss offer sheet"
+      />
       <View
-        className="border-t px-5 pt-3"
+        className="relative border-t px-5 pt-3"
         style={{
           backgroundColor: C.bgSurface,
           borderTopColor: C.borderDefault,
@@ -133,6 +141,11 @@ export function BuyerOfferModal({ listing, onOffered, onCancel }: BuyerOfferModa
         >
           <Text style={{ fontSize: 14, fontWeight: '600', color: C.textSecondary }}>Not now</Text>
         </Pressable>
+        <View style={{ position: 'absolute', top: 12, right: 16, zIndex: 10, elevation: 10 }}>
+          <IconButton size={34} radius={12} accessibilityLabel="Close offer sheet" onPress={onCancel} disabled={submitting}>
+            <X size={16} color="#8b93a7" />
+          </IconButton>
+        </View>
       </View>
       <ToastHost />
     </View>

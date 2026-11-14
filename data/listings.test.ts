@@ -24,7 +24,7 @@ describe('mock listings', () => {
     }
   });
 
-  it('give Zacian its default form (Crowned Sword Zacian is untradable) and Mewtwo the Armored one', () => {
+  it('give Zacian its default (Hero) form and Mewtwo the Armored one', () => {
     const byId = new Map(listings.map((listing) => [listing.id, listing]));
     expect(byId.get('l1')!.pokemonId).toBe(888);
     expect(byId.get('l1')!.formCode).toBeUndefined();

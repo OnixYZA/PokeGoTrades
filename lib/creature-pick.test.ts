@@ -89,10 +89,11 @@ describe('creatureRefFromPick', () => {
     expect(creatureRefFromPick(p(151))).toEqual({ ok: false, reason: 'untradable' }); // Mew
     // ...a form of a species whose other forms trade...
     expect(creatureRefFromPick(p(646, { formCode: 'WHITE' }))).toEqual({ ok: false, reason: 'untradable' });
-    expect(creatureRefFromPick(p(888, { formCode: 'CROWNED_SWORD' }))).toEqual({ ok: false, reason: 'untradable' });
+    expect(creatureRefFromPick(p(800, { formCode: 'ULTRA' }))).toEqual({ ok: false, reason: 'untradable' });
     // ...while the same species in its default form is fine.
     expect(refOf(p(646))).toMatchObject({ pokemonId: 646 });
     expect(refOf(p(888))).toMatchObject({ pokemonId: 888 });
+    expect(refOf(p(888, { formCode: 'CROWNED_SWORD' }))).toMatchObject({ pokemonId: 888, formCode: 'CROWNED_SWORD' }); // listed by the owner's decision
   });
 
   it('builds a ref that survives creatureRefToJson -> parseCreatureRef unchanged (what the insert and the read do)', () => {

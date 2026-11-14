@@ -12,6 +12,7 @@ import { ListingFilterSheet } from '@/components/modals/ListingFilterSheet';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { IconButton } from '@/components/ui/IconButton';
 import { StatTile } from '@/components/ui/StatTile';
+import { ALL_LOCATIONS, isAllLocations } from '@/constants/locations';
 import { COLORS, SURFACE } from '@/constants/theme';
 import { getPostingReadiness } from '@/lib/api/profile';
 import { USE_SUPABASE } from '@/lib/data-source';
@@ -20,6 +21,7 @@ import { useTradeStore } from '@/store/trade-store';
 
 export default function FeedScreen() {
   const filterLocation = useTradeStore((s) => s.filterLocation);
+  const setFilterLocation = useTradeStore((s) => s.setFilterLocation);
   const addListing = useTradeStore((s) => s.addListing);
   const listingFilters = useTradeStore((s) => s.listingFilters);
   const clearListingFilters = useTradeStore((s) => s.clearListingFilters);
@@ -167,8 +169,15 @@ export default function FeedScreen() {
               actionLabel="Clear"
               onAction={clearListingFilters}
             />
+          ) : isAllLocations(filterLocation) ? (
+            <FeedMessage title="No live listings yet" body="Post a trade to be the first listing here." />
           ) : (
-            <FeedMessage title={`Nothing in ${filterLocation} yet`} body="Post a trade to be the first listing here." />
+            <FeedMessage
+              title={`Nothing in ${filterLocation} yet`}
+              body="Post a trade to be the first listing here."
+              actionLabel="Show all locations"
+              onAction={() => setFilterLocation(ALL_LOCATIONS)}
+            />
           )
         }
       />

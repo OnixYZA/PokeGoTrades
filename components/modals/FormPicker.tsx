@@ -46,11 +46,11 @@ interface FormPickerProps {
  * no option is ever hidden off-screen.
  *
  * THE DEFAULT IS A CHOICE LIKE ANY OTHER, and it is `null`, not its own code. A species whose default has a
- * name (Zacian is Hero, Vivillon is Meadow, Unown is A) labels it with that name, so "Standard" never stands
+ * name (Zacian is Hero of Many Battles, Vivillon is Meadow, Unown is A) labels it with that name, so "Standard" never stands
  * in for a form the trainer can not find in the list; the creature still carries `formCode: null`, so one
  * creature is never stored two ways (`defaultFormOf`).
  *
- * UNTRADABLE FORMS (e.g. White Kyurem, Ultra Necrozma, Crowned Sword Zacian; `constants/untradable.ts`) are shown, dimmed and marked
+ * UNTRADABLE FORMS (e.g. White Kyurem, Ultra Necrozma; `constants/untradable.ts`) are shown, dimmed and marked
  * with a Ban icon, and tapping one explains why it can't be listed — the same treatment `PokemonPickerModal`
  * gives an untradable species (and the same `UntradableNotice`). They are not hidden: a trainer who owns a
  * White Kyurem would otherwise find no White Kyurem and list it as a plain Kyurem. The rule is

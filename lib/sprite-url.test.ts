@@ -38,6 +38,11 @@ describe('spriteObjectKey', () => {
     expect(spriteObjectKey({ pokemonId: 19, form: 'ALOLA' })).toBe('pokemon/19.fALOLA.png');
   });
 
+  it('keys the Crowned forms by their stored form code', () => {
+    expect(spriteObjectKey({ pokemonId: 888, form: 'CROWNED_SWORD' })).toContain('888.fCROWNED_SWORD');
+    expect(spriteObjectKey({ pokemonId: 889, form: 'CROWNED_SHIELD' })).toContain('889.fCROWNED_SHIELD');
+  });
+
   it('folds in a costume as .c{COSTUME}, underscores included', () => {
     expect(spriteObjectKey({ pokemonId: 25, costume: 'JAN_2020_NOEVOLVE' })).toBe(
       'pokemon/25.cJAN_2020_NOEVOLVE.png',

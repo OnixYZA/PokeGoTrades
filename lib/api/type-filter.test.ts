@@ -282,6 +282,7 @@ function listingOf(row: Row): Listing {
     sizeClass: null,
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'flexible',
   };
 }

@@ -35,6 +35,7 @@ function makeListing(partial: Partial<Listing> = {}): Listing {
     sizeClass: null,
     willTravel: false,
     isGigantamax: false,
+    isDynamax: false,
     tradeTimeline: 'flexible',
     ...partial,
   };
@@ -104,6 +105,35 @@ describe('compileFilter / matchesFilter — flags', () => {
     expect(spec.flags.isGigantamax).toBe(false);
     expect(matchesFilter(makeListing({ isGigantamax: false }), spec)).toBe(true);
     expect(matchesFilter(makeListing({ isGigantamax: true }), spec)).toBe(false);
+  });
+});
+
+describe('compileFilter / matchesFilter — Dynamax chip', () => {
+  it('the Dynamax chip includes only Dynamax listings', () => {
+    const spec = compileFilter({ isDynamax: 'include' });
+    expect(spec.flags.isDynamax).toBe(true);
+    expect(matchesFilter(makeListing({ isDynamax: true }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ isDynamax: false }), spec)).toBe(false);
+  });
+
+  it('the Dynamax chip excludes Dynamax listings', () => {
+    const spec = compileFilter({ isDynamax: 'exclude' });
+    expect(spec.flags.isDynamax).toBe(false);
+    expect(matchesFilter(makeListing({ isDynamax: false }), spec)).toBe(true);
+    expect(matchesFilter(makeListing({ isDynamax: true }), spec)).toBe(false);
+  });
+});
+
+describe('compileFilter / matchesFilter — Dynamax vs Gigantamax', () => {
+  it('an include-Dynamax filter excludes a Gigantamax-only listing, and vice versa', () => {
+    const dynamax = compileFilter({ isDynamax: 'include' });
+    const gigantamax = compileFilter({ isGigantamax: 'include' });
+    const gmaxOnly = makeListing({ isGigantamax: true, isDynamax: false });
+    const dmaxOnly = makeListing({ isGigantamax: false, isDynamax: true });
+    expect(matchesFilter(gmaxOnly, dynamax)).toBe(false);
+    expect(matchesFilter(dmaxOnly, dynamax)).toBe(true);
+    expect(matchesFilter(dmaxOnly, gigantamax)).toBe(false);
+    expect(matchesFilter(gmaxOnly, gigantamax)).toBe(true);
   });
 });
 

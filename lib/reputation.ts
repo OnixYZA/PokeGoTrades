@@ -215,11 +215,22 @@ export interface RepStanding {
 // Hex values mirror COLORS.accentGold / accentGreen / textMuted / accentDanger in constants/theme.ts.
 const STANDING_COLORS = { exemplary: '#f5c518', trusted: '#7dffb3', standard: '#8b93a7', caution: '#ff5c8a' } as const;
 
+/**
+ * The standing tiers, highest first: the ONE source of the rep thresholds. `getRepStanding` walks it and the
+ * in-app guide (`lib/trade-guide.ts`) prints it, so the number a trainer reads is the number that decides
+ * their standing. The last entry's `min` is `MIN_REP`, so every score lands in a tier.
+ */
+export const REP_TIER_THRESHOLDS: readonly { tier: RepTier; label: string; min: number }[] = [
+  { tier: 'exemplary', label: 'Exemplary', min: 4.8 },
+  { tier: 'trusted', label: 'Trusted', min: 4.2 },
+  { tier: 'standard', label: 'Standard', min: 3.5 },
+  { tier: 'caution', label: 'Caution', min: MIN_REP },
+];
+
 /** Standing label for a rep score. `trades`/`bails` are accepted for callers' symmetry but do not change the tier. */
 export function getRepStanding(rep: number | null | undefined, _trades?: number, _bails?: number): RepStanding {
   const value = rep ?? DEFAULT_REP;
-  if (value >= 4.8) return { tier: 'exemplary', label: 'Exemplary', color: STANDING_COLORS.exemplary };
-  if (value >= 4.2) return { tier: 'trusted', label: 'Trusted', color: STANDING_COLORS.trusted };
-  if (value >= 3.5) return { tier: 'standard', label: 'Standard', color: STANDING_COLORS.standard };
-  return { tier: 'caution', label: 'Caution', color: STANDING_COLORS.caution };
+  const last = REP_TIER_THRESHOLDS[REP_TIER_THRESHOLDS.length - 1];
+  const hit = REP_TIER_THRESHOLDS.find((t) => value >= t.min) ?? last;
+  return { tier: hit.tier, label: hit.label, color: STANDING_COLORS[hit.tier] };
 }

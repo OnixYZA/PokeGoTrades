@@ -3,12 +3,14 @@ import { ChevronLeft, LogIn, UserRound } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
+import { TradeGuideModal } from '@/components/modals/TradeGuideModal';
 import { PhoneFrame } from '@/components/layout/PhoneFrame';
 import { ProfileProofStep } from '@/components/onboarding/ProfileProofStep';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SURFACE } from '@/constants/theme';
 import { fetchMyProfile, isProfileReady, type MyProfile } from '@/lib/api/profile';
 import { completeOAuthRedirect, signInWithProvider, type OAuthProvider } from '@/lib/auth';
+import { goBack } from '@/lib/navigation';
 import { useSession } from '@/lib/session';
 
 const SECONDARY_BUTTON_STYLE = { ...SURFACE.card, borderWidth: 1, borderColor: '#1a2032' };
@@ -32,6 +34,7 @@ export default function OnboardingScreen() {
   const [completingOAuth, setCompletingOAuth] = useState(() => Boolean(params.code || params.error));
   const [provider, setProvider] = useState<OAuthProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [profileState, setProfileState] = useState<'idle' | 'loading' | 'incomplete' | 'error'>('idle');
@@ -99,8 +102,6 @@ export default function OnboardingScreen() {
 
   if (done) return null;
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
-
   const signIn = async (next: OAuthProvider) => {
     setProvider(next);
     setError(null);
@@ -129,7 +130,7 @@ export default function OnboardingScreen() {
     <PhoneFrame>
       <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3 pt-1.5">
         <Pressable
-          onPress={goBack}
+          onPress={() => goBack()}
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={6}
@@ -207,7 +208,19 @@ export default function OnboardingScreen() {
             {provider ? <ActivityIndicator color="#4fb3ff" /> : null}
           </View>
         )}
+        <Pressable
+          onPress={() => setGuideOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="How trading & reputation work"
+          className="mt-6 items-center justify-center active:opacity-70"
+          style={{ minHeight: 44 }}
+        >
+          <Text className="font-display-med" style={{ fontSize: 13, color: '#4fb3ff' }}>
+            How trading &amp; reputation work
+          </Text>
+        </Pressable>
       </ScrollView>
+      <TradeGuideModal visible={guideOpen} initialStep="listings" onClose={() => setGuideOpen(false)} />
     </PhoneFrame>
   );
 }

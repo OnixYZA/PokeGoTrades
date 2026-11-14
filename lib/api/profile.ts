@@ -1,5 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 
+import { sanitizeLocationLabel, type LocationName } from '@/constants/locations';
 import type { CreatureRef, TradeHistoryEntry } from '@/data/types';
 import { creatureRefToJson, parseCreatureRef } from '@/lib/api/creature-ref';
 import type { TrainerCreature } from '@/lib/creature-list';
@@ -8,6 +9,7 @@ import type { Database } from '@/lib/database.types';
 import { formatTradeDate } from '@/lib/format';
 import type { PickedProof } from '@/lib/proof-image';
 import { readProofBytes } from '@/lib/proof-image';
+import { describeError } from '@/lib/rpc-errors';
 import { supabase } from '@/lib/supabase';
 
 export type Team = Database['public']['Enums']['team_name'];
@@ -28,6 +30,8 @@ export interface MyProfile {
   handleIsPlaceholder: boolean;
   team: Team | null;
   friendCode: string | null;
+  /** The trainer's home location (`profile_private.safe_loc`), a place label; null when unset. */
+  homeLocation: LocationName | null;
   /** Server-written reputation stats (`confirm_trade` / `bail_and_block`); see lib/reputation.ts. */
   rep: number;
   trades: number;
@@ -37,7 +41,7 @@ export interface MyProfile {
 
 /** A problem with the profile form that should be shown next to a field. */
 export class ProfileError extends Error {
-  readonly field: 'handle' | 'team' | 'friendCode' | 'form';
+  readonly field: 'handle' | 'team' | 'friendCode' | 'homeLocation' | 'form';
 
   constructor(field: ProfileError['field'], message: string) {
     super(message);
@@ -76,7 +80,7 @@ export async function fetchMyProfile(): Promise<MyProfile> {
   const id = await currentUserId();
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, handle, handle_is_placeholder, team, rep, trades_count, streak_days, bails_count, profile_private(friend_code)')
+    .select('id, handle, handle_is_placeholder, team, rep, trades_count, streak_days, bails_count, profile_private(friend_code, safe_loc)')
     .eq('id', id)
     .single();
   if (error) throw new ProfileError('form', error.message);
@@ -86,11 +90,36 @@ export async function fetchMyProfile(): Promise<MyProfile> {
     handleIsPlaceholder: data.handle_is_placeholder,
     team: data.team,
     friendCode: data.profile_private?.friend_code ?? null,
+    homeLocation: data.profile_private?.safe_loc ? sanitizeLocationLabel(data.profile_private.safe_loc) : null,
     rep: data.rep,
     trades: data.trades_count,
     streak: data.streak_days,
     bailsCount: data.bails_count,
   };
+}
+
+const HOME_LOCATION_ERROR = 'Use a neighbourhood or city name, not coordinates.';
+
+/** The signed-in trainer's own home location (`profile_private.safe_loc`), or null when unset. */
+export async function fetchHomeLocation(): Promise<LocationName | null> {
+  const id = await currentUserId();
+  const { data, error } = await supabase.from('profile_private').select('safe_loc').eq('user_id', id).maybeSingle();
+  if (error) throw new ProfileError('form', error.message);
+  return data?.safe_loc ? sanitizeLocationLabel(data.safe_loc) : null;
+}
+
+/** Sets (or, with null, clears) the home location. The label is sanitized first; the database CHECK
+ *  (`profile_private_safe_loc_is_place_label`) refuses coordinate-like text from any other client. */
+export async function saveHomeLocation(label: LocationName | null): Promise<void> {
+  const safeLoc = label === null ? null : sanitizeLocationLabel(label);
+  if (label !== null && safeLoc === null) throw new ProfileError('homeLocation', HOME_LOCATION_ERROR);
+  const id = await currentUserId();
+  const { data, error } = await supabase.from('profile_private').update({ safe_loc: safeLoc }).eq('user_id', id).select('user_id');
+  if (error) {
+    if (error.code === '23514') throw new ProfileError('homeLocation', HOME_LOCATION_ERROR);
+    throw new ProfileError('form', error.message);
+  }
+  if (data.length === 0) throw new ProfileError('form', 'Could not update your profile. Try again.');
 }
 
 /** Whether this session may create listings right now, for gating the "new listing" button. */
@@ -302,6 +331,8 @@ export interface ProfileInput {
   handle: string;
   team: Team;
   friendCode: string;
+  /** Optional. `undefined` leaves the stored home location alone; null clears it. */
+  homeLocation?: LocationName | null;
 }
 
 /**
@@ -323,6 +354,12 @@ export async function saveProfile(input: ProfileInput): Promise<void> {
     throw new ProfileError('friendCode', `A friend code has ${FRIEND_CODE_LENGTH} digits.`);
   }
 
+  let safeLoc: LocationName | null | undefined;
+  if (input.homeLocation !== undefined) {
+    safeLoc = input.homeLocation === null ? null : sanitizeLocationLabel(input.homeLocation);
+    if (input.homeLocation !== null && safeLoc === null) throw new ProfileError('homeLocation', HOME_LOCATION_ERROR);
+  }
+
   const id = await currentUserId();
 
   const profile = await supabase.from('profiles').update({ handle, team: input.team }).eq('id', id).select('id');
@@ -334,8 +371,9 @@ export async function saveProfile(input: ProfileInput): Promise<void> {
   }
   if (profile.data.length === 0) throw new ProfileError('form', 'Could not update your profile. Try again.');
 
-  const priv = await supabase.from('profile_private').update({ friend_code: friendCode }).eq('user_id', id).select('user_id');
+  const priv = await supabase.from('profile_private').update({ friend_code: friendCode, ...(safeLoc !== undefined ? { safe_loc: safeLoc } : {}) }).eq('user_id', id).select('user_id');
   if (priv.error) {
+    if (priv.error.code === '23514' && priv.error.message.includes('safe_loc')) throw new ProfileError('homeLocation', HOME_LOCATION_ERROR);
     if (priv.error.code === '23505') throw new ProfileError('friendCode', 'That friend code is already registered.');
     if (priv.error.code === '23514') throw new ProfileError('friendCode', `A friend code has ${FRIEND_CODE_LENGTH} digits.`);
     throw new ProfileError('form', priv.error.message);
@@ -395,13 +433,25 @@ export interface ProfileProof {
  * while one is still `pending`/`processing` fails with `23505`.
  */
 export async function uploadProfileProof(proof: PickedProof): Promise<void> {
-  const bytes = await readProofBytes(proof);
+  const { data: bytes, contentType } = await readProofBytes(proof);
   const id = randomUUID();
   const path = `${await currentUserId()}/${id}`;
   const bucket = supabase.storage.from(PROFILE_PROOF_BUCKET);
 
-  const { error: uploadError } = await bucket.upload(path, bytes, { contentType: proof.contentType, upsert: false });
-  if (uploadError) throw new ProfileError('form', uploadError.message);
+  const { error: uploadError } = await bucket.upload(path, bytes, { contentType, upsert: false });
+  if (uploadError) {
+    // The restrictive `profile_proofs_obj_insert_rate_limit` storage policy (20261112000100) refuses the object.
+    const refused =
+      ('statusCode' in uploadError && String(uploadError.statusCode) === '403') ||
+      uploadError.message.includes('row-level security');
+    if (refused) {
+      throw new ProfileError(
+        'form',
+        "Couldn't upload that screenshot. If you've sent several in the last hour, wait a while and try again, or enter your details by hand."
+      );
+    }
+    throw new ProfileError('form', uploadError.message);
+  }
 
   const { error: insertError } = await supabase.from('profile_proofs').insert({ id, storage_path: path });
   if (insertError) {
@@ -410,6 +460,7 @@ export async function uploadProfileProof(proof: PickedProof): Promise<void> {
     // reference the object — an orphan left behind here is harmless.
     await bucket.remove([path]);
     if (insertError.code === '23505') throw new ProfileError('form', 'Your last screenshot is still being read.');
+    if (insertError.code === 'PT429') throw new ProfileError('form', describeError(insertError).message);
     throw new ProfileError('form', insertError.message);
   }
 }

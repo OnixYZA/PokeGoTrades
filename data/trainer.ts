@@ -6,7 +6,7 @@ export const trainer: Trainer = {
   lvl: 47,
   team: 'Mystic',
   bio: 'Long-time hoarder. Only trade in daylight, only in public. Prefer meeting near IIT-M gate.',
-  safeLoc: 'Adyar · ~500m radius',
+  safeLoc: 'Adyar',
   trades: 214,
   rep: 4.9,
   streak: 38,

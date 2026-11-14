@@ -61,10 +61,6 @@ export const MODAL_SURFACE: Record<string, ViewStyle> = {
     ...gradient(`linear-gradient(135deg, ${C.blue}, ${C.blueDark})`, C.blue),
     boxShadow: '0 0 12px rgba(56,189,248,0.4)',
   },
-  toggleCrimson: {
-    ...gradient('linear-gradient(135deg, #ff2a5f, #be123c)', '#ff2a5f'),
-    boxShadow: '0 0 12px rgba(255,42,95,0.4)',
-  },
   extractedCard: gradient(
     'linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.02))',
     'rgba(251,191,36,0.05)'

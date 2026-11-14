@@ -1,5 +1,8 @@
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+
+import type { MaxBadgeSize } from '@/constants/max-badges';
+import { MaxBadge } from '@/components/ui/MaxBadge';
 
 /** The Gigantamax marker's icon: a bold four-armed burst (an X whose arms flare outward) over a
  *  puffy cloud-like crown, evoking raw "power" billowing up. It is an ORIGINAL drawing made for this app;
@@ -31,26 +34,9 @@ export function GigantamaxSymbol({ size, color }: { size: number; color: string 
   );
 }
 
-/** "Can Gigantamax" listing marker. A flat crimson tint pill, the same pill shape as `LuckyBadge`, but
- *  static: lucky's gold shimmer is its own signature, and the crimson is its own colour so the two never
- *  read as one marker. */
-export function GigantamaxBadge({ size = 'md' }: { size?: 'sm' | 'md' }) {
-  const fontSize = size === 'sm' ? 9 : 10;
-  return (
-    <View
-      accessible
-      accessibilityLabel="Gigantamax"
-      className="flex-row items-center gap-1 rounded-full border px-2 py-[3px]"
-      style={{ backgroundColor: 'rgba(255,42,95,0.14)', borderColor: 'rgba(255,42,95,0.38)' }}
-    >
-      <GigantamaxSymbol size={fontSize + 3} color="#ff2a5f" />
-      <Text
-        className="font-display uppercase"
-        style={{ fontSize, letterSpacing: fontSize * 0.08, color: '#ff2a5f' }}
-        importantForAccessibility="no-hide-descendants"
-      >
-        G-MAX
-      </Text>
-    </View>
-  );
+/** "Can Gigantamax" listing marker: the shared `MaxBadge` pill (see `constants/max-badges.ts`) in crimson,
+ *  the same pill shape as `LuckyBadge` but static: lucky's gold shimmer is its own signature, and the crimson
+ *  is its own colour so the two never read as one marker. */
+export function GigantamaxBadge({ size = 'md' }: { size?: MaxBadgeSize }) {
+  return <MaxBadge kind="gigantamax" size={size} glyph={GigantamaxSymbol} />;
 }

@@ -15,7 +15,9 @@
  *     replace), the same reason `constants/base-form-codes.ts` is a leaf.
  *
  * WHERE THE RULES COME FROM. They are the project's own decision, and they agree with the pinned game master's
- * `isTradable` for every species and every form EXCEPT the one deliberate override below (Pecharunt). The
+ * `isTradable` for every species and every form EXCEPT the deliberate overrides: Pecharunt (kept untradable
+ * although the game master calls it tradable) and the Crowned Sword / Crowned Shield forms (listed although the
+ * game master marks them untradable; they are therefore ABSENT from the lists below). The
  * generator enforces that: a game master update that changes any creature's tradability fails the run until
  * these lists (and the database function) are updated or the difference is documented in
  * `TRADABILITY_OVERRIDES` (scripts/pokedex-source.ts). Do not edit a list here without the matching migration.
@@ -47,7 +49,7 @@ export const UNTRADABLE_MYTHICAL_IDS: ReadonlySet<number> = new Set([
   802, // Marshadow
   807, // Zeraora
   893, // Zarude
-  // Pecharunt is the ONE place this rule deliberately departs from the game master: the pinned game master
+  // Pecharunt is one of the places this rule deliberately departs from the game master: the pinned game master
   // marks it `isTradable: true` (on its formless template and its `PECHARUNT_NORMAL` form), but the project
   // treats it as a Mythical and keeps it untradable. That is a product decision, not a reading of the source,
   // so it is recorded as an override in `TRADABILITY_OVERRIDES` (scripts/pokedex-source.ts), which is what
@@ -66,9 +68,16 @@ export const UNTRADABLE_SPECIES_IDS: ReadonlySet<number> = new Set([
  * Untradable FORMS of a species whose other forms stay tradable, keyed by PokeMiners form code
  * (`CreatureRef.formCode`). The species itself, and its default form, can still be traded.
  *
- * Added on the project's decision (2026-10-18): the Crowned forms and Ultra Necrozma. Each one matches the
- * game master, which carries no `isTradable` on `ZACIAN_CROWNED_SWORD`, `ZAMAZENTA_CROWNED_SHIELD` or
- * `NECROZMA_ULTRA` although it does on their base forms.
+ * Added on the project's decision (2026-10-18): Ultra Necrozma, next to the fused Kyurem and Necrozma forms.
+ * Each one matches the game master, which carries no `isTradable` on `NECROZMA_ULTRA` although it does on its
+ * base form.
+ *
+ * Crowned Sword Zacian (888, `CROWNED_SWORD`) and Crowned Shield Zamazenta (889, `CROWNED_SHIELD`) were on this
+ * list from 2026-10-18 and were taken off it on 2026-11-12: the owner's decision to list them. The game master
+ * marks those templates untradable (`ZACIAN_CROWNED_SWORD` and `ZAMAZENTA_CROWNED_SHIELD` carry no
+ * `isTradable`), so the app now departs from the source there, recorded in `TRADABILITY_OVERRIDES`
+ * (scripts/pokedex-source.ts) and applied to the database by
+ * 20261112000400_allow_crowned_zacian_zamazenta.sql.
  */
 export const UNTRADABLE_FORM_COMBINATIONS: readonly { pokemonId: number; formCode: string }[] = [
   { pokemonId: 646, formCode: 'WHITE' }, // White Kyurem (fused). Plain Kyurem stays tradable.
@@ -76,8 +85,6 @@ export const UNTRADABLE_FORM_COMBINATIONS: readonly { pokemonId: number; formCod
   { pokemonId: 800, formCode: 'DUSK_MANE' }, // Dusk Mane Necrozma (fused). Plain Necrozma stays tradable.
   { pokemonId: 800, formCode: 'DAWN_WINGS' }, // Dawn Wings Necrozma (fused)
   { pokemonId: 800, formCode: 'ULTRA' }, // Ultra Necrozma (Ultra Burst)
-  { pokemonId: 888, formCode: 'CROWNED_SWORD' }, // Crowned Sword Zacian. Hero Zacian (the default form) stays tradable.
-  { pokemonId: 889, formCode: 'CROWNED_SHIELD' }, // Crowned Shield Zamazenta. Hero Zamazenta (the default form) stays tradable.
 ];
 
 /** Whether this species (and form) can never change hands in Pokémon GO, so it must never be listed,

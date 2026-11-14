@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, Handshake } from 'lucide-react-native';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,8 +7,10 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { ArsenalOfferSheet } from '@/components/chats/ArsenalOfferSheet';
 import { ChatActionRow } from '@/components/chats/ChatActionRow';
+import { ChatAttachmentSheet } from '@/components/chats/ChatAttachmentSheet';
 import { Composer } from '@/components/chats/Composer';
 import { FormalOfferCard } from '@/components/chats/FormalOfferCard';
+import { ClosedBanner } from '@/components/chats/ClosedBanner';
 import { FrozenBanner } from '@/components/chats/FrozenBanner';
 import { LockedBanner } from '@/components/chats/LockedBanner';
 import { MessageBubble } from '@/components/chats/MessageBubble';
@@ -21,6 +23,7 @@ import type { ChatMessage, CreatureRef } from '@/data/types';
 import { creatureToOffer } from '@/lib/api/chats';
 import { USE_SUPABASE } from '@/lib/data-source';
 import { creatureFullName } from '@/lib/format';
+import { goBack } from '@/lib/navigation';
 import { newestAcceptableOffer, offerAvailability } from '@/store/offer-state';
 import { selectTradeView, useTradeStore } from '@/store/trade-store';
 
@@ -56,6 +59,7 @@ export default function ActiveChatScreen() {
   const subscribeToChat = useTradeStore((s) => s.subscribeToChat);
 
   const [draft, setDraft] = useState('');
+  const [showAttachSheet, setShowAttachSheet] = useState(false);
   const [showArsenal, setShowArsenal] = useState(false);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [loadState, setLoadState] = useState<LoadState>(chat ? 'ready' : 'loading');
@@ -92,13 +96,21 @@ export default function ActiveChatScreen() {
     }
   }, [handshakeRequest, chatId, trade.phase, clearHandshakeRequest]);
 
+  // Immediately close active attachment/offer sheets if the chat becomes non-composable (frozen/closed/bailed/completed).
+  useEffect(() => {
+    if (!trade.canCompose) {
+      setShowAttachSheet(false);
+      setShowArsenal(false);
+    }
+  }, [trade.canCompose]);
+
   if (!chat || !chatId) {
     if (!USE_SUPABASE) return null;
     return (
       <View className="flex-1">
         <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3.5 pt-1.5">
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => goBack('/chats')}
             accessibilityRole="button"
             accessibilityLabel="Back to chats"
             hitSlop={6}
@@ -167,14 +179,14 @@ export default function ActiveChatScreen() {
   const handleMarkCompleted = async () => {
     await confirmTrade(chatId);
     setOverlay(null);
-    router.back();
+    goBack('/chats');
   };
 
   return (
     <View className="flex-1">
       <View className="flex-row items-center gap-2.5 border-b border-border-subtle px-4 pb-3.5 pt-1.5">
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => goBack('/chats')}
           accessibilityRole="button"
           accessibilityLabel="Back to chats"
           hitSlop={6}
@@ -205,6 +217,9 @@ export default function ActiveChatScreen() {
         )}
       </View>
 
+      {trade.live && trade.phase === 'closed' && (
+        <ClosedBanner reason={listing?.status === 'withdrawn' ? 'withdrawn' : 'closed'} />
+      )}
       {trade.phase === 'frozen' && <FrozenBanner role={trade.live ? trade.role : 'buyer'} />}
       {showLockedBanner && (
         <LockedBanner
@@ -249,7 +264,7 @@ export default function ActiveChatScreen() {
           partner={chat.partner}
           onOpenHandshake={openHandshake}
           onReviewOffer={reviewNewestOffer}
-          onBailed={() => router.back()}
+          onBailed={() => goBack('/chats')}
         />
         <Composer
           value={draft}
@@ -257,12 +272,35 @@ export default function ActiveChatScreen() {
           onSend={send}
           phase={composerPhase}
           disabled={!trade.canCompose}
-          onOpenArsenal={() => setShowArsenal(true)}
+          onOpenAttachments={() => setShowAttachSheet(true)}
         />
       </View>
 
+      <Modal
+        visible={showAttachSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAttachSheet(false)}
+        statusBarTranslucent
+      >
+        {showAttachSheet ? (
+          <ChatAttachmentSheet
+            disabled={!trade.canCompose}
+            onOpenArsenal={() => {
+              setShowAttachSheet(false);
+              setShowArsenal(true);
+            }}
+            onSendImage={(image, caption) => {
+              setShowAttachSheet(false);
+              void sendMessage(chatId, { image, caption });
+            }}
+            onCancel={() => setShowAttachSheet(false)}
+          />
+        ) : null}
+      </Modal>
+
       <Modal visible={showArsenal} transparent animationType="slide" onRequestClose={() => setShowArsenal(false)}>
-        <ArsenalOfferSheet onSelect={sendFormalOffer} onCancel={() => setShowArsenal(false)} />
+        {showArsenal ? <ArsenalOfferSheet onSelect={sendFormalOffer} onCancel={() => setShowArsenal(false)} /> : null}
       </Modal>
 
       <Modal
@@ -278,7 +316,7 @@ export default function ActiveChatScreen() {
             onMarkCompleted={() => void handleMarkCompleted()}
             onCompleted={() => {
               setOverlay(null);
-              router.back();
+              goBack('/chats');
             }}
             onReturnToChat={() => setOverlay(null)}
           />

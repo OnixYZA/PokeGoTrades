@@ -11,6 +11,8 @@ interface ComposerProps {
   phase: ChatPhase;
   /** Input and both buttons are off: frozen, closed, bailed or completed. */
   disabled: boolean;
+  onOpenAttachments?: () => void;
+  /** @deprecated Prefer `onOpenAttachments`; kept for backwards compatibility. */
   onOpenArsenal?: () => void;
 }
 
@@ -23,16 +25,16 @@ const PLACEHOLDER: Record<ChatPhase, string> = {
   completed: 'Trade completed',
 };
 
-export function Composer({ value, onChangeText, onSend, phase, disabled, onOpenArsenal }: ComposerProps) {
+export function Composer({ value, onChangeText, onSend, phase, disabled, onOpenAttachments, onOpenArsenal }: ComposerProps) {
   return (
     <View className="flex-row items-center gap-2">
       <Pressable
-        onPress={onOpenArsenal}
+        onPress={onOpenAttachments ?? onOpenArsenal}
         disabled={disabled}
         accessibilityRole="button"
-        accessibilityLabel="Send a formal offer from your Arsenal"
+        accessibilityLabel="Add attachment or formal offer"
         className="items-center justify-center rounded-full border border-border bg-bg-card active:opacity-70"
-        style={{ width: 40, height: 40, opacity: disabled ? 0.4 : 1 }}
+        style={{ width: 44, height: 44, opacity: disabled ? 0.4 : 1 }}
       >
         <Plus size={18} color="#4fb3ff" />
       </Pressable>
@@ -54,7 +56,7 @@ export function Composer({ value, onChangeText, onSend, phase, disabled, onOpenA
         accessibilityRole="button"
         accessibilityLabel="Send message"
         className="items-center justify-center rounded-full border border-border bg-bg-card active:opacity-70"
-        style={{ width: 40, height: 40, opacity: value.trim() && !disabled ? 1 : 0.5 }}
+        style={{ width: 44, height: 44, opacity: value.trim() && !disabled ? 1 : 0.5 }}
       >
         <Send size={16} color="#4fb3ff" />
       </Pressable>
